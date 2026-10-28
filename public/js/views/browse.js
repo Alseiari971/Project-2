@@ -36,7 +36,6 @@ export async function browseView(app, params) {
         ${query ? '' : html`<div class="segmented small">${Object.entries(sorts).map(([k, label]) =>
           html`<a class="${k === sort ? 'active' : ''}" href="${qs({ sort: k })}">${label}</a>`)}</div>`}
       </div>
-      <p class="muted">${data.count.toLocaleString()} ${data.count === 1 ? 'game' : 'games'}</p>
       ${data.results.length
         ? html`<div class="grid" id="grid">${data.results.map((g) => gameTile(g))}</div>`
         : emptyState('No games found', 'Try a different search or genre.')}

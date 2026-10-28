@@ -275,3 +275,25 @@ test('RAWG games sold on Steam get official poster and logo art', async () => {
   assert.equal(requested.filter((p) => p.endsWith('/stores')).length, before);
   assert.equal(again.results[0].poster, portal.poster);
 });
+
+test('RAWG search drops fan-made entries and puts the real game first', async () => {
+  const epic = [{ store: { id: 11, slug: 'epic-games' } }];
+  const fakeFetch = async (url) => {
+    assert.equal(url.searchParams.get('exclude_additions'), 'true');
+    const body = {
+      count: 83,
+      next: null,
+      results: [
+        { id: 1, slug: 'fortnite-save-the-world', name: 'Fortnite: Save The World', added: 900, stores: epic, background_image: 'a.jpg' },
+        { id: 2, slug: 'fortnite-but-bad', name: 'Fortnite..... But Bad', added: 3, stores: [], background_image: 'b.jpg' },
+        { id: 3, slug: 'fortnite', name: 'Fortnite', added: 14000, stores: epic, background_image: 'c.jpg' },
+        { id: 4, slug: 'fortnite-userjasneet', name: 'Fortnite (UserJasneet)', added: 0, stores: [{ store: { id: 9, slug: 'itch' } }], background_image: 'd.jpg' },
+        { id: 5, slug: 'lego-fortnite', name: 'LEGO Fortnite', added: 120, stores: [], background_image: 'e.jpg' },
+      ],
+    };
+    return { ok: true, status: 200, json: async () => body };
+  };
+  const rawg = createRawgProvider('test-key', { fetchImpl: fakeFetch });
+  const { results } = await rawg.search({ query: 'fortnite' });
+  assert.deepEqual(results.map((g) => g.name), ['Fortnite', 'Fortnite: Save The World', 'LEGO Fortnite']);
+});

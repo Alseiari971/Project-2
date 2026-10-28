@@ -67,15 +67,20 @@ export function gameTile(game, { badge = '', caption = true } = {}) {
     game.released !== undefined ? year(game.released) : null,
     game.genres?.length ? game.genres.slice(0, 2).join(', ') : null,
   ].filter(Boolean).join(' · ');
-  // Screenshots without the game's name get the title laid over them, like streaming apps do.
+  // Screenshots without the game's name get the title laid over them, like
+  // streaming apps do. The caption then skips the name so it isn't shown twice.
+  const overlay = Boolean(game.image) && !hasTitleArt(game);
   return html`
     <a class="tile" href="${gameHref(id)}" title="${game.name}">
-      <div class="tile-frame ${hasTitleArt(game) ? '' : 'needs-title'}">
+      <div class="tile-frame ${overlay ? 'needs-title' : ''}">
         ${art(game)}
         ${game.image ? html`<span class="tile-overlay-title" aria-hidden="true">${game.name}</span>` : ''}
         ${badge}
       </div>
-      ${caption ? html`<div class="tile-caption"><div class="tile-title">${game.name}</div>${meta ? html`<div class="tile-meta">${meta}</div>` : ''}</div>` : ''}
+      ${caption ? html`<div class="tile-caption">
+        <div class="tile-title ${overlay ? 'visually-hidden' : ''}">${game.name}</div>
+        ${meta ? html`<div class="tile-meta">${meta}</div>` : ''}
+      </div>` : ''}
     </a>`;
 }
 
@@ -227,6 +232,7 @@ document.addEventListener('error', (e) => {
     img.src = img.dataset.fallback;
     delete img.dataset.fallback;
     img.closest('.tile-frame')?.classList.add('needs-title');
+    img.closest('.tile')?.querySelector('.tile-title')?.classList.add('visually-hidden');
     return;
   }
 

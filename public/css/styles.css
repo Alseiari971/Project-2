@@ -55,6 +55,8 @@ button { font: inherit; color: inherit; }
 
 .icon { width: 1.1em; height: 1.1em; flex: none; }
 .muted { color: var(--dim); }
+/* Read by screen readers, not shown. */
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .small { font-size: 13px; }
 .center { text-align: center; margin: 32px 0; }
 .muted a, .center a, .text-link { color: var(--text); text-decoration: underline; text-decoration-color: var(--faint); text-underline-offset: 3px; }
@@ -553,7 +555,7 @@ button { font: inherit; color: inherit; }
 }
 .chip:hover { background: var(--hover); color: #fff; }
 .chip.active { background: #fff; color: #000; border-color: #fff; }
-.browse-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 4px; }
+.browse-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
 .browse-head h1 { font-size: clamp(26px, 3vw, 36px); }
 .page > .muted { margin-bottom: 24px; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 24px 16px; }

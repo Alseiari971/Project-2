@@ -8,6 +8,13 @@ const { steamArt } = require('./steam-art');
 const MATCH_CONCURRENCY = 5;
 const STEAM_STORE_ID = 1;
 
+// RAWG lets anyone submit games, so searches turn up fan-made entries. A game
+// counts as real if a major store sells it (Steam, Xbox, PlayStation, App Store,
+// GOG, Nintendo, Xbox 360, Google Play, Epic) or enough RAWG users have added it.
+const OFFICIAL_STORE_IDS = new Set([1, 2, 3, 4, 5, 6, 7, 8, 11]);
+const MIN_ADDED = 30;
+const isRealGame = (g) => (g.added || 0) >= MIN_ADDED || (g.stores || []).some((s) => OFFICIAL_STORE_IDS.has(s.store.id));
+
 const steamAppIdFromUrl = (url) => Number(/store\.steampowered\.com\/app\/(\d+)/.exec(url || '')?.[1]) || null;
 
 const BASE_URL = 'https://api.rawg.io/api';
@@ -94,15 +101,29 @@ function createRawgProvider(apiKey, { fetchImpl = fetch, steamIds = memoryStore(
         search: q || undefined,
         search_precise: q ? true : undefined,
         genres: genreSlug,
+        // DLC, editions and add-on packs aren't separate games.
+        exclude_additions: true,
         // Searches are ordered by relevance; browsing uses the chosen sort.
         ...(q ? {} : sortParams(sort)),
         page,
-        page_size: pageSize,
+        // Searches ask for extra results, since fan-made entries get filtered out.
+        page_size: q ? 40 : pageSize,
       });
+      let results = data.results.filter(isRealGame);
+      if (q) {
+        // An exact title match comes first, then the games most people have added.
+        const target = normalizeTitle(q);
+        const rank = (g) => (normalizeTitle(g.name) === target ? 1 : 0);
+        results = results
+          .map((g, i) => ({ g, i }))
+          .sort((a, b) => rank(b.g) - rank(a.g) || Boolean(b.g.background_image) - Boolean(a.g.background_image) ||
+            (b.g.added || 0) - (a.g.added || 0) || a.i - b.i)
+          .map(({ g }) => g);
+      }
       return {
         count: data.count,
         hasMore: Boolean(data.next),
-        results: data.results.map(toSummary),
+        results: results.map(toSummary),
       };
     },
 
@@ -157,7 +178,7 @@ function createRawgProvider(apiKey, { fetchImpl = fetch, steamIds = memoryStore(
         while (next < steamGames.length) {
           const i = next++;
           try {
-            const data = await request('/games', { search: steamGames[i].name, search_precise: true, page_size: 5 });
+            const data = await request('/games', { search: steamGames[i].name, search_precise: true, exclude_additions: true, page_size: 5 });
             const target = normalizeTitle(steamGames[i].name);
             const hit = data.results.find((g) => normalizeTitle(g.name) === target);
             if (hit) results[i] = toSummary(hit);
