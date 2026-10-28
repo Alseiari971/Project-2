@@ -1,0 +1,20 @@
+{
+  "name": "gameshelf",
+  "version": "0.1.0",
+  "description": "Discover every game, find where to buy it, and share the games you've played.",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20.12"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "better-sqlite3": "^12.11.1",
+    "express": "^5.3.0"
+  }
+}
