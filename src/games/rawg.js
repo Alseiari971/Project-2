@@ -2,6 +2,9 @@
 // It needs a free API key, set as RAWG_API_KEY.
 const { RAWG_STORE_KEYS, buildBuyLinks } = require('./stores');
 const { findGenre } = require('./genres');
+const { normalizeTitle } = require('../text');
+
+const MATCH_CONCURRENCY = 5;
 
 const BASE_URL = 'https://api.rawg.io/api';
 const CACHE_TTL_MS = 10 * 60 * 1000;
@@ -40,6 +43,9 @@ function createRawgProvider(apiKey, { fetchImpl = fetch } = {}) {
       released: g.released || null,
       image: g.background_image || null,
       backdrop: g.background_image_additional || g.background_image || null,
+      // RAWG has no logo or poster art; the site falls back to text and cropped images.
+      logo: null,
+      poster: null,
       genres: (g.genres || []).map((x) => x.name),
       platforms: (g.parent_platforms || g.platforms || []).map((p) => p.platform.name),
       description: g.description_raw || null,
@@ -83,6 +89,28 @@ function createRawgProvider(apiKey, { fetchImpl = fetch } = {}) {
       };
     },
 
+    // Matches Steam games to RAWG by exact title, a few lookups at a time.
+    // Returns a summary or null for each game, in the same order.
+    async matchSteamGames(steamGames) {
+      const results = new Array(steamGames.length).fill(null);
+      let next = 0;
+      const worker = async () => {
+        while (next < steamGames.length) {
+          const i = next++;
+          try {
+            const data = await request('/games', { search: steamGames[i].name, search_precise: true, page_size: 5 });
+            const target = normalizeTitle(steamGames[i].name);
+            const hit = data.results.find((g) => normalizeTitle(g.name) === target);
+            if (hit) results[i] = toSummary(hit);
+          } catch (err) {
+            console.error(`Could not match "${steamGames[i].name}":`, err.message);
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: MATCH_CONCURRENCY }, worker));
+      return results;
+    },
+
     async getGame(id) {
       const game = await request(`/games/${encodeURIComponent(id)}`);
       if (!game || !game.id) return null;
@@ -95,8 +123,14 @@ function createRawgProvider(apiKey, { fetchImpl = fetch } = {}) {
         url: urlByStoreId.get(s.store.id),
       }));
 
+      // RAWG doesn't expose Steam app IDs directly, but the Steam store link contains one.
+      const steamStore = (game.stores || []).find((s) => s.store.slug === 'steam');
+      const steamUrl = steamStore && urlByStoreId.get(steamStore.store.id);
+      const steamAppId = Number(/store\.steampowered\.com\/app\/(\d+)/.exec(steamUrl || '')?.[1]) || null;
+
       return {
         ...toSummary(game),
+        steamAppId,
         developers: (game.developers || []).map((d) => d.name),
         publishers: (game.publishers || []).map((p) => p.name),
         website: game.website || null,

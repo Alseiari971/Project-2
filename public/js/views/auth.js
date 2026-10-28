@@ -10,8 +10,8 @@ export async function authView(app, mode) {
       <div class="auth-wall" aria-hidden="true">${art.map((g) => html`<div class="auth-tile" data-bg="${g.image}"></div>`)}</div>
       <div class="auth-shade"></div>
       <form class="auth-card glass" id="auth-form">
-        <h1>${isLogin ? 'Welcome back' : 'Create your account'}</h1>
-        <p class="muted">${isLogin ? 'Log in to your game shelf.' : 'Track what you play and show it off.'}</p>
+        <h1>${isLogin ? 'Welcome back' : 'Start your shelf'}</h1>
+        <p class="muted">${isLogin ? 'Pick up where you left off.' : 'Log every game you play, rate them, and show your profile off.'}</p>
         <label>Username
           <input class="input" name="username" required minlength="3" maxlength="20" pattern="[A-Za-z0-9_]+" autocomplete="username" autofocus>
         </label>
@@ -19,9 +19,9 @@ export async function authView(app, mode) {
           <input class="input" name="password" type="password" required minlength="8" autocomplete="${isLogin ? 'current-password' : 'new-password'}">
         </label>
         <p class="form-error" id="auth-error" role="alert"></p>
-        <button class="btn btn-light btn-lg btn-block" type="submit">${isLogin ? 'Log in' : 'Sign up'}</button>
+        <button class="btn btn-light btn-lg btn-block" type="submit">${isLogin ? 'Log in' : 'Create account'}</button>
         <p class="muted small center">${isLogin
-          ? html`New to GameShelf? <a href="#/register">Create an account</a>`
+          ? html`New here? <a href="#/register">Create an account</a>`
           : html`Already have an account? <a href="#/login">Log in</a>`}</p>
       </form>
     </div>

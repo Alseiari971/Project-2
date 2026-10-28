@@ -1,21 +1,34 @@
 import { html, api, mount, state, STATUS_LABELS, timeAgo, parseDbTime, gameHref, profileHref, toast } from '../lib.js';
-import { avatar, libraryTile, levelBadge, statusBadge, ratingBadge, emptyState } from '../components.js';
-import { icon, BADGE_ICONS } from '../icons.js';
+import { avatar, libraryTile, levelBadge, statusBadge, emptyState, titleArt, stars, starValue, formatHours } from '../components.js';
+import { icon } from '../icons.js';
 
 const SHOWCASE_TITLES = {
   favorite: 'Favorite game',
   toprated: 'Highest rated',
-  completed: 'Completion showcase',
-  stats: 'Gaming stats',
+  completed: 'Recently completed',
+  stats: 'By the numbers',
 };
+
+// Short labels drawn inside each badge medal.
+const BADGE_GLYPHS = {
+  collector: 'COL', completionist: '100%', critic: '★', explorer: 'EXP',
+  veteran: 'HRS', backlog: 'TBP', curator: 'CUR', socialite: 'SOC',
+};
+
+function badgeTitle(b) {
+  const status = b.tier ? `${b.tierName}` : 'Locked';
+  const next = b.nextTarget ? ` · ${b.progress}/${b.nextTarget} for ${['Bronze', 'Silver', 'Gold'][b.tier]}` : ' · Max tier';
+  return `${b.name} (${status}): ${b.description}${next}`;
+}
 
 function statBlocks(stats) {
   return html`
     <div class="stat-blocks">
       <div><strong>${stats.games}</strong><span>Games</span></div>
       <div><strong>${stats.completed}</strong><span>Completed</span></div>
-      <div><strong>${stats.averageRating ?? '–'}</strong><span>Avg rating</span></div>
-      <div><strong>${stats.completionRate}%</strong><span>Completion</span></div>
+      ${stats.hours ? html`<div><strong>${stats.hours.toLocaleString()}</strong><span>Hours played</span></div>` : ''}
+      <div><strong>${stats.averageRating ? starValue(stats.averageRating) : '–'}</strong><span>Avg stars</span></div>
+      <div><strong>${stats.completionRate}%</strong><span>Completion rate</span></div>
       <div><strong>${stats.genres}</strong><span>Genres</span></div>
     </div>`;
 }
@@ -25,27 +38,31 @@ function showcase(s, stats) {
     const g = s.game;
     return html`
       <section class="showcase showcase-favorite">
-        <div class="showcase-title">${SHOWCASE_TITLES.favorite}</div>
+        <h2 class="showcase-title">${SHOWCASE_TITLES.favorite}</h2>
         <a class="favorite-card" href="${gameHref(g.gameId)}">
           <div class="favorite-bg" data-bg="${g.backdrop || g.image || ''}"></div>
           <div class="favorite-info">
-            <h3>${g.name}</h3>
-            <div class="favorite-meta">${statusBadge(g.status)}${ratingBadge(g.rating)}</div>
+            ${titleArt({ name: g.name, logo: g.logo }, 'h3')}
+            <div class="favorite-meta">
+              ${statusBadge(g.status)}
+              ${g.rating ? stars(g.rating) : ''}
+              ${g.playtime ? html`<span class="muted">${formatHours(g.playtime)} played</span>` : ''}
+            </div>
           </div>
         </a>
       </section>`;
   }
   if (s.type === 'stats') {
-    return html`<section class="showcase"><div class="showcase-title">${SHOWCASE_TITLES.stats}</div>${statBlocks(stats)}</section>`;
+    return html`<section class="showcase"><h2 class="showcase-title">${SHOWCASE_TITLES.stats}</h2>${statBlocks(stats)}</section>`;
   }
   if (s.type === 'info') {
-    return html`<section class="showcase"><div class="showcase-title">${s.title}</div><p class="prose">${s.text}</p></section>`;
+    return html`<section class="showcase"><h2 class="showcase-title">${s.title}</h2><p class="prose">${s.text}</p></section>`;
   }
   // collection, toprated, completed: a grid of games.
   const title = s.title || SHOWCASE_TITLES[s.type];
   return html`
     <section class="showcase">
-      <div class="showcase-title">${title}</div>
+      <h2 class="showcase-title">${title}</h2>
       ${s.games.length
         ? html`<div class="showcase-grid">${s.games.map(libraryTile)}</div>`
         : html`<p class="muted">Nothing to show here yet.</p>`}
@@ -95,7 +112,7 @@ export async function profileView(app, username, params) {
     ${state.user ? html`
       <form class="comment-form" id="comment-form">
         ${avatar(state.user)}
-        <textarea name="body" maxlength="500" rows="2" placeholder="Leave a comment for ${user.displayName}…" required></textarea>
+        <textarea name="body" maxlength="500" rows="2" placeholder="Say something to ${user.displayName}" required></textarea>
         <button class="btn btn-accent" type="submit">Post</button>
       </form>` : html`<p class="muted"><a href="#/login">Log in</a> to leave a comment.</p>`}
     ${comments.length
@@ -106,7 +123,7 @@ export async function profileView(app, username, params) {
     <div class="profile" data-accent="${user.accent}">
       ${backgroundLayer(background)}
       <div class="profile-inner">
-        <header class="glass profile-header">
+        <header class="profile-header">
           ${avatar(user, 'xl')}
           <div class="profile-id">
             <h1>${user.displayName}</h1>
@@ -124,9 +141,9 @@ export async function profileView(app, username, params) {
             <div class="muted small">${progression.xpToNext} XP to level ${progression.level + 1}</div>
             <div class="profile-actions">
               ${isMe
-                ? html`<a class="btn btn-accent" href="#/customize">${icon('sliders')} Edit profile</a>`
+                ? html`<a class="btn btn-accent" href="#/customize">Edit profile</a>`
                 : ''}
-              <button class="btn btn-glass" type="button" id="share">${icon('link')} Share</button>
+              <button class="btn btn-quiet" type="button" id="share">${icon('link')} Copy link</button>
             </div>
           </div>
         </header>
@@ -137,14 +154,17 @@ export async function profileView(app, username, params) {
             ${isMe && !showcases.length ? html`
               <section class="showcase showcase-cta">
                 <div>
-                  <h3>Make this profile yours</h3>
-                  <p class="muted">Add showcases for your favorite game, a top-rated collection, your stats and more. Pick a background and colors to match.</p>
+                  <h3>Only you can see this</h3>
+                  <p class="muted">Your profile is still plain. Pin a favorite game, pick a background and choose what visitors see first.</p>
                 </div>
-                <a class="btn btn-accent" href="#/customize">${icon('sparkle')} Customize profile</a>
+                <a class="btn btn-accent" href="#/customize">Customize profile</a>
               </section>` : ''}
 
             <section class="showcase">
-              <div class="showcase-title">Game library</div>
+              <div class="showcase-head">
+                <h2 class="showcase-title">Library</h2>
+                ${isMe ? html`<a class="text-link small" href="#/import">Import from Steam</a>` : ''}
+              </div>
               <nav class="tabs">
                 ${tab('all', 'All', library.length)}
                 ${Object.entries(STATUS_LABELS).map(([k, label]) => tab(k, label, stats[k]))}
@@ -152,44 +172,45 @@ export async function profileView(app, username, params) {
               ${shown.length
                 ? html`<div class="library-grid">${shown.map(libraryTile)}</div>`
                 : emptyState(
-                    isMe ? 'Your list is empty' : 'Nothing here yet',
-                    isMe ? 'Find a game and add it to your list.' : '',
-                    isMe ? html`<a class="btn btn-accent" href="#/browse">Browse games</a>` : '',
+                    isMe ? 'Nothing on your shelf yet' : 'Nothing here yet',
+                    isMe ? 'Add games from any game page, or import your Steam library.' : '',
+                    isMe ? html`<div class="hero-actions"><a class="btn btn-accent" href="#/import">Import from Steam</a><a class="btn btn-quiet" href="#/browse">Find games</a></div>` : '',
                   )}
             </section>
 
             <section class="showcase" id="comments">
-              <div class="showcase-title">Comments</div>
+              <h2 class="showcase-title">Comments</h2>
               <div id="comments-body">${renderComments()}</div>
             </section>
           </main>
 
           <aside class="profile-side">
-            <section class="glass side-card">
-              <h3>Badges <span class="muted">${earned.length}/${progression.badges.length}</span></h3>
+            <section class="side-card">
+              <h3>Badges <span class="muted">${earned.length} of ${progression.badges.length}</span></h3>
               <div class="badges">
                 ${progression.badges.map((b) => html`
-                  <div class="badge ${b.earned ? 'earned' : 'locked'}" title="${b.name}: ${b.description} (${b.progress}/${b.target})">
-                    <span class="badge-icon">${icon(BADGE_ICONS[b.id])}</span>
+                  <div class="badge tier-${b.tier}" title="${badgeTitle(b)}">
+                    <span class="medal"><span>${BADGE_GLYPHS[b.id]}</span></span>
                     <span class="badge-name">${b.name}</span>
                   </div>`)}
               </div>
             </section>
-            <section class="glass side-card">
+            <section class="side-card">
               <h3>Stats</h3>
               <ul class="side-stats">
                 <li><span>Games</span><strong>${stats.games}</strong></li>
                 ${Object.entries(STATUS_LABELS).map(([k, label]) => html`<li><span>${label}</span><strong>${stats[k]}</strong></li>`)}
-                <li><span>Average rating</span><strong>${stats.averageRating ?? '–'}</strong></li>
+                <li><span>Average rating</span><strong>${stats.averageRating ? `${starValue(stats.averageRating)} ★` : '–'}</strong></li>
+                ${stats.hours ? html`<li><span>Hours played</span><strong>${stats.hours.toLocaleString()}</strong></li>` : ''}
               </ul>
             </section>
-            <section class="glass side-card">
+            <section class="side-card">
               <h3>Recent activity</h3>
               ${library.length
                 ? html`<ul class="activity">${library.slice(0, 5).map((e) => html`
                     <li>
                       <a href="${gameHref(e.gameId)}">${e.name}</a>
-                      <div class="muted small">${STATUS_LABELS[e.status]}${e.rating ? ` · ${e.rating}/10` : ''} · ${timeAgo(e.updatedAt)}</div>
+                      <div class="muted small">${STATUS_LABELS[e.status]}${e.rating ? ` · ${starValue(e.rating)} ★` : ''} · ${timeAgo(e.updatedAt)}</div>
                     </li>`)}</ul>`
                 : html`<p class="muted small">No activity yet.</p>`}
             </section>

@@ -13,8 +13,8 @@ const SHOWCASE_INFO = {
   favorite: { name: 'Favorite game', description: 'Spotlight one game with its full artwork.' },
   collection: { name: 'Game collection', description: 'Hand-pick up to 6 games under your own title.' },
   toprated: { name: 'Highest rated', description: 'Your 6 highest-rated games, updated automatically.' },
-  completed: { name: 'Completion showcase', description: 'Games you’ve completed most recently.' },
-  stats: { name: 'Gaming stats', description: 'Games, completions, average rating and more.' },
+  completed: { name: 'Recently completed', description: 'Games you’ve completed most recently.' },
+  stats: { name: 'By the numbers', description: 'Games, completions, hours, average rating and more.' },
   info: { name: 'Custom info box', description: 'Write anything: favorite genres, setup, gamer tags.' },
 };
 const AVATAR_SIZE = 256;
@@ -143,7 +143,7 @@ export async function customizeView(app) {
       <span class="muted small">Add a showcase (${draft.showcases.length}/${options.maxShowcases})</span>
       <div class="add-buttons">
         ${options.showcaseTypes.map((type) => html`
-          <button type="button" class="btn btn-glass btn-sm" data-add="${type}" ${draft.showcases.length >= options.maxShowcases ? html`disabled` : ''}>
+          <button type="button" class="btn btn-quiet btn-sm" data-add="${type}" ${draft.showcases.length >= options.maxShowcases ? html`disabled` : ''}>
             ${icon('plus')} ${SHOWCASE_INFO[type].name}
           </button>`)}
       </div>
@@ -154,7 +154,7 @@ export async function customizeView(app) {
       ${avatar(previewUser(), 'xl')}
       <div class="avatar-actions">
         <label class="btn btn-accent">${icon('upload')} Upload image<input type="file" id="avatar-file" accept="image/*" hidden></label>
-        ${state.user.avatarUrl ? html`<button type="button" class="btn btn-glass" id="avatar-remove">Remove</button>` : ''}
+        ${state.user.avatarUrl ? html`<button type="button" class="btn btn-quiet" id="avatar-remove">Remove</button>` : ''}
         <p class="muted small">Square images look best. We crop and resize it for you.</p>
       </div>
     </div>
@@ -189,11 +189,11 @@ export async function customizeView(app) {
       <div class="customize-head">
         <div>
           <h1>Edit profile</h1>
-          <p class="muted">Make your profile look the way you want. Changes show in the preview right away.</p>
+          <p class="muted">Changes show in the preview straight away. Nothing is public until you save.</p>
         </div>
-        <a class="btn btn-glass" href="${profileHref(state.user.username)}">View profile</a>
+        <a class="btn btn-quiet" href="${profileHref(state.user.username)}">View profile</a>
       </div>
-      <div class="preview glass" id="preview">${preview()}</div>
+      <div class="preview" id="preview">${preview()}</div>
       <div class="customize-layout">
         <nav class="side-nav">
           <a href="#general">${icon('user')} General</a>
@@ -203,7 +203,7 @@ export async function customizeView(app) {
           <a href="#showcases">${icon('trophy')} Showcases</a>
         </nav>
         <div class="customize-sections">
-          <section class="glass panel" id="general">
+          <section class="panel" id="general">
             <h2>General</h2>
             <div class="form-grid">
               <label>Display name<input class="input" data-draft="displayName" value="${draft.displayName}" maxlength="40" required></label>
@@ -212,16 +212,16 @@ export async function customizeView(app) {
               <label class="full">Bio<textarea class="input" data-draft="bio" maxlength="600" rows="4" placeholder="Tell people what you love to play">${draft.bio}</textarea></label>
             </div>
           </section>
-          <section class="glass panel" id="avatar"><h2>Avatar</h2><div id="avatar-section">${avatarSection()}</div></section>
-          <section class="glass panel" id="background"><h2>Profile background</h2><div id="background-section">${backgroundSection()}</div></section>
-          <section class="glass panel" id="theme"><h2>Theme color</h2><div id="theme-section">${themeSection()}</div></section>
-          <section class="glass panel" id="showcases"><h2>Showcases</h2><div id="showcases-section">${showcasesSection()}</div></section>
+          <section class="panel" id="avatar"><h2>Avatar</h2><div id="avatar-section">${avatarSection()}</div></section>
+          <section class="panel" id="background"><h2>Profile background</h2><div id="background-section">${backgroundSection()}</div></section>
+          <section class="panel" id="theme"><h2>Theme color</h2><div id="theme-section">${themeSection()}</div></section>
+          <section class="panel" id="showcases"><h2>Showcases</h2><div id="showcases-section">${showcasesSection()}</div></section>
         </div>
       </div>
       <div class="save-bar" id="save-bar">
         <span>You have unsaved changes</span>
         <div>
-          <button type="button" class="btn btn-glass" id="discard">Discard</button>
+          <button type="button" class="btn btn-quiet" id="discard">Discard</button>
           <button type="button" class="btn btn-accent" id="save">Save changes</button>
         </div>
       </div>

@@ -40,7 +40,7 @@ export async function browseView(app, params) {
       ${data.results.length
         ? html`<div class="grid" id="grid">${data.results.map((g) => gameTile(g))}</div>`
         : emptyState('No games found', 'Try a different search or genre.')}
-      <div class="center">${data.hasMore ? html`<button class="btn btn-glass" id="more">Load more</button>` : ''}</div>
+      <div class="center">${data.hasMore ? html`<button class="btn btn-quiet" id="more">Load more</button>` : ''}</div>
     </div>
   `);
 

@@ -11,16 +11,18 @@ const XP_PER_LEVEL = 50;
 
 const GAME_ID_RE = /^[a-z0-9][a-z0-9-]{0,149}$/;
 
+// Each badge has bronze, silver and gold tiers.
 const BADGES = [
-  { id: 'first-steps', name: 'First Steps', description: 'Add your first game', stat: 'games', target: 1 },
-  { id: 'collector', name: 'Collector', description: 'Add 25 games to your list', stat: 'games', target: 25 },
-  { id: 'completionist', name: 'Completionist', description: 'Complete 10 games', stat: 'completed', target: 10 },
-  { id: 'critic', name: 'Critic', description: 'Rate 10 games', stat: 'rated', target: 10 },
-  { id: 'explorer', name: 'Explorer', description: 'Play games from 5 genres', stat: 'genres', target: 5 },
-  { id: 'backlog', name: 'Backlog Builder', description: 'Save 10 games to play later', stat: 'want', target: 10 },
-  { id: 'curator', name: 'Curator', description: 'Set up 2 profile showcases', stat: 'showcases', target: 2 },
-  { id: 'socialite', name: 'Socialite', description: 'Leave 5 comments on profiles', stat: 'comments', target: 5 },
+  { id: 'collector', name: 'Collector', description: 'Games on your list', stat: 'games', tiers: [10, 50, 150] },
+  { id: 'completionist', name: 'Completionist', description: 'Games completed', stat: 'completed', tiers: [5, 25, 75] },
+  { id: 'critic', name: 'Critic', description: 'Games rated', stat: 'rated', tiers: [10, 50, 150] },
+  { id: 'explorer', name: 'Explorer', description: 'Genres played', stat: 'genres', tiers: [3, 6, 10] },
+  { id: 'veteran', name: 'Veteran', description: 'Hours played', stat: 'hours', tiers: [100, 500, 2000] },
+  { id: 'backlog', name: 'Backlog Builder', description: 'Games saved for later', stat: 'want', tiers: [5, 20, 50] },
+  { id: 'curator', name: 'Curator', description: 'Profile showcases', stat: 'showcases', tiers: [1, 2, 4] },
+  { id: 'socialite', name: 'Socialite', description: 'Comments left on profiles', stat: 'comments', tiers: [5, 25, 100] },
 ];
+const TIER_NAMES = ['Locked', 'Bronze', 'Silver', 'Gold'];
 
 function clean(value, max) {
   return String(value ?? '').trim().slice(0, max);
@@ -54,8 +56,10 @@ function statsFor(library) {
   const genres = new Set();
   const stats = { games: library.length, playing: 0, completed: 0, played: 0, want: 0, dropped: 0, rated: 0 };
   let ratingSum = 0;
+  let minutes = 0;
   for (const e of library) {
     stats[e.status]++;
+    minutes += e.playtime || 0;
     if (e.rating) {
       stats.rated++;
       ratingSum += e.rating;
@@ -63,6 +67,7 @@ function statsFor(library) {
     for (const g of e.genres) genres.add(g);
   }
   stats.genres = genres.size;
+  stats.hours = Math.round(minutes / 60);
   stats.averageRating = stats.rated ? Math.round((ratingSum / stats.rated) * 10) / 10 : null;
   const finished = stats.completed + stats.played + stats.dropped;
   stats.completionRate = finished ? Math.round((stats.completed / finished) * 100) : 0;
@@ -70,7 +75,8 @@ function statsFor(library) {
 }
 
 function progression(stats, { showcases = 0, comments = 0 } = {}) {
-  const xp = stats.games * 10 + stats.completed * 20 + stats.rated * 5 + stats.genres * 5 + comments * 2;
+  const xp = stats.games * 10 + stats.completed * 20 + stats.rated * 5 + stats.genres * 5 + comments * 2 +
+    Math.floor(stats.hours / 10);
   const level = Math.floor(xp / XP_PER_LEVEL) + 1;
   const values = { ...stats, showcases, comments };
   return {
@@ -78,12 +84,19 @@ function progression(stats, { showcases = 0, comments = 0 } = {}) {
     xp,
     levelProgress: (xp % XP_PER_LEVEL) / XP_PER_LEVEL,
     xpToNext: XP_PER_LEVEL - (xp % XP_PER_LEVEL),
-    badges: BADGES.map(({ stat, target, ...b }) => ({
-      ...b,
-      earned: values[stat] >= target,
-      progress: Math.min(values[stat], target),
-      target,
-    })),
+    badges: BADGES.map(({ stat, tiers, ...b }) => {
+      const value = values[stat];
+      const tier = tiers.filter((t) => value >= t).length;
+      return {
+        ...b,
+        tier,
+        tierName: TIER_NAMES[tier],
+        earned: tier > 0,
+        progress: value,
+        // The next tier to work towards, or null once gold is reached.
+        nextTarget: tiers[tier] ?? null,
+      };
+    }),
   };
 }
 

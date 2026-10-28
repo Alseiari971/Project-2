@@ -19,6 +19,8 @@ const ADDED_COLUMNS = {
   library: {
     game_backdrop: 'TEXT',
     game_genres: "TEXT NOT NULL DEFAULT '[]'",
+    playtime_minutes: 'INTEGER',
+    game_logo: 'TEXT',
   },
 };
 

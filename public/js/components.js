@@ -3,10 +3,56 @@ import { html, raw, hueFor, year, gameHref, profileHref, STATUS_LABELS, applySty
 import { icon } from './icons.js';
 
 /** Game artwork, or a colored title card when there is no image. */
-export function art(game, cls = 'tile-art') {
-  return game.image
-    ? html`<img class="${cls}" src="${game.image}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+export function art(game, cls = 'tile-art', src = game.image) {
+  return src
+    ? html`<img class="${cls}" src="${src}" alt="" loading="lazy" referrerpolicy="no-referrer">`
     : html`<div class="${cls} art-fallback" data-hue="${hueFor(game.name)}"><span>${game.name}</span></div>`;
+}
+
+/**
+ * The game's logo artwork when we have it, otherwise its name as text.
+ * If the logo fails to load, the error handler below swaps in the text.
+ */
+export function titleArt(game, tag = 'h1') {
+  const inner = game.logo
+    ? html`<img class="logo-art" src="${game.logo}" alt="${game.name}" referrerpolicy="no-referrer">`
+    : html`${game.name}`;
+  return html`${raw(`<${tag} class="title-art${game.logo ? ' has-logo' : ''}">`)}${inner}${raw(`</${tag}>`)}`;
+}
+
+/** Ratings are stored out of 10 and shown as 5 stars with halves. */
+export const starValue = (rating) => String(rating / 2);
+
+/** Read-only star display. */
+export function stars(rating, size = '') {
+  const row = (cls) => html`<span class="${cls}">${[1, 2, 3, 4, 5].map(() => icon('star'))}</span>`;
+  return html`<span class="stars ${size}" data-progress="${rating / 10}" role="img" aria-label="${starValue(rating)} out of 5 stars">
+    ${row('stars-bg')}${row('stars-fg')}
+  </span>`;
+}
+
+/** Interactive half-star rating input. Ten invisible buttons sit over the five stars. */
+export function starInput(rating) {
+  return html`
+    <div class="star-input" data-value="${rating || 0}">
+      ${stars(rating || 0, 'lg')}
+      <div class="star-hit">
+        ${Array.from({ length: 10 }, (_, i) => i + 1).map((n) => html`
+          <button type="button" data-rating="${n}" aria-label="${starValue(n)} stars"></button>`)}
+      </div>
+    </div>`;
+}
+
+/** Hovering previews a rating; leaving restores the saved one. */
+export function wireStarInput(el, onPick) {
+  const fg = () => el.querySelector('.stars');
+  const show = (n) => fg().style.setProperty('--progress', String(n / 10));
+  el.querySelectorAll('[data-rating]').forEach((b) => {
+    b.addEventListener('mouseenter', () => show(Number(b.dataset.rating)));
+    b.addEventListener('focus', () => show(Number(b.dataset.rating)));
+    b.addEventListener('click', () => onPick(Number(b.dataset.rating)));
+  });
+  el.addEventListener('mouseleave', () => show(Number(el.dataset.value)));
 }
 
 /** Landscape game tile with a caption underneath (Apple TV style). */
@@ -14,7 +60,7 @@ export function gameTile(game, { badge = '', caption = true } = {}) {
   const id = game.id || game.gameId;
   const meta = [
     game.released !== undefined ? year(game.released) : null,
-    game.genres?.length ? game.genres.slice(0, 2).join(' · ') : null,
+    game.genres?.length ? game.genres.slice(0, 2).join(', ') : null,
   ].filter(Boolean).join(' · ');
   return html`
     <a class="tile" href="${gameHref(id)}" title="${game.name}">
@@ -26,22 +72,42 @@ export function gameTile(game, { badge = '', caption = true } = {}) {
     </a>`;
 }
 
+/** Tall poster with a big rank number, for the Top 10 row. */
+export function rankTile(game, rank) {
+  return html`
+    <a class="rank-tile" href="${gameHref(game.id)}" title="${game.name}">
+      <span class="rank" aria-hidden="true">${rank}</span>
+      <div class="poster">${art(game, 'tile-art', game.poster || game.image)}</div>
+    </a>`;
+}
+
 export const statusBadge = (status) => html`<span class="status status-${status}">${STATUS_LABELS[status]}</span>`;
 
-export const ratingBadge = (rating) => (rating ? html`<span class="rating-pill">${icon('star')}${rating}</span>` : '');
+export const ratingBadge = (rating) => (rating ? html`<span class="rating-pill">${icon('star')}${starValue(rating)}</span>` : '');
 
-/** A library entry tile with its status and rating overlaid. */
+export function formatHours(minutes) {
+  if (!minutes) return '';
+  const hours = minutes / 60;
+  return hours < 1 ? '<1 h' : `${hours < 10 ? Math.round(hours * 10) / 10 : Math.round(hours).toLocaleString()} h`;
+}
+
+/** A library entry tile with its status, rating and playtime overlaid. */
 export function libraryTile(entry) {
   return gameTile(
     { id: entry.gameId, name: entry.name, image: entry.image, genres: entry.genres },
-    { badge: html`<div class="tile-badges">${statusBadge(entry.status)}${ratingBadge(entry.rating)}</div>` },
+    {
+      badge: html`<div class="tile-badges">
+        ${statusBadge(entry.status)}${ratingBadge(entry.rating)}
+        ${entry.playtime ? html`<span class="rating-pill hours">${formatHours(entry.playtime)}</span>` : ''}
+      </div>`,
+    },
   );
 }
 
 /** Horizontally scrolling row with arrow buttons, like a streaming app. */
-export function row({ title, href, items, id = '' }) {
+export function row({ title, href, items, id = '', cls = '' }) {
   return html`
-    <section class="row" ${raw(id ? `id="${id}"` : '')}>
+    <section class="row ${cls}" ${raw(id ? `id="${id}"` : '')}>
       <div class="row-head">
         <h2>${title}</h2>
         ${href ? html`<a class="row-more" href="${href}">See all ${icon('right')}</a>` : ''}
@@ -92,21 +158,47 @@ export function levelBadge(level, size = '') {
 }
 
 export const emptyState = (title, body = '', action = '') =>
-  html`<div class="empty">${icon('gamepad', 'empty-icon')}<h3>${title}</h3>${body ? html`<p>${body}</p>` : ''}${action}</div>`;
+  html`<div class="empty"><h3>${title}</h3>${body ? html`<p>${body}</p>` : ''}${action}</div>`;
 
-export const spinner = () => html`<div class="loading"><span class="spinner"></span></div>`;
+// ---- Loading skeletons ------------------------------------------------------------
 
-// Replace a broken image with the colored title card. Image errors don't
-// bubble, so this listens in the capture phase.
+const skeletonTiles = (n) => html`${Array.from({ length: n }, () => html`<div class="sk-tile"><div class="sk sk-frame"></div><div class="sk sk-line"></div><div class="sk sk-line short"></div></div>`)}`;
+
+export function skeleton(kind) {
+  if (kind === 'home') {
+    return html`<div class="skeleton"><div class="sk sk-hero"></div>
+      ${[1, 2].map(() => html`<div class="sk-row"><div class="sk sk-heading"></div><div class="sk-track">${skeletonTiles(5)}</div></div>`)}</div>`;
+  }
+  if (kind === 'game') {
+    return html`<div class="skeleton"><div class="sk sk-hero short"></div><div class="sk-page"><div class="sk sk-heading"></div><div class="sk sk-line wide"></div><div class="sk sk-line wide"></div></div></div>`;
+  }
+  return html`<div class="skeleton sk-page"><div class="sk sk-title"></div><div class="sk-grid">${skeletonTiles(10)}</div></div>`;
+}
+
+// ---- Broken images -------------------------------------------------------------------
+
+// Image errors don't bubble, so this listens in the capture phase.
 document.addEventListener('error', (e) => {
   const img = e.target;
-  if (!(img instanceof HTMLImageElement) || !img.classList.contains('tile-art')) return;
-  const name = img.closest('.tile')?.getAttribute('title') || '';
-  const div = document.createElement('div');
-  div.className = 'tile-art art-fallback';
-  div.dataset.hue = hueFor(name);
-  div.innerHTML = html`<span>${name}</span>`.value;
-  const parent = img.parentElement;
-  img.replaceWith(div);
-  applyStyles(parent);
+  if (!(img instanceof HTMLImageElement)) return;
+
+  // Missing logo: show the game's name as text instead.
+  if (img.classList.contains('logo-art')) {
+    const heading = img.parentElement;
+    heading.classList.remove('has-logo');
+    img.replaceWith(document.createTextNode(img.alt));
+    return;
+  }
+
+  // Missing cover: show a colored title card.
+  if (img.classList.contains('tile-art')) {
+    const name = img.closest('[title]')?.getAttribute('title') || '';
+    const div = document.createElement('div');
+    div.className = 'tile-art art-fallback';
+    div.dataset.hue = hueFor(name);
+    div.innerHTML = html`<span>${name}</span>`.value;
+    const parent = img.parentElement;
+    img.replaceWith(div);
+    applyStyles(parent);
+  }
 }, true);

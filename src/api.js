@@ -1,5 +1,6 @@
 // JSON API. The website uses it today, and a future mobile app can use the
 // exact same endpoints.
+const crypto = require('node:crypto');
 const express = require('express');
 const {
   hashPassword,
@@ -11,11 +12,22 @@ const {
 } = require('./auth');
 const { GENRES, findGenre } = require('./games/genres');
 const profile = require('./profile');
+const { SteamError } = require('./steam');
 
 const STATUSES = ['playing', 'completed', 'played', 'want', 'dropped'];
 const USERNAME_RE = /^[a-zA-Z0-9_]{3,20}$/;
 const GAME_ID_RE = /^[a-z0-9][a-z0-9-]{0,149}$/;
 const SORTS = ['popular', 'new', 'top'];
+// Big Steam libraries are capped to the most-played games to keep matching quick.
+const STEAM_IMPORT_MAX = 300;
+const PREVIEW_TTL_MS = 30 * 60 * 1000;
+
+// Guess a list status from Steam playtime (minutes).
+function suggestStatus({ playtime, recentPlaytime }) {
+  if (recentPlaytime > 0) return 'playing';
+  if (playtime > 0) return 'played';
+  return 'want';
+}
 
 const publicUser = (u) => ({
   username: u.username,
@@ -35,16 +47,21 @@ const libraryEntry = (row) => ({
   name: row.game_name,
   image: row.game_image,
   backdrop: row.game_backdrop,
+  logo: row.game_logo ?? null,
   genres: JSON.parse(row.game_genres || '[]'),
   status: row.status,
   rating: row.rating,
+  playtime: row.playtime_minutes ?? null,
   updatedAt: row.updated_at,
 });
 
-function createApi({ db, games }) {
+function createApi({ db, games, prices, steam }) {
   const api = express.Router();
   const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30 });
   const commentLimiter = rateLimit({ windowMs: 60 * 1000, max: 10 });
+  const importLimiter = rateLimit({ windowMs: 60 * 1000, max: 6 });
+  // Matched import previews, kept briefly so the commit step can trust them.
+  const previews = new Map();
 
   const q = {
     userByName: db.prepare('SELECT * FROM users WHERE username = ?'),
@@ -69,14 +86,20 @@ function createApi({ db, games }) {
     library: db.prepare('SELECT * FROM library WHERE user_id = ? ORDER BY updated_at DESC'),
     libraryEntry: db.prepare('SELECT * FROM library WHERE user_id = ? AND game_id = ?'),
     upsertEntry: db.prepare(`
-      INSERT INTO library (user_id, game_id, game_name, game_image, game_backdrop, game_genres, status, rating)
-      VALUES (@userId, @gameId, @name, @image, @backdrop, @genres, @status, @rating)
+      INSERT INTO library (user_id, game_id, game_name, game_image, game_backdrop, game_logo, game_genres, status, rating)
+      VALUES (@userId, @gameId, @name, @image, @backdrop, @logo, @genres, @status, @rating)
       ON CONFLICT (user_id, game_id) DO UPDATE SET
         game_name = excluded.game_name, game_image = excluded.game_image,
-        game_backdrop = excluded.game_backdrop, game_genres = excluded.game_genres,
+        game_backdrop = excluded.game_backdrop, game_logo = excluded.game_logo, game_genres = excluded.game_genres,
         status = excluded.status, rating = excluded.rating, updated_at = datetime('now')
     `),
     deleteEntry: db.prepare('DELETE FROM library WHERE user_id = ? AND game_id = ?'),
+    // Imports never overwrite a status or rating you set yourself; they only refresh playtime.
+    importEntry: db.prepare(`
+      INSERT INTO library (user_id, game_id, game_name, game_image, game_backdrop, game_logo, game_genres, status, playtime_minutes)
+      VALUES (@userId, @gameId, @name, @image, @backdrop, @logo, @genres, @status, @playtime)
+      ON CONFLICT (user_id, game_id) DO UPDATE SET playtime_minutes = excluded.playtime_minutes
+    `),
     playersOf: db.prepare(`
       SELECT u.*, l.status, l.rating
       FROM library l JOIN users u ON u.id = l.user_id
@@ -111,7 +134,7 @@ function createApi({ db, games }) {
   // ---- Games ---------------------------------------------------------------
 
   api.get('/info', (_req, res) => {
-    res.json({ source: games.name, statuses: STATUSES, genres: GENRES.map((g) => g.name) });
+    res.json({ source: games.name, statuses: STATUSES, genres: GENRES.map((g) => g.name), steamImport: steam.enabled });
   });
 
   // Everything the home screen needs in one request: a featured carousel and rows.
@@ -129,9 +152,12 @@ function createApi({ db, games }) {
       .map((r, i) => ({ id: r.id, title: r.title, genre: r.genre || null, games: results[i].results }))
       .filter((r) => r.games.length >= 3);
 
+    // Netflix-style "Top 10" row with tall posters, taken from the trending list.
+    rows.splice(1, 0, { id: 'top10', title: 'Top 10 this week', genre: null, games: results[0].results.slice(0, 10) });
+
     const community = q.communityFavorites.all().map((row) => ({ ...libraryEntry(row), id: row.game_id, players: row.players }));
     if (community.length) {
-      rows.splice(1, 0, { id: 'community', title: 'Popular on GameShelf', genre: null, games: community });
+      rows.splice(2, 0, { id: 'community', title: 'Popular on GameShelf', genre: null, games: community });
     }
 
     const featured = results[0].results.filter((g) => g.backdrop).slice(0, 6);
@@ -176,6 +202,14 @@ function createApi({ db, games }) {
       },
       myEntry: mine ? libraryEntry(mine) : null,
     });
+  }));
+
+  api.get('/games/:id/prices', asyncRoute(async (req, res) => {
+    const { id } = req.params;
+    const game = GAME_ID_RE.test(id) ? await games.getGame(id) : null;
+    if (!game) return res.status(404).json({ error: 'Game not found.' });
+    const result = await prices.pricesFor({ steamAppId: game.steamAppId, name: game.name });
+    res.json(result || { currency: 'USD', deals: [], lowestEver: null });
   }));
 
   // ---- Accounts --------------------------------------------------------------
@@ -301,12 +335,79 @@ function createApi({ db, games }) {
       name: game.name,
       image: game.image,
       backdrop: game.backdrop,
+      logo: game.logo,
       genres: JSON.stringify(game.genres),
       status,
       rating,
     });
     res.json({ entry: libraryEntry(q.libraryEntry.get(req.user.id, game.id)) });
   }));
+
+  // ---- Steam import ----------------------------------------------------------
+
+  api.post('/me/import/steam/preview', requireUser, importLimiter, asyncRoute(async (req, res) => {
+    let owned;
+    try {
+      owned = await steam.ownedGames(req.body?.profile);
+    } catch (err) {
+      if (err instanceof SteamError) return res.status(err.code === 'unavailable' ? 502 : 400).json({ error: err.message, code: err.code });
+      throw err;
+    }
+
+    const played = [...owned.games].sort((a, b) => b.playtime - a.playtime);
+    const considered = played.slice(0, STEAM_IMPORT_MAX);
+    const matches = await games.matchSteamGames(considered);
+    const existing = new Map(q.library.all(req.user.id).map((r) => [r.game_id, r.status]));
+
+    const items = considered.map((g, i) => ({
+      appid: g.appid,
+      name: g.name,
+      playtime: g.playtime,
+      suggestedStatus: suggestStatus(g),
+      match: matches[i],
+      existingStatus: matches[i] ? existing.get(matches[i].id) || null : null,
+    }));
+
+    const previewId = crypto.randomBytes(16).toString('hex');
+    for (const [id, p] of previews) if (p.expires < Date.now()) previews.delete(id);
+    previews.set(previewId, { userId: req.user.id, items, expires: Date.now() + PREVIEW_TTL_MS });
+
+    res.json({ previewId, total: owned.games.length, considered: considered.length, items });
+  }));
+
+  api.post('/me/import/steam/commit', requireUser, (req, res) => {
+    const preview = previews.get(String(req.body?.previewId || ''));
+    if (!preview || preview.userId !== req.user.id || preview.expires < Date.now()) {
+      return res.status(410).json({ error: 'This import expired. Please load your Steam library again.' });
+    }
+    const chosen = Array.isArray(req.body?.items) ? req.body.items : [];
+    const byAppId = new Map(preview.items.filter((i) => i.match).map((i) => [i.appid, i]));
+
+    let added = 0;
+    let updated = 0;
+    db.transaction(() => {
+      for (const pick of chosen) {
+        const item = byAppId.get(Number(pick?.appid));
+        if (!item || !STATUSES.includes(pick.status)) continue;
+        const g = item.match;
+        q.importEntry.run({
+          userId: req.user.id,
+          gameId: g.id,
+          name: g.name,
+          image: g.image,
+          backdrop: g.backdrop,
+          logo: g.logo,
+          genres: JSON.stringify(g.genres),
+          status: pick.status,
+          playtime: item.playtime,
+        });
+        if (item.existingStatus) updated++;
+        else added++;
+      }
+    })();
+    previews.delete(req.body.previewId);
+    res.json({ added, updated });
+  });
 
   api.delete('/me/library/:gameId', requireUser, (req, res) => {
     q.deleteEntry.run(req.user.id, req.params.gameId);

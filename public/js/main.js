@@ -1,5 +1,5 @@
-import { html, api, mount, state, refreshMe, runCleanups, profileHref, applyStyles } from './lib.js';
-import { avatar, spinner, emptyState } from './components.js';
+import { html, api, mount, state, refreshMe, runCleanups, profileHref } from './lib.js';
+import { avatar, skeleton, emptyState } from './components.js';
 import { icon } from './icons.js';
 import { homeView } from './views/home.js';
 import { browseView } from './views/browse.js';
@@ -8,6 +8,7 @@ import { profileView } from './views/profile.js';
 import { customizeView } from './views/customize.js';
 import { communityView } from './views/community.js';
 import { authView } from './views/auth.js';
+import { importView } from './views/import.js';
 
 const app = document.getElementById('app');
 
@@ -33,10 +34,11 @@ function renderNav(section) {
             <div class="menu-user">${avatar(state.user)}<div><strong>${state.user.displayName}</strong><div class="muted small">@${state.user.username}</div></div></div>
             <a href="${profileHref(state.user.username)}">${icon('user')} My profile</a>
             <a href="#/customize">${icon('sliders')} Edit profile</a>
+            <a href="#/import">${icon('upload')} Import from Steam</a>
             <button type="button" id="logout">${icon('logout')} Log out</button>
           </div>
         </div>`
-      : html`<a class="nav-login" href="#/login">Log in</a><a class="btn btn-light btn-sm" href="#/register">Sign up</a>`}
+      : html`<a class="nav-login" href="#/login">Log in</a><a class="btn btn-light btn-sm" href="#/register">Join free</a>`}
   `);
 
   const tab = (href, label, iconName, key) => html`
@@ -90,7 +92,7 @@ async function route() {
   document.title = 'GameShelf';
   renderNav(currentSection);
   window.scrollTo(0, 0);
-  mount(app, spinner());
+  mount(app, skeleton({ undefined: 'home', game: 'game' }[parts[0]] || 'page'));
   app.classList.remove('view-in');
 
   try {
@@ -100,6 +102,7 @@ async function route() {
       case 'game': await gameView(app, parts[1], params); break;
       case 'u': await profileView(app, parts[1], params); break;
       case 'customize': await customizeView(app); break;
+      case 'import': await importView(app); break;
       case 'community': await communityView(app, params); break;
       case 'login': await authView(app, 'login'); break;
       case 'register': await authView(app, 'register'); break;
@@ -111,7 +114,6 @@ async function route() {
   }
   void app.offsetWidth; // restart the fade-in animation
   app.classList.add('view-in');
-  applyStyles(document.getElementById('nav-right'));
   onScroll();
 }
 

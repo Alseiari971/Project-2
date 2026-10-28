@@ -14,6 +14,9 @@ function toSummary(game) {
     released: game.released,
     image: game.steamAppId ? steamAsset(game.steamAppId, 'capsule_616x353.jpg') : null,
     backdrop: game.steamAppId ? steamAsset(game.steamAppId, 'library_hero.jpg') : null,
+    // Transparent title artwork, shown instead of plain text on big banners.
+    logo: game.steamAppId ? steamAsset(game.steamAppId, 'logo.png') : null,
+    poster: game.steamAppId ? steamAsset(game.steamAppId, 'library_600x900.jpg') : null,
     genres: game.genres,
     platforms: game.platforms,
     description: game.description,
@@ -41,6 +44,12 @@ function createLocalProvider() {
       };
     },
 
+    // Matches Steam games to the catalog by Steam app ID. Returns a summary or null for each.
+    async matchSteamGames(steamGames) {
+      const byAppId = new Map(catalog.filter((g) => g.steamAppId).map((g) => [g.steamAppId, g]));
+      return steamGames.map((s) => (byAppId.has(s.appid) ? toSummary(byAppId.get(s.appid)) : null));
+    },
+
     async getGame(id) {
       const game = catalog.find((g) => g.id === id);
       if (!game) return null;
@@ -50,6 +59,7 @@ function createLocalProvider() {
       }));
       return {
         ...toSummary(game),
+        steamAppId: game.steamAppId || null,
         developers: game.developers || [],
         publishers: [],
         website: null,

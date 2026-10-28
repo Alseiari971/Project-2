@@ -1,27 +1,62 @@
-import { html, api, mount, state, year, formatDate, STATUS_LABELS, toast, hueFor } from '../lib.js';
-import { gameTile, row, enableRows, userChip, statusBadge } from '../components.js';
+import { html, api, mount, state, year, formatDate, STATUS_LABELS, toast, hueFor, onLeave } from '../lib.js';
+import { gameTile, row, enableRows, userChip, statusBadge, titleArt, starInput, wireStarInput, starValue, formatHours } from '../components.js';
 import { icon } from '../icons.js';
 
-function listControls(game) {
+function listActions(game) {
   if (!state.user) {
-    return html`<a class="btn btn-light btn-lg" href="#/login">${icon('plus')} Log in to add to your list</a>`;
+    return html`<div class="list-actions"><a class="btn btn-light btn-lg" href="#/login">${icon('plus')} Add to list</a></div>`;
   }
   const entry = game.myEntry;
   return html`
-    <div class="list-controls" id="list-controls">
-      <div class="segmented" role="group" aria-label="Status">
-        ${Object.entries(STATUS_LABELS).map(([value, label]) => html`
-          <button type="button" class="${entry?.status === value ? 'active' : ''}" data-status="${value}" aria-pressed="${entry?.status === value}">
-            ${entry?.status === value ? icon('check') : ''}${label}
-          </button>`)}
+    <div class="list-actions" id="list-actions">
+      <div class="dropdown">
+        <button type="button" class="btn ${entry ? 'btn-quiet' : 'btn-light'} btn-lg" id="list-button" aria-haspopup="menu" aria-expanded="false">
+          ${entry ? html`${icon('check')} ${STATUS_LABELS[entry.status]}` : html`${icon('plus')} Add to list`}
+          ${icon('down', 'chevron')}
+        </button>
+        <div class="dropdown-menu" id="list-menu" role="menu" hidden>
+          ${Object.entries(STATUS_LABELS).map(([value, label]) => html`
+            <button type="button" role="menuitemradio" aria-checked="${entry?.status === value}" data-status="${value}">
+              <span class="check">${entry?.status === value ? icon('check') : ''}</span>${label}
+            </button>`)}
+          ${entry ? html`<div class="menu-sep"></div><button type="button" role="menuitem" class="danger" id="remove-entry">${icon('trash')} Remove from list</button>` : ''}
+        </div>
       </div>
-      <div class="rating-picker ${entry ? '' : 'disabled'}" role="group" aria-label="Your rating">
-        <span class="rating-label">${entry ? 'Your rating' : 'Pick a status to rate'}</span>
-        ${Array.from({ length: 10 }, (_, i) => i + 1).map((n) => html`
-          <button type="button" data-rating="${n}" class="${entry?.rating >= n ? 'on' : ''}" aria-label="${n} out of 10" ${entry ? '' : html`disabled`}>${n}</button>`)}
-        ${entry ? html`<button type="button" class="link-btn" id="remove-entry">${icon('trash')} Remove</button>` : ''}
+      <div class="rate">
+        ${starInput(entry?.rating)}
+        <span class="rate-label">${entry?.rating ? `${starValue(entry.rating)} / 5` : 'Rate it'}</span>
       </div>
+      ${entry?.playtime ? html`<span class="playtime">${formatHours(entry.playtime)} played</span>` : ''}
     </div>`;
+}
+
+function priceSection(prices) {
+  if (!prices || !prices.deals.length) return '';
+  const best = prices.deals[0];
+  const money = (n) => `$${n.toFixed(2)}`;
+  return html`
+    <div class="best-price">
+      <div class="best-label">Best price right now</div>
+      <div class="best-row">
+        <span class="best-amount">${best.price === 0 ? 'Free' : money(best.price)}</span>
+        ${best.savings >= 1 ? html`<span class="discount">−${Math.round(best.savings)}%</span>` : ''}
+      </div>
+      <a class="btn btn-accent btn-block" href="${best.url}" target="_blank" rel="noopener noreferrer">Buy on ${best.store} ${icon('external')}</a>
+      ${prices.lowestEver ? html`<div class="muted small">Lowest ever: ${money(prices.lowestEver.price)}, ${new Date(prices.lowestEver.date).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}</div>` : ''}
+    </div>
+    ${prices.deals.length > 1 ? html`
+      <h3 class="buy-subhead">All PC prices</h3>
+      <div class="deal-list">
+        ${prices.deals.map((d) => html`
+          <a class="deal" href="${d.url}" target="_blank" rel="noopener noreferrer">
+            <span class="deal-store">${d.store}</span>
+            <span class="deal-price">
+              ${d.savings >= 1 ? html`<s>${money(d.retailPrice)}</s>` : ''}
+              <strong>${d.price === 0 ? 'Free' : money(d.price)}</strong>
+            </span>
+          </a>`)}
+      </div>` : ''}
+    <p class="fine-print">PC prices in US dollars from CheapShark, updated hourly.</p>`;
 }
 
 export async function gameView(app, id, params) {
@@ -38,18 +73,20 @@ export async function gameView(app, id, params) {
 
   mount(app, html`
     <section class="game-hero">
-      ${game.backdrop || game.image
-        ? html`<div class="hero-bg" data-bg="${game.backdrop || game.image}"></div>`
-        : html`<div class="hero-bg" data-hue="${hueFor(game.name)}"></div>`}
-      <div class="hero-shade"></div>
+      <div class="hero-media">
+        ${game.backdrop || game.image
+          ? html`<div class="hero-bg" data-bg="${game.backdrop || game.image}"></div>`
+          : html`<div class="hero-bg" data-hue="${hueFor(game.name)}"></div>`}
+        <div class="hero-shade"></div>
+      </div>
       <div class="hero-content">
-        <h1 class="hero-title">${game.name}</h1>
+        ${titleArt(game)}
         <div class="hero-meta">
           <span>${year(game.released)}</span>
           ${game.genres.slice(0, 3).map((g) => html`<span class="dot">${g}</span>`)}
-          ${game.community.count ? html`<span class="dot">${game.community.count} on GameShelf</span>` : ''}
+          ${game.community.count ? html`<span class="dot">${game.community.count} ${game.community.count === 1 ? 'player' : 'players'} here</span>` : ''}
         </div>
-        ${listControls(game)}
+        ${listActions(game)}
       </div>
     </section>
 
@@ -70,21 +107,21 @@ export async function gameView(app, id, params) {
             <h2>Players on GameShelf</h2>
             ${game.community.players.length
               ? html`<div class="chip-list">${game.community.players.map((p) => userChip(p, statusBadge(p.status)))}</div>`
-              : html`<p class="muted">Nobody has added this game yet. Be the first.</p>`}
+              : html`<p class="muted">No one has added this yet.</p>`}
           </section>
         </div>
 
-        <aside class="glass buy-card" id="buy">
-          <h2>${icon('bag')} Where to buy</h2>
-          <p class="muted small">GameShelf doesn't sell games. These buttons open the official stores.</p>
-          ${game.buy.links.length
-            ? html`<div class="store-list">${game.buy.links.map((l) => html`
-                <a class="store" href="${l.url}" target="_blank" rel="noopener noreferrer">
-                  <span class="store-name">${l.name}<small>${l.direct ? 'Store page' : 'Search store'}</small></span>
-                  ${icon('external')}
-                </a>`)}</div>`
-            : html`<p class="muted">We don't know which stores carry this game yet.</p>`}
-          <a class="btn btn-glass btn-block" href="${game.buy.compareUrl}" target="_blank" rel="noopener noreferrer">Compare prices ${icon('external')}</a>
+        <aside class="buy-card" id="buy">
+          <h2>Where to buy</h2>
+          <div id="prices"><div class="sk sk-line wide"></div><div class="sk sk-line"></div></div>
+          ${game.buy.links.length ? html`
+            <h3 class="buy-subhead">Stores</h3>
+            <div class="store-list">${game.buy.links.map((l) => html`
+              <a class="store" href="${l.url}" target="_blank" rel="noopener noreferrer">
+                <span>${l.name}</span>
+                <span class="store-kind">${l.direct ? 'Store page' : 'Search'} ${icon('external')}</span>
+              </a>`)}</div>` : ''}
+          <a class="text-link small" href="${game.buy.compareUrl}" target="_blank" rel="noopener noreferrer">Compare on IsThereAnyDeal ${icon('external')}</a>
         </aside>
       </div>
 
@@ -94,38 +131,70 @@ export async function gameView(app, id, params) {
   enableRows(app);
   if (params.get('section') === 'buy') document.getElementById('buy').scrollIntoView({ block: 'center' });
 
-  if (!document.getElementById('list-controls')) return;
+  // Prices come from a separate, slower service, so they load after the page.
+  api(`/games/${encodeURIComponent(game.id)}/prices`)
+    .catch(() => null)
+    .then((prices) => {
+      const el = document.getElementById('prices');
+      if (el) mount(el, priceSection(prices));
+    });
+
+  if (!document.getElementById('list-actions')) return;
+
+  // Clicking anywhere else closes the list menu.
+  const closeMenus = () => document.querySelectorAll('#list-menu').forEach((m) => {
+    m.hidden = true;
+    document.getElementById('list-button')?.setAttribute('aria-expanded', 'false');
+  });
+  document.addEventListener('click', closeMenus);
+  onLeave(() => document.removeEventListener('click', closeMenus));
 
   const save = async (body, message) => {
     try {
       const { entry } = await api(`/me/library/${encodeURIComponent(game.id)}`, { method: 'PUT', body });
       game.myEntry = entry;
-      document.getElementById('list-controls').outerHTML = listControls(game).value;
-      wire();
+      rerender();
       toast(message);
     } catch (err) {
       toast(err.message, { error: true });
     }
   };
 
+  function rerender() {
+    const el = document.getElementById('list-actions');
+    el.outerHTML = listActions(game).value;
+    wire();
+  }
+
   function wire() {
-    const el = document.getElementById('list-controls');
-    el.querySelectorAll('[data-status]').forEach((b) => b.addEventListener('click', () =>
-      save({ status: b.dataset.status, rating: game.myEntry?.rating ?? null }, `Marked as ${STATUS_LABELS[b.dataset.status]}`)));
-    el.querySelectorAll('[data-rating]').forEach((b) => b.addEventListener('click', () => {
-      const n = Number(b.dataset.rating);
-      // Clicking your current rating again clears it.
-      const rating = game.myEntry?.rating === n ? null : n;
-      save({ status: game.myEntry.status, rating }, rating ? `Rated ${rating}/10` : 'Rating cleared');
+    const el = document.getElementById('list-actions');
+    const button = el.querySelector('#list-button');
+    const menu = el.querySelector('#list-menu');
+    const close = closeMenus;
+    button.addEventListener('click', (e) => {
+      e.stopPropagation();
+      menu.hidden = !menu.hidden;
+      button.setAttribute('aria-expanded', String(!menu.hidden));
+    });
+
+    menu.querySelectorAll('[data-status]').forEach((b) => b.addEventListener('click', () => {
+      close();
+      save({ status: b.dataset.status, rating: game.myEntry?.rating ?? null }, `Moved to ${STATUS_LABELS[b.dataset.status]}`);
     }));
-    el.querySelector('#remove-entry')?.addEventListener('click', async () => {
+    menu.querySelector('#remove-entry')?.addEventListener('click', async () => {
+      close();
       await api(`/me/library/${encodeURIComponent(game.id)}`, { method: 'DELETE' });
       game.myEntry = null;
-      el.outerHTML = listControls(game).value;
-      wire();
+      rerender();
       toast('Removed from your list');
     });
+
+    wireStarInput(el.querySelector('.star-input'), (n) => {
+      // Picking your current rating again clears it. Rating a game that isn't
+      // on your list yet adds it as Played.
+      const rating = game.myEntry?.rating === n ? null : n;
+      save({ status: game.myEntry?.status || 'played', rating }, rating ? `Rated ${starValue(rating)} stars` : 'Rating cleared');
+    });
   }
-  // The controls are re-rendered after every change, so wire() looks them up fresh.
   wire();
 }

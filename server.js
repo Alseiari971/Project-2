@@ -10,8 +10,15 @@ const { openDatabase } = require('./src/db');
 const { loadUser } = require('./src/auth');
 const { createGameProvider } = require('./src/games');
 const { createApi } = require('./src/api');
+const { createPriceService } = require('./src/prices');
+const { createSteamService } = require('./src/steam');
 
-function createApp({ db = openDatabase(), games = createGameProvider() } = {}) {
+function createApp({
+  db = openDatabase(),
+  games = createGameProvider(),
+  prices = createPriceService(),
+  steam = createSteamService(),
+} = {}) {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', 'loopback');
@@ -29,7 +36,7 @@ function createApp({ db = openDatabase(), games = createGameProvider() } = {}) {
   // Large enough for a resized avatar image.
   app.use(express.json({ limit: '500kb' }));
   app.use(loadUser(db));
-  app.use('/api', createApi({ db, games }));
+  app.use('/api', createApi({ db, games, prices, steam }));
   app.use(express.static(path.join(__dirname, 'public')));
 
   app.use((err, _req, res, _next) => {
@@ -51,6 +58,9 @@ if (require.main === module) {
     console.log(`GameShelf running at http://localhost:${port}`);
     if (games.name === 'local') {
       console.log('Using the built-in sample catalog. Set RAWG_API_KEY to search every game (see README).');
+    }
+    if (!process.env.STEAM_API_KEY) {
+      console.log('Steam import is off. Set STEAM_API_KEY to turn it on (see README).');
     }
   });
 }
