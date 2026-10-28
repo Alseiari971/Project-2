@@ -233,3 +233,34 @@ test('profile comments can be deleted by the author or the profile owner', async
   assert.equal((await client()('/api/users/frank')).body.comments.length, 0);
   assert.equal((await client()('/api/users/frank/comments', { method: 'POST', body: { body: 'hi' } })).status, 401);
 });
+
+test('RAWG games sold on Steam get official poster and logo art', async () => {
+  const responses = {
+    '/api/games': {
+      count: 2,
+      next: null,
+      results: [
+        { id: 4200, slug: 'portal-2', name: 'Portal 2', background_image: 'https://media.rawg.io/p2.jpg', stores: [{ store: { id: 1, slug: 'steam' } }] },
+        { id: 99, slug: 'zelda', name: 'Zelda', background_image: 'https://media.rawg.io/z.jpg', stores: [{ store: { id: 6, slug: 'nintendo' } }] },
+      ],
+    },
+    '/api/games/4200/stores': { results: [{ store_id: 1, url: 'https://store.steampowered.com/app/620/' }] },
+  };
+  const requested = [];
+  const fakeFetch = async (url) => {
+    requested.push(url.pathname);
+    const body = responses[url.pathname];
+    return { ok: Boolean(body), status: body ? 200 : 404, json: async () => body };
+  };
+  const rawg = createRawgProvider('test-key', { fetchImpl: fakeFetch });
+  const { results } = await rawg.search({});
+  await rawg.addSteamArt(results);
+
+  const [portal, zelda] = results;
+  assert.equal(portal.poster, 'https://cdn.cloudflare.steamstatic.com/steam/apps/620/library_600x900.jpg');
+  assert.equal(portal.logo, 'https://cdn.cloudflare.steamstatic.com/steam/apps/620/logo.png');
+  assert.equal(portal.image, 'https://media.rawg.io/p2.jpg');
+  // Not on Steam: no poster, and no wasted request to look one up.
+  assert.equal(zelda.poster, null);
+  assert.ok(!requested.includes('/api/games/99/stores'));
+});

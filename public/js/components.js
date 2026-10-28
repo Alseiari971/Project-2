@@ -1,5 +1,5 @@
 // Reusable pieces of UI shared by several pages.
-import { html, raw, hueFor, year, gameHref, profileHref, STATUS_LABELS, applyStyles } from './lib.js';
+import { html, raw, hueFor, year, gameHref, profileHref, STATUS_LABELS, applyStyles, mount } from './lib.js';
 import { icon } from './icons.js';
 
 /** Game artwork, or a colored title card when there is no image. */
@@ -72,12 +72,29 @@ export function gameTile(game, { badge = '', caption = true } = {}) {
     </a>`;
 }
 
+/**
+ * A poster card for games without official poster art: the full wide image
+ * over a blurred copy of itself, with the title underneath. Never a bad crop.
+ */
+function composedPoster(game) {
+  return html`
+    <div class="poster-composed">
+      ${game.image ? html`<span class="poster-blur" data-bg="${game.image}"></span><img class="poster-shot" src="${game.image}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}
+      <span class="poster-title">${game.name}</span>
+      ${game.released ? html`<span class="poster-year">${year(game.released)}</span>` : ''}
+    </div>`;
+}
+
 /** Tall poster with a big rank number, for the Top 10 row. */
 export function rankTile(game, rank) {
   return html`
     <a class="rank-tile" href="${gameHref(game.id)}" title="${game.name}">
       <span class="rank" aria-hidden="true">${rank}</span>
-      <div class="poster">${art(game, 'tile-art', game.poster || game.image)}</div>
+      <div class="poster" data-name="${game.name}" data-image="${game.image || ''}" data-year="${game.released || ''}">
+        ${game.poster
+          ? html`<img class="poster-art" src="${game.poster}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+          : composedPoster(game)}
+      </div>
     </a>`;
 }
 
@@ -187,6 +204,14 @@ document.addEventListener('error', (e) => {
     const heading = img.parentElement;
     heading.classList.remove('has-logo');
     img.replaceWith(document.createTextNode(img.alt));
+    return;
+  }
+
+  // Missing official poster: build a poster card from the game's wide image.
+  if (img.classList.contains('poster-art')) {
+    const poster = img.parentElement;
+    const { name, image, year: released } = poster.dataset;
+    mount(poster, composedPoster({ name, image: image || null, released: released || null }));
     return;
   }
 

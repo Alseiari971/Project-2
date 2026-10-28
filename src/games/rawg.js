@@ -3,8 +3,12 @@
 const { RAWG_STORE_KEYS, buildBuyLinks } = require('./stores');
 const { findGenre } = require('./genres');
 const { normalizeTitle } = require('../text');
+const { steamArt } = require('./steam-art');
 
 const MATCH_CONCURRENCY = 5;
+const STEAM_STORE_ID = 1;
+
+const steamAppIdFromUrl = (url) => Number(/store\.steampowered\.com\/app\/(\d+)/.exec(url || '')?.[1]) || null;
 
 const BASE_URL = 'https://api.rawg.io/api';
 const CACHE_TTL_MS = 10 * 60 * 1000;
@@ -14,6 +18,8 @@ const isoDate = (d) => d.toISOString().slice(0, 10);
 
 function createRawgProvider(apiKey, { fetchImpl = fetch } = {}) {
   const cache = new Map();
+  // RAWG's numeric id for each slug, and whether the game is sold on Steam, learned from search results.
+  const seen = new Map();
 
   async function request(path, params = {}) {
     const url = new URL(BASE_URL + path);
@@ -36,6 +42,7 @@ function createRawgProvider(apiKey, { fetchImpl = fetch } = {}) {
   }
 
   function toSummary(g) {
+    seen.set(g.slug, { rawgId: g.id, onSteam: (g.stores || []).some((s) => s.store.id === STEAM_STORE_ID) });
     return {
       // Slugs are stable and readable, and RAWG accepts them anywhere an id is expected.
       id: g.slug,
@@ -43,7 +50,7 @@ function createRawgProvider(apiKey, { fetchImpl = fetch } = {}) {
       released: g.released || null,
       image: g.background_image || null,
       backdrop: g.background_image_additional || g.background_image || null,
-      // RAWG has no logo or poster art; the site falls back to text and cropped images.
+      // RAWG has no logo or poster art. addSteamArt fills these in for games sold on Steam.
       logo: null,
       poster: null,
       genres: (g.genres || []).map((x) => x.name),
@@ -89,6 +96,27 @@ function createRawgProvider(apiKey, { fetchImpl = fetch } = {}) {
       };
     },
 
+    /**
+     * Swaps in official Steam artwork (poster, logo) for games that are sold on
+     * Steam. Costs one cached request per game, so only use it on short lists
+     * like the home page banner and Top 10.
+     */
+    async addSteamArt(games) {
+      await Promise.all(games.map(async (game) => {
+        const info = seen.get(game.id);
+        if (!info?.onSteam || game.poster) return;
+        try {
+          const stores = await request(`/games/${info.rawgId}/stores`);
+          const steam = stores?.results.find((s) => s.store_id === STEAM_STORE_ID);
+          const appId = steamAppIdFromUrl(steam?.url);
+          if (appId) Object.assign(game, { ...steamArt(appId), image: game.image, backdrop: game.backdrop });
+        } catch (err) {
+          console.error(`Could not load Steam art for ${game.id}:`, err.message);
+        }
+      }));
+      return games;
+    },
+
     // Matches Steam games to RAWG by exact title, a few lookups at a time.
     // Returns a summary or null for each game, in the same order.
     async matchSteamGames(steamGames) {
@@ -126,10 +154,13 @@ function createRawgProvider(apiKey, { fetchImpl = fetch } = {}) {
       // RAWG doesn't expose Steam app IDs directly, but the Steam store link contains one.
       const steamStore = (game.stores || []).find((s) => s.store.slug === 'steam');
       const steamUrl = steamStore && urlByStoreId.get(steamStore.store.id);
-      const steamAppId = Number(/store\.steampowered\.com\/app\/(\d+)/.exec(steamUrl || '')?.[1]) || null;
+      const steamAppId = steamAppIdFromUrl(steamUrl);
+      const art = steamAppId ? steamArt(steamAppId) : {};
 
       return {
         ...toSummary(game),
+        logo: art.logo || null,
+        poster: art.poster || null,
         steamAppId,
         developers: (game.developers || []).map((d) => d.name),
         publishers: (game.publishers || []).map((p) => p.name),

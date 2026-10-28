@@ -2,21 +2,20 @@
 // app works out of the box. Add a RAWG key to unlock every game in the world.
 const path = require('node:path');
 const { buildBuyLinks } = require('./stores');
+const { steamArt } = require('./steam-art');
 
 const catalog = require(path.join(__dirname, '..', '..', 'data', 'games.json'));
-
-const steamAsset = (appId, file) => `https://cdn.cloudflare.steamstatic.com/steam/apps/${appId}/${file}`;
 
 function toSummary(game) {
   return {
     id: game.id,
     name: game.name,
     released: game.released,
-    image: game.steamAppId ? steamAsset(game.steamAppId, 'capsule_616x353.jpg') : null,
-    backdrop: game.steamAppId ? steamAsset(game.steamAppId, 'library_hero.jpg') : null,
-    // Transparent title artwork, shown instead of plain text on big banners.
-    logo: game.steamAppId ? steamAsset(game.steamAppId, 'logo.png') : null,
-    poster: game.steamAppId ? steamAsset(game.steamAppId, 'library_600x900.jpg') : null,
+    image: null,
+    backdrop: null,
+    logo: null,
+    poster: null,
+    ...(game.steamAppId ? steamArt(game.steamAppId) : {}),
     genres: game.genres,
     platforms: game.platforms,
     description: game.description,
@@ -42,6 +41,11 @@ function createLocalProvider() {
         hasMore: start + pageSize < matches.length,
         results: matches.slice(start, start + pageSize).map(toSummary),
       };
+    },
+
+    // The catalog already uses official Steam artwork.
+    async addSteamArt(games) {
+      return games;
     },
 
     // Matches Steam games to the catalog by Steam app ID. Returns a summary or null for each.

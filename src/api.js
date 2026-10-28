@@ -13,6 +13,7 @@ const {
 const { GENRES, findGenre } = require('./games/genres');
 const profile = require('./profile');
 const { SteamError } = require('./steam');
+const { steamArt } = require('./games/steam-art');
 
 const STATUSES = ['playing', 'completed', 'played', 'want', 'dropped'];
 const USERNAME_RE = /^[a-zA-Z0-9_]{3,20}$/;
@@ -163,6 +164,9 @@ function createApi({ db, games, prices, steam }) {
     }
 
     const featured = results[0].results.filter((g) => g.backdrop).slice(0, 6);
+    // Official posters and logos for the banner and Top 10, where artwork matters most.
+    // The same objects appear in the rows, so they pick up the art too.
+    await games.addSteamArt([...new Set([...featured, ...results[0].results.slice(0, 10)])]);
 
     // Each genre card borrows art from a game we already loaded, so this costs no extra requests.
     const loaded = results.flatMap((r) => r.results);
@@ -401,13 +405,14 @@ function createApi({ db, games, prices, steam }) {
         const item = byAppId.get(Number(pick?.appid));
         if (!item || !STATUSES.includes(pick.status)) continue;
         const g = item.match;
+        const art = steamArt(item.appid);
         q.importEntry.run({
           userId: req.user.id,
           gameId: g.id,
           name: g.name,
           image: g.image,
           backdrop: g.backdrop,
-          logo: g.logo,
+          logo: g.logo || art.logo,
           genres: JSON.stringify(g.genres),
           status: pick.status,
           playtime: item.playtime,
