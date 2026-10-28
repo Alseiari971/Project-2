@@ -259,8 +259,19 @@ test('RAWG games sold on Steam get official poster and logo art', async () => {
   const [portal, zelda] = results;
   assert.equal(portal.poster, 'https://cdn.cloudflare.steamstatic.com/steam/apps/620/library_600x900.jpg');
   assert.equal(portal.logo, 'https://cdn.cloudflare.steamstatic.com/steam/apps/620/logo.png');
-  assert.equal(portal.image, 'https://media.rawg.io/p2.jpg');
+  // Steam's store banner has the title in the art; RAWG's image stays as a fallback.
+  assert.equal(portal.image, 'https://cdn.cloudflare.steamstatic.com/steam/apps/620/capsule_616x353.jpg');
+  assert.equal(portal.fallbackImage, 'https://media.rawg.io/p2.jpg');
+  assert.equal(portal.artHasTitle, true);
   // Not on Steam: no poster, and no wasted request to look one up.
   assert.equal(zelda.poster, null);
+  assert.equal(zelda.artHasTitle, false);
   assert.ok(!requested.includes('/api/games/99/stores'));
+
+  // The Steam ID is remembered, so the next page load needs no extra request.
+  const before = requested.filter((p) => p.endsWith('/stores')).length;
+  const again = await rawg.search({ page: 2 });
+  await rawg.addSteamArt(again.results);
+  assert.equal(requested.filter((p) => p.endsWith('/stores')).length, before);
+  assert.equal(again.results[0].poster, portal.poster);
 });

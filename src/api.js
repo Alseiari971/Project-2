@@ -164,9 +164,9 @@ function createApi({ db, games, prices, steam }) {
     }
 
     const featured = results[0].results.filter((g) => g.backdrop).slice(0, 6);
-    // Official posters and logos for the banner and Top 10, where artwork matters most.
-    // The same objects appear in the rows, so they pick up the art too.
-    await games.addSteamArt([...new Set([...featured, ...results[0].results.slice(0, 10)])]);
+    // Official Steam store art for every game on the page. The same objects
+    // appear in several rows, so de-duplicate first.
+    await games.addSteamArt([...new Set(results.flatMap((r) => r.results))]);
 
     // Each genre card borrows art from a game we already loaded, so this costs no extra requests.
     const loaded = results.flatMap((r) => r.results);
@@ -186,6 +186,7 @@ function createApi({ db, games, prices, steam }) {
     if (req.query.genre && !genre) return res.status(400).json({ error: 'Unknown genre.' });
     const sort = SORTS.includes(req.query.sort) ? req.query.sort : 'popular';
     const data = await games.search({ query, genre, sort, page });
+    await games.addSteamArt(data.results);
     res.json({ ...data, page, source: games.name });
   }));
 
@@ -202,6 +203,7 @@ function createApi({ db, games, prices, steam }) {
       try {
         const data = await games.search({ genre: genre.name, pageSize: 13 });
         similar = data.results.filter((g) => g.id !== game.id).slice(0, 12);
+        await games.addSteamArt(similar);
       } catch (err) {
         console.error('Could not load similar games:', err.message);
       }
@@ -410,7 +412,8 @@ function createApi({ db, games, prices, steam }) {
           userId: req.user.id,
           gameId: g.id,
           name: g.name,
-          image: g.image,
+          // We know the exact Steam app, so use its store banner.
+          image: art.image,
           backdrop: g.backdrop,
           logo: g.logo || art.logo,
           genres: JSON.stringify(g.genres),

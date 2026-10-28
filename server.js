@@ -15,7 +15,7 @@ const { createSteamService } = require('./src/steam');
 
 function createApp({
   db = openDatabase(),
-  games = createGameProvider(),
+  games = createGameProvider(process.env.RAWG_API_KEY, { db }),
   prices = createPriceService(),
   steam = createSteamService(),
 } = {}) {
@@ -53,8 +53,9 @@ function createApp({
 
 if (require.main === module) {
   const port = Number(process.env.PORT) || 3000;
-  const games = createGameProvider();
-  createApp({ games }).listen(port, () => {
+  const db = openDatabase();
+  const games = createGameProvider(process.env.RAWG_API_KEY, { db });
+  createApp({ db, games }).listen(port, () => {
     console.log(`GameShelf running at http://localhost:${port}`);
     if (games.name === 'local') {
       console.log('Using the built-in sample catalog. Set RAWG_API_KEY to search every game (see README).');

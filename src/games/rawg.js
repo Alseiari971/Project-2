@@ -16,7 +16,15 @@ const CACHE_MAX = 500;
 
 const isoDate = (d) => d.toISOString().slice(0, 10);
 
-function createRawgProvider(apiKey, { fetchImpl = fetch } = {}) {
+// Fallback when no database is passed in (tests): remembers Steam IDs in memory.
+function memoryStore() {
+  const map = new Map();
+  return { get: (id) => map.get(id), set: (id, appId) => map.set(id, appId) };
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function createRawgProvider(apiKey, { fetchImpl = fetch, steamIds = memoryStore() } = {}) {
   const cache = new Map();
   // RAWG's numeric id for each slug, and whether the game is sold on Steam, learned from search results.
   const seen = new Map();
@@ -50,9 +58,11 @@ function createRawgProvider(apiKey, { fetchImpl = fetch } = {}) {
       released: g.released || null,
       image: g.background_image || null,
       backdrop: g.background_image_additional || g.background_image || null,
-      // RAWG has no logo or poster art. addSteamArt fills these in for games sold on Steam.
+      // RAWG has no logo or poster art, and its images are screenshots without the
+      // title. addSteamArt swaps in Steam's store art for games sold on Steam.
       logo: null,
       poster: null,
+      artHasTitle: false,
       genres: (g.genres || []).map((x) => x.name),
       platforms: (g.parent_platforms || g.platforms || []).map((p) => p.platform.name),
       description: g.description_raw || null,
@@ -97,23 +107,44 @@ function createRawgProvider(apiKey, { fetchImpl = fetch } = {}) {
     },
 
     /**
-     * Swaps in official Steam artwork (poster, logo) for games that are sold on
-     * Steam. Costs one cached request per game, so only use it on short lists
-     * like the home page banner and Top 10.
+     * Swaps in Steam's official store art (banner with the title, poster, logo)
+     * for games sold on Steam. Each game's Steam ID is looked up once and saved
+     * for good. Waits at most `budgetMs`; slower lookups finish in the background
+     * and show up on the next page load.
      */
-    async addSteamArt(games) {
-      await Promise.all(games.map(async (game) => {
+    async addSteamArt(games, { budgetMs = 1500 } = {}) {
+      const apply = (game, appId) => {
+        // Keep RAWG's wide background for banners, and its image as a fallback.
+        const { backdrop } = game;
+        Object.assign(game, steamArt(appId), { backdrop, fallbackImage: game.image, steamAppId: appId });
+      };
+      const unknown = [];
+      for (const game of games) {
         const info = seen.get(game.id);
-        if (!info?.onSteam || game.poster) return;
-        try {
-          const stores = await request(`/games/${info.rawgId}/stores`);
-          const steam = stores?.results.find((s) => s.store_id === STEAM_STORE_ID);
-          const appId = steamAppIdFromUrl(steam?.url);
-          if (appId) Object.assign(game, { ...steamArt(appId), image: game.image, backdrop: game.backdrop });
-        } catch (err) {
-          console.error(`Could not load Steam art for ${game.id}:`, err.message);
+        if (!info?.onSteam || game.artHasTitle) continue;
+        const known = steamIds.get(game.id);
+        if (known === undefined) unknown.push({ game, rawgId: info.rawgId });
+        else if (known) apply(game, known);
+      }
+      if (!unknown.length) return games;
+
+      let next = 0;
+      const worker = async () => {
+        while (next < unknown.length) {
+          const { game, rawgId } = unknown[next++];
+          try {
+            const stores = await request(`/games/${rawgId}/stores`);
+            const steam = stores?.results.find((s) => s.store_id === STEAM_STORE_ID);
+            const appId = steamAppIdFromUrl(steam?.url);
+            steamIds.set(game.id, appId);
+            if (appId) apply(game, appId);
+          } catch (err) {
+            console.error(`Could not look up Steam art for ${game.id}:`, err.message);
+          }
         }
-      }));
+      };
+      const all = Promise.all(Array.from({ length: MATCH_CONCURRENCY }, worker));
+      await Promise.race([all, sleep(budgetMs)]);
       return games;
     },
 
@@ -155,12 +186,15 @@ function createRawgProvider(apiKey, { fetchImpl = fetch } = {}) {
       const steamStore = (game.stores || []).find((s) => s.store.slug === 'steam');
       const steamUrl = steamStore && urlByStoreId.get(steamStore.store.id);
       const steamAppId = steamAppIdFromUrl(steamUrl);
-      const art = steamAppId ? steamArt(steamAppId) : {};
+      if (steamAppId) steamIds.set(game.slug, steamAppId);
+      const summary = toSummary(game);
+      const art = steamAppId
+        ? { ...steamArt(steamAppId), backdrop: summary.backdrop, fallbackImage: summary.image }
+        : {};
 
       return {
-        ...toSummary(game),
-        logo: art.logo || null,
-        poster: art.poster || null,
+        ...summary,
+        ...art,
         steamAppId,
         developers: (game.developers || []).map((d) => d.name),
         publishers: (game.publishers || []).map((p) => p.name),

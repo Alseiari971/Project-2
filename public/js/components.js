@@ -5,9 +5,14 @@ import { icon } from './icons.js';
 /** Game artwork, or a colored title card when there is no image. */
 export function art(game, cls = 'tile-art', src = game.image) {
   return src
-    ? html`<img class="${cls}" src="${src}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+    ? html`<img class="${cls}" src="${src}" alt="" loading="lazy" referrerpolicy="no-referrer" ${game.fallbackImage ? html`data-fallback="${game.fallbackImage}"` : ''}>`
     : html`<div class="${cls} art-fallback" data-hue="${hueFor(game.name)}"><span>${game.name}</span></div>`;
 }
+
+// Steam store banners have the title built in. Saved list entries don't carry
+// the artHasTitle flag, so recognise those banners by their address.
+const STEAM_BANNER = /steamstatic\.com\/steam\/apps\/\d+\/(capsule_616x353|header)\.jpg/;
+const hasTitleArt = (game) => Boolean(game.image) && (game.artHasTitle ?? STEAM_BANNER.test(game.image));
 
 /**
  * The game's logo artwork when we have it, otherwise its name as text.
@@ -62,10 +67,12 @@ export function gameTile(game, { badge = '', caption = true } = {}) {
     game.released !== undefined ? year(game.released) : null,
     game.genres?.length ? game.genres.slice(0, 2).join(', ') : null,
   ].filter(Boolean).join(' · ');
+  // Screenshots without the game's name get the title laid over them, like streaming apps do.
   return html`
     <a class="tile" href="${gameHref(id)}" title="${game.name}">
-      <div class="tile-frame">
+      <div class="tile-frame ${hasTitleArt(game) ? '' : 'needs-title'}">
         ${art(game)}
+        ${game.image ? html`<span class="tile-overlay-title" aria-hidden="true">${game.name}</span>` : ''}
         ${badge}
       </div>
       ${caption ? html`<div class="tile-caption"><div class="tile-title">${game.name}</div>${meta ? html`<div class="tile-meta">${meta}</div>` : ''}</div>` : ''}
@@ -212,6 +219,14 @@ document.addEventListener('error', (e) => {
     const poster = img.parentElement;
     const { name, image, year: released } = poster.dataset;
     mount(poster, composedPoster({ name, image: image || null, released: released || null }));
+    return;
+  }
+
+  // Steam banner missing: use the game's other image, with the title laid over it.
+  if (img.dataset.fallback) {
+    img.src = img.dataset.fallback;
+    delete img.dataset.fallback;
+    img.closest('.tile-frame')?.classList.add('needs-title');
     return;
   }
 

@@ -8,6 +8,8 @@ function steamArt(appId) {
     // Transparent title artwork, shown instead of plain text on big banners.
     logo: asset(appId, 'logo.png'),
     poster: asset(appId, 'library_600x900.jpg'),
+    // Steam's store banners have the game's title built into the artwork.
+    artHasTitle: true,
   };
 }
 

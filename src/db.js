@@ -78,10 +78,31 @@ function openDatabase(file = process.env.DB_FILE || path.join(__dirname, '..', '
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS comments_profile ON comments(profile_id, id);
+
+    -- Which Steam app each RAWG game is (NULL = checked, not on Steam). This never
+    -- changes, so each game is looked up once, ever, to save the RAWG request quota.
+    CREATE TABLE IF NOT EXISTS steam_ids (
+      game_id    TEXT PRIMARY KEY,
+      app_id     INTEGER,
+      checked_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   migrate(db);
   return db;
 }
 
-module.exports = { openDatabase };
+/** Key-value store for steam_ids: get() is undefined when never checked, null when not on Steam. */
+function steamIdStore(db) {
+  const get = db.prepare('SELECT app_id FROM steam_ids WHERE game_id = ?');
+  const set = db.prepare('INSERT OR REPLACE INTO steam_ids (game_id, app_id) VALUES (?, ?)');
+  return {
+    get: (gameId) => {
+      const row = get.get(gameId);
+      return row ? row.app_id : undefined;
+    },
+    set: (gameId, appId) => set.run(gameId, appId),
+  };
+}
+
+module.exports = { openDatabase, steamIdStore };

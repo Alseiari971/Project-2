@@ -28,3 +28,13 @@ test('upgrades a database from the first version without losing data', () => {
   assert.equal(db.prepare('SELECT game_genres FROM library').get().game_genres, '[]');
   db.close();
 });
+
+test('remembers Steam IDs, including games that are not on Steam', () => {
+  const { steamIdStore } = require('../src/db');
+  const store = steamIdStore(openDatabase(':memory:'));
+  assert.equal(store.get('portal-2'), undefined);
+  store.set('portal-2', 620);
+  store.set('zelda', null);
+  assert.equal(store.get('portal-2'), 620);
+  assert.equal(store.get('zelda'), null);
+});
