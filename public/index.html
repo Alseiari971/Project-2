@@ -2,29 +2,30 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0a0a0c">
   <title>GameShelf</title>
   <meta name="description" content="Discover every game, find where to buy it, and share the games you've played.">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css">
-  <script src="/app.js" defer></script>
+  <link rel="stylesheet" href="/css/styles.css">
+  <script type="module" src="/js/main.js"></script>
 </head>
 <body>
-  <header class="topbar">
+  <header class="topbar" id="topbar">
     <div class="topbar-inner">
-      <a href="#/" class="logo">Game<span>Shelf</span></a>
-      <form class="search" id="search-form" role="search">
-        <input type="search" id="search-input" placeholder="Search any game…" aria-label="Search games" autocomplete="off">
-      </form>
-      <nav class="nav" id="nav"></nav>
+      <a href="#/" class="logo" aria-label="GameShelf home">Game<span>Shelf</span></a>
+      <nav class="nav-links" id="nav-links" aria-label="Main"></nav>
+      <div class="nav-right" id="nav-right"></div>
     </div>
   </header>
 
-  <main id="app" class="container" tabindex="-1"></main>
+  <main id="app" tabindex="-1"></main>
 
   <footer class="footer">
-    GameShelf doesn't sell games. Store buttons take you to the official stores.
-    <span id="data-credit"></span>
+    <p>GameShelf doesn't sell games. Store buttons take you to the official stores.</p>
+    <p id="data-credit"></p>
   </footer>
+
+  <nav class="tabbar glass" id="tabbar" aria-label="Main"></nav>
 </body>
 </html>

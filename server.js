@@ -26,7 +26,8 @@ function createApp({ db = openDatabase(), games = createGameProvider() } = {}) {
     next();
   });
 
-  app.use(express.json({ limit: '20kb' }));
+  // Large enough for a resized avatar image.
+  app.use(express.json({ limit: '500kb' }));
   app.use(loadUser(db));
   app.use('/api', createApi({ db, games }));
   app.use(express.static(path.join(__dirname, 'public')));

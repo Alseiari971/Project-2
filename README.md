@@ -4,7 +4,14 @@ Look up any game in the world, see where to buy it, and keep a public list of th
 
 - **Every game:** search and browse 500,000+ games across PC, console and mobile (through the free [RAWG](https://rawg.io) database).
 - **We don't sell anything:** each game page has "Where to buy" buttons that link out to the real stores (Steam, Epic, GOG, PlayStation Store, Xbox, Nintendo eShop, itch.io, App Store, Google Play), plus a price-comparison link.
-- **Profiles:** sign up and add games to your list as *Playing*, *Completed*, *Played*, *Want to play* or *Dropped*, with an optional 1–10 rating. Anyone can view your profile at `#/u/<username>`, and each game page shows who on GameShelf has played it.
+- **Streaming-app look:** a rotating featured banner, scrolling rows by genre, and a bottom tab bar on phones.
+- **Steam-style profiles:** add games to your list as *Playing*, *Completed*, *Played*, *Want to play* or *Dropped* with a 1–10 rating, then customize your profile:
+  - an avatar (upload your own) with an animated frame
+  - a background, either a preset scene or art from any game on your list
+  - a theme color, a headline, a location and a bio
+  - up to 4 showcases: favorite game, a hand-picked collection, highest rated, completed games, stats or a custom text box
+  - levels, XP and badges earned from your list, plus a comment wall
+- Each game page shows who on GameShelf has played it.
 
 ## Run it
 
@@ -29,13 +36,17 @@ Out of the box the site uses a small built-in catalog of about 35 popular games,
 
 ```
 server.js            starts the website
-src/api.js           JSON API (games, accounts, lists, profiles)
+src/api.js           JSON API (games, accounts, lists, profiles, comments)
+src/profile.js       profile customization, levels and badges
 src/auth.js          passwords, login sessions
-src/db.js            SQLite database (saved to data/gameshelf.db)
+src/db.js            SQLite database (saved to data/gameshelf.db, upgraded automatically)
 src/games/rawg.js    the RAWG game database (every game)
 src/games/local.js   built-in sample catalog (data/games.json)
 src/games/stores.js  "where to buy" store links
-public/              the website (HTML, CSS, JavaScript)
+src/games/genres.js  genres you can browse by
+public/css/          the stylesheet
+public/js/main.js    navigation and page routing
+public/js/views/     one file per page (home, browse, game, profile, edit profile, community, log in)
 test/                automated tests: npm test
 ```
 
@@ -45,16 +56,21 @@ The website talks to the server only through this JSON API, so a phone app can r
 
 | Method | Path | What it does |
 | --- | --- | --- |
-| GET | `/api/games?search=&page=` | Search or browse games |
+| GET | `/api/home` | Featured games and rows for the home screen |
+| GET | `/api/games?search=&genre=&sort=&page=` | Search or browse games (`sort`: popular, new, top) |
 | GET | `/api/games/:id` | Game details, store links, who's played it |
 | POST | `/api/auth/register` | `{ username, password }` |
 | POST | `/api/auth/login` | `{ username, password }` |
 | POST | `/api/auth/logout` | |
 | GET | `/api/me` | The logged-in user (or `null`) |
-| PATCH | `/api/me` | `{ displayName, bio }` |
+| PATCH | `/api/me` | `{ displayName, headline, bio, country, avatarFrame, background, accent, showcases }` |
+| PUT | `/api/me/avatar` | `{ image }` as a JPEG/PNG/WebP data URL |
+| DELETE | `/api/me/avatar` | Removes your avatar |
 | PUT | `/api/me/library/:gameId` | `{ status, rating }` adds or updates a game on your list |
 | DELETE | `/api/me/library/:gameId` | Removes a game from your list |
 | GET | `/api/users?search=` | Find people |
-| GET | `/api/users/:username` | A profile and their game list |
+| GET | `/api/users/:username` | A profile: game list, showcases, level, badges, comments |
+| POST | `/api/users/:username/comments` | `{ body }` leaves a comment on a profile |
+| DELETE | `/api/comments/:id` | Deletes a comment (its author or the profile owner) |
 
 Logins use a cookie session. A native mobile app would most likely switch to token auth (an `Authorization` header), which is a small change in `src/auth.js`.

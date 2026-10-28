@@ -1,0 +1,99 @@
+import { html, api, mount, state, year, gameHref, onLeave, hueFor } from '../lib.js';
+import { gameTile, libraryTile, row, enableRows } from '../components.js';
+import { icon } from '../icons.js';
+
+const SLIDE_MS = 7000;
+
+function hero(featured) {
+  return html`
+    <section class="hero" aria-roledescription="carousel" aria-label="Featured games">
+      ${featured.map((g, i) => html`
+        <div class="hero-slide ${i === 0 ? 'active' : ''}" aria-hidden="${i === 0 ? 'false' : 'true'}">
+          <div class="hero-bg" data-bg="${g.backdrop}"></div>
+          <div class="hero-shade"></div>
+          <div class="hero-content">
+            <div class="eyebrow">Featured</div>
+            <h1 class="hero-title">${g.name}</h1>
+            <div class="hero-meta">
+              <span>${year(g.released)}</span>
+              ${g.genres.slice(0, 3).map((x) => html`<span class="dot">${x}</span>`)}
+            </div>
+            ${g.description ? html`<p class="hero-desc">${g.description}</p>` : ''}
+            <div class="hero-actions">
+              <a class="btn btn-light btn-lg" href="${gameHref(g.id)}">${icon('info')} View game</a>
+              <a class="btn btn-glass btn-lg" href="${gameHref(g.id)}?section=buy">${icon('bag')} Where to buy</a>
+            </div>
+          </div>
+        </div>`)}
+      <div class="hero-dots" role="tablist">
+        ${featured.map((g, i) => html`<button class="${i === 0 ? 'active' : ''}" type="button" aria-label="Show ${g.name}" data-slide="${i}"></button>`)}
+      </div>
+    </section>`;
+}
+
+function startCarousel(root) {
+  const slides = [...root.querySelectorAll('.hero-slide')];
+  const dots = [...root.querySelectorAll('.hero-dots button')];
+  if (slides.length < 2) return;
+  let current = 0;
+  const show = (i) => {
+    slides[current].classList.remove('active');
+    slides[current].setAttribute('aria-hidden', 'true');
+    dots[current].classList.remove('active');
+    current = (i + slides.length) % slides.length;
+    slides[current].classList.add('active');
+    slides[current].setAttribute('aria-hidden', 'false');
+    dots[current].classList.add('active');
+  };
+  let timer = setInterval(() => show(current + 1), SLIDE_MS);
+  dots.forEach((dot) => dot.addEventListener('click', () => {
+    clearInterval(timer);
+    show(Number(dot.dataset.slide));
+    timer = setInterval(() => show(current + 1), SLIDE_MS);
+  }));
+  onLeave(() => clearInterval(timer));
+}
+
+export async function homeView(app) {
+  const [home, mine] = await Promise.all([
+    api('/home'),
+    state.user ? api(`/users/${encodeURIComponent(state.user.username)}`).catch(() => null) : null,
+  ]);
+
+  const personalRows = [];
+  if (mine) {
+    const playing = mine.library.filter((e) => e.status === 'playing');
+    const want = mine.library.filter((e) => e.status === 'want');
+    if (playing.length) personalRows.push(row({ title: 'Continue playing', items: playing.map(libraryTile) }));
+    if (want.length) personalRows.push(row({ title: 'Your wishlist', items: want.map(libraryTile) }));
+  }
+
+  const gameRows = home.rows.map((r) => row({
+    title: r.title,
+    href: r.genre ? `#/browse?genre=${encodeURIComponent(r.genre)}` : r.id === 'community' ? null : `#/browse?sort=${r.id === 'new' ? 'new' : 'popular'}`,
+    items: r.games.map((g) => gameTile(g, {
+      badge: g.players ? html`<div class="tile-badges"><span class="status">${g.players} ${g.players === 1 ? 'player' : 'players'}</span></div>` : '',
+    })),
+  }));
+
+  mount(app, html`
+    ${home.featured.length ? hero(home.featured) : html`<div class="page-spacer"></div>`}
+    <div class="rows ${home.featured.length ? 'over-hero' : ''}">
+      ${home.source === 'local' ? html`
+        <div class="notice">
+          ${icon('info')}
+          <span>You're browsing the built-in sample catalog. Add a free RAWG API key to unlock every game in the world. See the README.</span>
+        </div>` : ''}
+      ${personalRows}
+      ${gameRows}
+      <section class="row">
+        <div class="row-head"><h2>Browse by genre</h2></div>
+        <div class="genre-grid">
+          ${home.genres.map((g) => html`<a class="genre-card" data-hue="${hueFor(g)}" href="#/browse?genre=${encodeURIComponent(g)}">${g}</a>`)}
+        </div>
+      </section>
+    </div>
+  `);
+  enableRows(app);
+  startCarousel(app);
+}

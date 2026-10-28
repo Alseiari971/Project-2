@@ -130,3 +130,105 @@ test('RAWG provider maps games and store links', async () => {
   assert.deepEqual(game.buy.links.map((l) => [l.store, l.direct]), [['steam', true], ['playstation', false]]);
   assert.equal(await rawg.getGame('missing'), null);
 });
+
+test('home screen has a featured carousel and rows', async () => {
+  const { status, body } = await client()('/api/home');
+  assert.equal(status, 200);
+  assert.ok(body.featured.length > 0);
+  assert.ok(body.featured.every((g) => g.backdrop));
+  assert.ok(body.rows.some((r) => r.id === 'trending'));
+  assert.ok(body.rows.some((r) => r.genre === 'RPG'));
+
+  const rpg = await client()('/api/games?genre=rpg');
+  assert.ok(rpg.body.results.length > 0);
+  assert.ok(rpg.body.results.every((g) => g.genres.includes('RPG')));
+  assert.equal((await client()('/api/games?genre=nonsense')).status, 400);
+
+  const game = await client()('/api/games/hollow-knight');
+  assert.ok(game.body.similar.length > 0);
+  assert.ok(!game.body.similar.some((g) => g.id === 'hollow-knight'));
+});
+
+test('customize a profile with showcases, background, frame and accent', async () => {
+  const dana = client();
+  await dana('/api/auth/register', { method: 'POST', body: { username: 'dana', password: 'password123' } });
+  await dana('/api/me/library/elden-ring', { method: 'PUT', body: { status: 'completed', rating: 10 } });
+  await dana('/api/me/library/celeste', { method: 'PUT', body: { status: 'played', rating: 8 } });
+
+  const saved = await dana('/api/me', {
+    method: 'PATCH',
+    body: {
+      headline: 'Souls-like addict',
+      country: 'Dubai, UAE',
+      avatarFrame: 'fire',
+      background: 'game:elden-ring',
+      accent: '#ef4444',
+      showcases: [
+        { type: 'favorite', gameId: 'elden-ring' },
+        { type: 'collection', title: 'Hard but fair', gameIds: ['celeste', 'elden-ring'] },
+        { type: 'toprated' },
+        { type: 'info', title: 'Setup', text: 'PC + Steam Deck' },
+      ],
+    },
+  });
+  assert.equal(saved.status, 200);
+
+  const { body } = await client()('/api/users/dana');
+  assert.equal(body.user.headline, 'Souls-like addict');
+  assert.equal(body.user.avatarFrame, 'fire');
+  assert.equal(body.background.image, 'https://cdn.cloudflare.steamstatic.com/steam/apps/1245620/library_hero.jpg');
+  assert.deepEqual(body.showcases.map((s) => s.type), ['favorite', 'collection', 'toprated', 'info']);
+  assert.equal(body.showcases[0].game.name, 'Elden Ring');
+  assert.deepEqual(body.showcases[1].games.map((g) => g.gameId), ['celeste', 'elden-ring']);
+  assert.deepEqual(body.showcases[2].games.map((g) => g.rating), [10, 8]);
+  assert.equal(body.stats.averageRating, 9);
+  assert.ok(body.progression.level >= 2);
+  assert.ok(body.progression.badges.find((b) => b.id === 'curator').earned);
+
+  const bad = async (patch) => (await dana('/api/me', { method: 'PATCH', body: patch })).status;
+  assert.equal(await bad({ accent: '#123456' }), 400);
+  assert.equal(await bad({ avatarFrame: 'sparkles' }), 400);
+  assert.equal(await bad({ background: 'javascript:alert(1)' }), 400);
+  assert.equal(await bad({ showcases: [{ type: 'stats' }, { type: 'stats' }, { type: 'stats' }, { type: 'stats' }, { type: 'stats' }] }), 400);
+  assert.equal(await bad({ showcases: [{ type: 'evil' }] }), 400);
+});
+
+test('avatar upload checks the image bytes', async () => {
+  const erin = client();
+  await erin('/api/auth/register', { method: 'POST', body: { username: 'erin', password: 'password123' } });
+  // Smallest valid PNG: 1×1 transparent pixel.
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+  const ok = await erin('/api/me/avatar', { method: 'PUT', body: { image: `data:image/png;base64,${png}` } });
+  assert.equal(ok.status, 200);
+  assert.match(ok.body.user.avatarUrl, /^\/api\/users\/erin\/avatar\?v=1$/);
+
+  const res = await fetch(baseUrl + ok.body.user.avatarUrl);
+  assert.equal(res.headers.get('content-type'), 'image/png');
+
+  const fake = Buffer.from('<script>alert(1)</script>').toString('base64');
+  assert.equal((await erin('/api/me/avatar', { method: 'PUT', body: { image: `data:image/png;base64,${fake}` } })).status, 400);
+});
+
+test('profile comments can be deleted by the author or the profile owner', async () => {
+  const frank = client();
+  const gina = client();
+  await frank('/api/auth/register', { method: 'POST', body: { username: 'frank', password: 'password123' } });
+  await gina('/api/auth/register', { method: 'POST', body: { username: 'gina', password: 'password123' } });
+
+  const posted = await gina('/api/users/frank/comments', { method: 'POST', body: { body: 'Nice list!' } });
+  assert.equal(posted.status, 201);
+  const second = await gina('/api/users/frank/comments', { method: 'POST', body: { body: 'Play Hades!' } });
+
+  const profile = await client()('/api/users/frank');
+  assert.deepEqual(profile.body.comments.map((c) => c.body), ['Play Hades!', 'Nice list!']);
+  assert.equal(profile.body.comments[0].author.username, 'gina');
+  assert.equal(profile.body.comments[0].id, second.body.comment.id);
+
+  const stranger = client();
+  await stranger('/api/auth/register', { method: 'POST', body: { username: 'harry', password: 'password123' } });
+  assert.equal((await stranger(`/api/comments/${posted.body.comment.id}`, { method: 'DELETE' })).status, 403);
+  assert.equal((await frank(`/api/comments/${posted.body.comment.id}`, { method: 'DELETE' })).status, 200);
+  assert.equal((await gina(`/api/comments/${second.body.comment.id}`, { method: 'DELETE' })).status, 200);
+  assert.equal((await client()('/api/users/frank')).body.comments.length, 0);
+  assert.equal((await client()('/api/users/frank/comments', { method: 'POST', body: { body: 'hi' } })).status, 401);
+});

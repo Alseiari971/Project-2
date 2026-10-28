@@ -5,16 +5,18 @@ const { buildBuyLinks } = require('./stores');
 
 const catalog = require(path.join(__dirname, '..', '..', 'data', 'games.json'));
 
-const steamImage = (appId) => `https://cdn.cloudflare.steamstatic.com/steam/apps/${appId}/header.jpg`;
+const steamAsset = (appId, file) => `https://cdn.cloudflare.steamstatic.com/steam/apps/${appId}/${file}`;
 
 function toSummary(game) {
   return {
     id: game.id,
     name: game.name,
     released: game.released,
-    image: game.steamAppId ? steamImage(game.steamAppId) : null,
+    image: game.steamAppId ? steamAsset(game.steamAppId, 'capsule_616x353.jpg') : null,
+    backdrop: game.steamAppId ? steamAsset(game.steamAppId, 'library_hero.jpg') : null,
     genres: game.genres,
     platforms: game.platforms,
+    description: game.description,
   };
 }
 
@@ -22,11 +24,15 @@ function createLocalProvider() {
   return {
     name: 'local',
 
-    async search({ query = '', page = 1, pageSize = 24 }) {
+    // sort: 'popular' (catalog order), 'new' (newest first) or 'top' (no
+    // ratings in the sample catalog, so the same as popular).
+    async search({ query = '', genre = '', sort = 'popular', page = 1, pageSize = 24 }) {
       const q = query.trim().toLowerCase();
-      const matches = catalog
-        .filter((g) => !q || g.name.toLowerCase().includes(q) || g.genres.some((x) => x.toLowerCase() === q))
-        .sort((a, b) => b.released.localeCompare(a.released));
+      const g = genre.toLowerCase();
+      let matches = catalog.filter((x) =>
+        (!q || x.name.toLowerCase().includes(q)) &&
+        (!g || x.genres.some((name) => name.toLowerCase() === g)));
+      if (sort === 'new') matches = [...matches].sort((a, b) => b.released.localeCompare(a.released));
       const start = (page - 1) * pageSize;
       return {
         count: matches.length,
@@ -44,7 +50,6 @@ function createLocalProvider() {
       }));
       return {
         ...toSummary(game),
-        description: game.description,
         developers: game.developers || [],
         publishers: [],
         website: null,
