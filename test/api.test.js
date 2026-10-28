@@ -277,28 +277,40 @@ test('RAWG games sold on Steam get official poster and logo art', async () => {
 });
 
 test('RAWG search drops fan-made entries and puts the real game first', async () => {
-  const epic = [{ store: { id: 11, slug: 'epic-games' } }];
+  // Real RAWG numbers for "fortnite" (added = users who have it on a list).
+  const store = (...ids) => ids.map((id) => ({ store: { id } }));
+  const pages = {
+    fortnite: [
+      { id: 1, slug: 'fortnite-save-the-world', name: 'Fortnite: Save The World', added: 2916, stores: store(3, 2, 4, 6, 11), background_image: 'a.jpg' },
+      { id: 2, slug: 'fortnite', name: 'Fortnite Battle Royale', added: 5393, stores: store(3, 2, 4, 6, 11), background_image: 'b.jpg' },
+      { id: 3, slug: 'fortnite-fan', name: 'Fortnite', added: 139, stores: store(9), background_image: 'c.jpg' },
+      { id: 4, slug: 'lego-fortnite', name: 'LEGO Fortnite', added: 64, stores: store(11), background_image: 'd.jpg' },
+      { id: 5, slug: 'fortnite-looping', name: 'Fortnite Looping', added: 774, stores: store(9), background_image: 'e.jpg' },
+      { id: 6, slug: 'fortnite-platformer', name: 'Fortnite - Platformer', added: 8, stores: store(9), background_image: 'f.jpg' },
+      { id: 7, slug: 'fortnite-vbucks', name: 'Fortnite VBucks', added: 0, stores: store(4), background_image: 'g.jpg' },
+      { id: 8, slug: 'fortnite-festival', name: 'Fortnite Festival', added: 5, stores: [], background_image: 'h.jpg' },
+    ],
+    // A classic with no store listed, but very popular, must survive.
+    mario: [
+      { id: 10, slug: 'super-mario-odyssey', name: 'Super Mario Odyssey', added: 4000, stores: store(6), background_image: 'm.jpg' },
+      { id: 11, slug: 'super-mario-bros', name: 'Super Mario Bros.', added: 900, stores: [], background_image: 'n.jpg' },
+      { id: 12, slug: 'mario-fan', name: 'Mario Fan Game', added: 600, stores: store(9), background_image: 'o.jpg' },
+    ],
+    // Small searches keep the basic rule: real stores or 30+ adds.
+    tinyindie: [
+      { id: 20, slug: 'tiny-indie', name: 'Tiny Indie', added: 45, stores: store(9), background_image: 'p.jpg' },
+      { id: 21, slug: 'tiny-indie-fan', name: 'Tiny Indie Remix', added: 2, stores: store(9), background_image: 'q.jpg' },
+    ],
+  };
   const fakeFetch = async (url) => {
     assert.equal(url.searchParams.get('exclude_additions'), 'true');
-    const body = {
-      count: 83,
-      next: null,
-      results: [
-        { id: 1, slug: 'fortnite-save-the-world', name: 'Fortnite: Save The World', added: 900, stores: epic, background_image: 'a.jpg' },
-        { id: 2, slug: 'fortnite-but-bad', name: 'Fortnite..... But Bad', added: 3, stores: [], background_image: 'b.jpg' },
-        { id: 3, slug: 'fortnite', name: 'Fortnite', added: 14000, stores: epic, background_image: 'c.jpg' },
-        { id: 4, slug: 'fortnite-userjasneet', name: 'Fortnite (UserJasneet)', added: 0, stores: [{ store: { id: 9, slug: 'itch' } }], background_image: 'd.jpg' },
-        { id: 5, slug: 'lego-fortnite', name: 'LEGO Fortnite', added: 400, stores: [], background_image: 'e.jpg' },
-        // Cash-in mobile apps: on Google Play, but hardly anyone has them.
-        { id: 6, slug: 'fortnite-vbucks', name: 'Fortnite VBucks', added: 40, stores: [{ store: { id: 8, slug: 'google-play' } }], background_image: 'f.jpg' },
-        { id: 7, slug: 'chest-sim', name: 'Chest Sim for Fortnite', added: 160, stores: [{ store: { id: 4, slug: 'apple-appstore' } }], background_image: 'g.jpg' },
-        // Unpopular but sold on a major store: kept.
-        { id: 8, slug: 'fortnite-tycoon', name: 'Fortnite Tycoon', added: 12, stores: [{ store: { id: 1, slug: 'steam' } }], background_image: 'h.jpg' },
-      ],
-    };
+    const body = { count: 99, next: null, results: pages[url.searchParams.get('search')] };
     return { ok: true, status: 200, json: async () => body };
   };
   const rawg = createRawgProvider('test-key', { fetchImpl: fakeFetch });
-  const { results } = await rawg.search({ query: 'fortnite' });
-  assert.deepEqual(results.map((g) => g.name), ['Fortnite', 'Fortnite: Save The World', 'LEGO Fortnite', 'Fortnite Tycoon']);
+  const names = async (query) => (await rawg.search({ query })).results.map((g) => g.name);
+
+  assert.deepEqual(await names('fortnite'), ['Fortnite Battle Royale', 'Fortnite: Save The World', 'LEGO Fortnite']);
+  assert.deepEqual(await names('mario'), ['Super Mario Odyssey', 'Super Mario Bros.']);
+  assert.deepEqual(await names('tinyindie'), ['Tiny Indie']);
 });

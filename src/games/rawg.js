@@ -27,13 +27,15 @@ function isRealGame(g) {
   return added >= MIN_ADDED;
 }
 
-// When a search matches a big game, results with under 1% of its popularity are
-// almost always knock-offs ("Chest Sim for Fortnite"), unless a major store sells
-// them. Phone-only apps are where most knock-offs live, so they need 5%.
-const RELATIVE_CUTOFF = 0.01;
-const MOBILE_RELATIVE_CUTOFF = 0.05;
+// When a search matches a big game, everything else must be sold on a major
+// store, have review scores, or be at least 5% as popular as that game. Real
+// data for "fortnite": the real game has 5,393 adds and is on every console
+// store, while fan uploads on itch.io go up to 774 adds, so itch.io-only games
+// never pass on popularity alone.
 const BIG_GAME_ADDED = 2000;
-const mobileOnly = (g) => !onMajorStore(g) && storeIds(g).some((id) => MOBILE_STORE_IDS.has(id));
+const RELATIVE_CUTOFF = 0.05;
+const ITCH_STORE_ID = 9;
+const itchOnly = (g) => storeIds(g).length > 0 && storeIds(g).every((id) => id === ITCH_STORE_ID);
 
 const steamAppIdFromUrl = (url) => Number(/store\.steampowered\.com\/app\/(\d+)/.exec(url || '')?.[1]) || null;
 
@@ -136,8 +138,8 @@ function createRawgProvider(apiKey, { fetchImpl = fetch, steamIds = memoryStore(
         const rank = (g) => (normalizeTitle(g.name) === target ? 1 : 0);
         const top = Math.max(0, ...results.map((g) => g.added || 0));
         if (top >= BIG_GAME_ADDED) {
-          results = results.filter((g) => rank(g) || onMajorStore(g) || g.metacritic ||
-            (g.added || 0) >= top * (mobileOnly(g) ? MOBILE_RELATIVE_CUTOFF : RELATIVE_CUTOFF));
+          results = results.filter((g) => onMajorStore(g) || g.metacritic ||
+            (!itchOnly(g) && (g.added || 0) >= top * RELATIVE_CUTOFF));
         }
         results = results
           .map((g, i) => ({ g, i }))
