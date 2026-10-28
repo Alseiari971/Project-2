@@ -138,6 +138,7 @@ test('home screen has a featured carousel and rows', async () => {
   assert.ok(body.featured.every((g) => g.backdrop));
   assert.ok(body.rows.some((r) => r.id === 'trending'));
   assert.ok(body.rows.some((r) => r.genre === 'RPG'));
+  assert.ok(body.genres.find((g) => g.name === 'RPG').image);
 
   const rpg = await client()('/api/games?genre=rpg');
   assert.ok(rpg.body.results.length > 0);

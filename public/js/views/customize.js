@@ -1,6 +1,6 @@
 // "Edit profile" page, modeled on Steam's profile editor: general info, avatar
 // and frame, background, theme color and showcases, with a live preview.
-import { html, api, mount, state, refreshMe, toast, hueFor, profileHref, onLeave, runCleanups } from '../lib.js';
+import { html, api, mount, state, refreshMe, toast, hueFor, profileHref, onLeave, runCleanups, textColorOn } from '../lib.js';
 import { avatar } from '../components.js';
 import { icon } from '../icons.js';
 
@@ -144,7 +144,7 @@ export async function customizeView(app) {
       <div class="add-buttons">
         ${options.showcaseTypes.map((type) => html`
           <button type="button" class="btn btn-quiet btn-sm" data-add="${type}" ${draft.showcases.length >= options.maxShowcases ? html`disabled` : ''}>
-            ${icon('plus')} ${SHOWCASE_INFO[type].name}
+            ${SHOWCASE_INFO[type].name}
           </button>`)}
       </div>
     </div>`;
@@ -153,7 +153,7 @@ export async function customizeView(app) {
     <div class="avatar-edit">
       ${avatar(previewUser(), 'xl')}
       <div class="avatar-actions">
-        <label class="btn btn-accent">${icon('upload')} Upload image<input type="file" id="avatar-file" accept="image/*" hidden></label>
+        <label class="btn btn-accent">Upload image<input type="file" id="avatar-file" accept="image/*" hidden></label>
         ${state.user.avatarUrl ? html`<button type="button" class="btn btn-quiet" id="avatar-remove">Remove</button>` : ''}
         <p class="muted small">Square images look best. We crop and resize it for you.</p>
       </div>
@@ -196,11 +196,11 @@ export async function customizeView(app) {
       <div class="preview" id="preview">${preview()}</div>
       <div class="customize-layout">
         <nav class="side-nav">
-          <a href="#general">${icon('user')} General</a>
-          <a href="#avatar">${icon('image')} Avatar</a>
-          <a href="#background">${icon('layers')} Background</a>
-          <a href="#theme">${icon('sparkle')} Theme</a>
-          <a href="#showcases">${icon('trophy')} Showcases</a>
+          <a href="#general">General</a>
+          <a href="#avatar">Avatar</a>
+          <a href="#background">Background</a>
+          <a href="#theme">Theme color</a>
+          <a href="#showcases">Showcases</a>
         </nav>
         <div class="customize-sections">
           <section class="panel" id="general">
@@ -235,6 +235,7 @@ export async function customizeView(app) {
   function changed({ sections = [] } = {}) {
     mount($('preview'), preview());
     root.style.setProperty('--accent', draft.accent);
+    root.style.setProperty('--on-accent', textColorOn(draft.accent));
     for (const s of sections) refresh(`${s}-section`, { avatar: avatarSection, background: backgroundSection, theme: themeSection, showcases: showcasesSection }[s]);
     $('save-bar').classList.toggle('show', isDirty());
   }

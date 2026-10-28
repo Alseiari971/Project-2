@@ -1,6 +1,5 @@
-import { html, api, mount, state, year, gameHref, onLeave, hueFor } from '../lib.js';
+import { html, api, mount, state, year, gameHref, onLeave } from '../lib.js';
 import { gameTile, libraryTile, rankTile, row, enableRows, titleArt } from '../components.js';
-import { icon } from '../icons.js';
 
 const SLIDE_MS = 8000;
 
@@ -20,7 +19,7 @@ function hero(featured) {
             ${g.description ? html`<p class="hero-desc">${g.description}</p>` : ''}
             <div class="hero-actions">
               <a class="btn btn-light btn-lg" href="${gameHref(g.id)}">More info</a>
-              <a class="btn btn-quiet btn-lg" href="${gameHref(g.id)}?section=buy">${icon('bag')} Where to buy</a>
+              <a class="btn btn-quiet btn-lg" href="${gameHref(g.id)}?section=buy">Where to buy</a>
             </div>
           </div>
         </div>`)}
@@ -86,12 +85,16 @@ export async function homeView(app) {
       <section class="row">
         <div class="row-head"><h2>Browse by genre</h2></div>
         <div class="genre-grid">
-          ${home.genres.map((g) => html`<a class="genre-card" data-hue="${hueFor(g)}" href="#/browse?genre=${encodeURIComponent(g)}">${g}</a>`)}
+          ${home.genres.map((g) => html`
+            <a class="genre-card" href="#/browse?genre=${encodeURIComponent(g.name)}">
+              ${g.image ? html`<span class="genre-art" data-bg="${g.image}"></span>` : ''}
+              <span class="genre-name">${g.name}</span>
+            </a>`)}
         </div>
       </section>
       ${home.source === 'local' ? html`
         <p class="catalog-note">
-          ${icon('info')} This is a 35-game sample catalog. Add a free RAWG API key (see the README) to search all 500,000+ games.
+          This is a 35-game sample catalog. Add a free RAWG API key (see the README) to search all 500,000+ games.
         </p>` : ''}
     </div>
   `);

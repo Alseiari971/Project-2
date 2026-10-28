@@ -18,6 +18,8 @@ const STATUSES = ['playing', 'completed', 'played', 'want', 'dropped'];
 const USERNAME_RE = /^[a-zA-Z0-9_]{3,20}$/;
 const GAME_ID_RE = /^[a-z0-9][a-z0-9-]{0,149}$/;
 const SORTS = ['popular', 'new', 'top'];
+// New profiles start with the site's own orange rather than a stock blue.
+const DEFAULT_ACCENT = '#f97316';
 // Big Steam libraries are capped to the most-played games to keep matching quick.
 const STEAM_IMPORT_MAX = 300;
 const PREVIEW_TTL_MS = 30 * 60 * 1000;
@@ -66,7 +68,7 @@ function createApi({ db, games, prices, steam }) {
   const q = {
     userByName: db.prepare('SELECT * FROM users WHERE username = ?'),
     userById: db.prepare('SELECT * FROM users WHERE id = ?'),
-    insertUser: db.prepare('INSERT INTO users (username, display_name, password_hash) VALUES (?, ?, ?)'),
+    insertUser: db.prepare('INSERT INTO users (username, display_name, password_hash, accent) VALUES (?, ?, ?, ?)'),
     updateProfile: db.prepare(`
       UPDATE users SET display_name = @displayName, headline = @headline, bio = @bio, country = @country,
         avatar_frame = @avatarFrame, background = @background, accent = @accent, showcases = @showcases
@@ -161,7 +163,16 @@ function createApi({ db, games, prices, steam }) {
     }
 
     const featured = results[0].results.filter((g) => g.backdrop).slice(0, 6);
-    res.json({ source: games.name, featured, rows, genres: GENRES.map((g) => g.name) });
+
+    // Each genre card borrows art from a game we already loaded, so this costs no extra requests.
+    const loaded = results.flatMap((r) => r.results);
+    const used = new Set();
+    const genres = GENRES.map(({ name }) => {
+      const game = loaded.find((g) => g.genres.includes(name) && (g.backdrop || g.image) && !used.has(g.id));
+      if (game) used.add(game.id);
+      return { name, image: game ? game.backdrop || game.image : null };
+    });
+    res.json({ source: games.name, featured, rows, genres });
   }));
 
   api.get('/games', asyncRoute(async (req, res) => {
@@ -218,7 +229,7 @@ function createApi({ db, games, prices, steam }) {
     const username = String(req.body?.username || '').trim();
     const password = String(req.body?.password || '');
     if (!USERNAME_RE.test(username)) {
-      return res.status(400).json({ error: 'Username must be 3–20 characters: letters, numbers or underscores.' });
+      return res.status(400).json({ error: 'Usernames need 3 to 20 letters, numbers or underscores.' });
     }
     if (password.length < 8 || password.length > 200) {
       return res.status(400).json({ error: 'Password must be at least 8 characters.' });
@@ -226,7 +237,7 @@ function createApi({ db, games, prices, steam }) {
     if (q.userByName.get(username)) {
       return res.status(409).json({ error: 'That username is taken.' });
     }
-    const { lastInsertRowid } = q.insertUser.run(username, username, hashPassword(password));
+    const { lastInsertRowid } = q.insertUser.run(username, username, hashPassword(password), DEFAULT_ACCENT);
     createSession(db, res, lastInsertRowid);
     res.status(201).json({ user: publicUser(q.userByName.get(username)) });
   });
@@ -283,7 +294,7 @@ function createApi({ db, games, prices, steam }) {
     };
 
     if (!update.displayName || update.displayName.length > 40) {
-      return res.status(400).json({ error: 'Display name must be 1–40 characters.' });
+      return res.status(400).json({ error: 'Display names can be up to 40 characters.' });
     }
     if (update.headline.length > 60) return res.status(400).json({ error: 'Headline must be 60 characters or less.' });
     if (update.bio.length > 600) return res.status(400).json({ error: 'Bio must be 600 characters or less.' });
@@ -464,7 +475,7 @@ function createApi({ db, games, prices, steam }) {
     const target = q.userByName.get(req.params.username);
     if (!target) return res.status(404).json({ error: 'User not found.' });
     const body = String(req.body?.body || '').trim();
-    if (!body || body.length > 500) return res.status(400).json({ error: 'Comments must be 1–500 characters.' });
+    if (!body || body.length > 500) return res.status(400).json({ error: 'Comments can be up to 500 characters.' });
     const { lastInsertRowid } = q.insertComment.run(target.id, req.user.id, body);
     const c = q.commentById.get(lastInsertRowid);
     res.status(201).json({

@@ -1,6 +1,5 @@
 import { html, api, mount, state, STATUS_LABELS, timeAgo, parseDbTime, gameHref, profileHref, toast } from '../lib.js';
 import { avatar, libraryTile, levelBadge, statusBadge, emptyState, titleArt, stars, starValue, formatHours } from '../components.js';
-import { icon } from '../icons.js';
 
 const SHOWCASE_TITLES = {
   favorite: 'Favorite game',
@@ -27,7 +26,7 @@ function statBlocks(stats) {
       <div><strong>${stats.games}</strong><span>Games</span></div>
       <div><strong>${stats.completed}</strong><span>Completed</span></div>
       ${stats.hours ? html`<div><strong>${stats.hours.toLocaleString()}</strong><span>Hours played</span></div>` : ''}
-      <div><strong>${stats.averageRating ? starValue(stats.averageRating) : '–'}</strong><span>Avg stars</span></div>
+      ${stats.averageRating ? html`<div><strong>${starValue(stats.averageRating)}</strong><span>Avg stars</span></div>` : ''}
       <div><strong>${stats.completionRate}%</strong><span>Completion rate</span></div>
       <div><strong>${stats.genres}</strong><span>Genres</span></div>
     </div>`;
@@ -84,7 +83,7 @@ function commentItem(c, profileUser) {
         <div class="comment-head">
           <a href="${profileHref(c.author.username)}"><strong>${c.author.displayName}</strong></a>
           <span class="muted small">${timeAgo(c.createdAt)}</span>
-          ${canDelete ? html`<button class="link-btn" type="button" data-delete-comment="${c.id}" aria-label="Delete comment">${icon('trash')}</button>` : ''}
+          ${canDelete ? html`<button class="link-btn" type="button" data-delete-comment="${c.id}">Delete</button>` : ''}
         </div>
         <p>${c.body}</p>
       </div>
@@ -130,7 +129,7 @@ export async function profileView(app, username, params) {
             ${user.headline ? html`<div class="headline">${user.headline}</div>` : ''}
             <div class="profile-sub">
               <span>@${user.username}</span>
-              ${user.country ? html`<span>${icon('pin')}${user.country}</span>` : ''}
+              ${user.country ? html`<span>${user.country}</span>` : ''}
               <span>Joined ${joined}</span>
             </div>
             ${user.bio ? html`<p class="bio">${user.bio}</p>` : ''}
@@ -143,7 +142,7 @@ export async function profileView(app, username, params) {
               ${isMe
                 ? html`<a class="btn btn-accent" href="#/customize">Edit profile</a>`
                 : ''}
-              <button class="btn btn-quiet" type="button" id="share">${icon('link')} Copy link</button>
+              <button class="btn btn-quiet" type="button" id="share">Copy link</button>
             </div>
           </div>
         </header>
@@ -200,7 +199,7 @@ export async function profileView(app, username, params) {
               <ul class="side-stats">
                 <li><span>Games</span><strong>${stats.games}</strong></li>
                 ${Object.entries(STATUS_LABELS).map(([k, label]) => html`<li><span>${label}</span><strong>${stats[k]}</strong></li>`)}
-                <li><span>Average rating</span><strong>${stats.averageRating ? `${starValue(stats.averageRating)} ★` : '–'}</strong></li>
+                ${stats.averageRating ? html`<li><span>Average rating</span><strong>${starValue(stats.averageRating)} ★</strong></li>` : ''}
                 ${stats.hours ? html`<li><span>Hours played</span><strong>${stats.hours.toLocaleString()}</strong></li>` : ''}
               </ul>
             </section>

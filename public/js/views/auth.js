@@ -9,7 +9,7 @@ export async function authView(app, mode) {
     <div class="auth">
       <div class="auth-wall" aria-hidden="true">${art.map((g) => html`<div class="auth-tile" data-bg="${g.image}"></div>`)}</div>
       <div class="auth-shade"></div>
-      <form class="auth-card glass" id="auth-form">
+      <form class="auth-card" id="auth-form">
         <h1>${isLogin ? 'Welcome back' : 'Start your shelf'}</h1>
         <p class="muted">${isLogin ? 'Pick up where you left off.' : 'Log every game you play, rate them, and show your profile off.'}</p>
         <label>Username

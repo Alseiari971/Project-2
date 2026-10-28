@@ -77,7 +77,7 @@ The website talks to the server only through this JSON API, so a phone app can r
 | PATCH | `/api/me` | `{ displayName, headline, bio, country, avatarFrame, background, accent, showcases }` |
 | PUT | `/api/me/avatar` | `{ image }` as a JPEG/PNG/WebP data URL |
 | DELETE | `/api/me/avatar` | Removes your avatar |
-| PUT | `/api/me/library/:gameId` | `{ status, rating }` adds or updates a game on your list (rating 1–10 = half stars) |
+| PUT | `/api/me/library/:gameId` | `{ status, rating }` adds or updates a game on your list (rating 1 to 10, shown as half stars) |
 | DELETE | `/api/me/library/:gameId` | Removes a game from your list |
 | POST | `/api/me/import/steam/preview` | `{ profile }` reads a Steam library and matches the games |
 | POST | `/api/me/import/steam/commit` | `{ previewId, items: [{ appid, status }] }` adds the chosen games |

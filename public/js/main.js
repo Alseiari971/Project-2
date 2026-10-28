@@ -30,12 +30,13 @@ function renderNav(section) {
           <button class="menu-button" type="button" id="menu-button" aria-haspopup="true" aria-expanded="false" aria-label="Account menu">
             ${avatar(state.user)}
           </button>
-          <div class="menu-list glass" id="menu-list" hidden>
+          <div class="menu-list" id="menu-list" hidden>
             <div class="menu-user">${avatar(state.user)}<div><strong>${state.user.displayName}</strong><div class="muted small">@${state.user.username}</div></div></div>
-            <a href="${profileHref(state.user.username)}">${icon('user')} My profile</a>
-            <a href="#/customize">${icon('sliders')} Edit profile</a>
-            <a href="#/import">${icon('upload')} Import from Steam</a>
-            <button type="button" id="logout">${icon('logout')} Log out</button>
+            <a href="${profileHref(state.user.username)}">My profile</a>
+            <a href="#/customize">Edit profile</a>
+            <a href="#/import">Import from Steam</a>
+            <div class="menu-sep"></div>
+            <button type="button" id="logout">Log out</button>
           </div>
         </div>`
       : html`<a class="nav-login" href="#/login">Log in</a><a class="btn btn-light btn-sm" href="#/register">Join free</a>`}
@@ -93,7 +94,6 @@ async function route() {
   renderNav(currentSection);
   window.scrollTo(0, 0);
   mount(app, skeleton({ undefined: 'home', game: 'game' }[parts[0]] || 'page'));
-  app.classList.remove('view-in');
 
   try {
     switch (parts[0]) {
@@ -112,8 +112,6 @@ async function route() {
   } catch (err) {
     mount(app, html`<div class="page">${emptyState(err.status === 404 ? 'Not found' : 'Something went wrong', err.message, html`<a class="btn btn-light" href="#/">Go home</a>`)}</div>`);
   }
-  void app.offsetWidth; // restart the fade-in animation
-  app.classList.add('view-in');
   onScroll();
 }
 

@@ -19,7 +19,7 @@ function listActions(game) {
             <button type="button" role="menuitemradio" aria-checked="${entry?.status === value}" data-status="${value}">
               <span class="check">${entry?.status === value ? icon('check') : ''}</span>${label}
             </button>`)}
-          ${entry ? html`<div class="menu-sep"></div><button type="button" role="menuitem" class="danger" id="remove-entry">${icon('trash')} Remove from list</button>` : ''}
+          ${entry ? html`<div class="menu-sep"></div><button type="button" role="menuitem" class="danger" id="remove-entry">Remove from list</button>` : ''}
         </div>
       </div>
       <div class="rate">

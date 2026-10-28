@@ -39,7 +39,7 @@ export function mount(el, content) {
 export function applyStyles(root) {
   root.querySelectorAll('[data-hue]').forEach((el) => {
     const h = Number(el.dataset.hue);
-    el.style.backgroundImage = `linear-gradient(135deg, hsl(${h} 60% 32%), hsl(${(h + 60) % 360} 65% 16%))`;
+    el.style.backgroundColor = `hsl(${h} 28% 24%)`;
   });
   root.querySelectorAll('[data-bg]').forEach((el) => {
     if (!el.dataset.bg) return;
@@ -47,10 +47,21 @@ export function applyStyles(root) {
   });
   root.querySelectorAll('[data-accent]').forEach((el) => {
     el.style.setProperty('--accent', el.dataset.accent);
+    el.style.setProperty('--on-accent', textColorOn(el.dataset.accent));
   });
   root.querySelectorAll('[data-progress]').forEach((el) => {
     el.style.setProperty('--progress', el.dataset.progress);
   });
+}
+
+/** Black or white, whichever reads better on the given #rrggbb color (WCAG contrast). */
+export function textColorOn(hex) {
+  const channel = (i) => {
+    const c = parseInt(hex.slice(1 + i * 2, 3 + i * 2), 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  const lum = 0.2126 * channel(0) + 0.7152 * channel(1) + 0.0722 * channel(2);
+  return (lum + 0.05) / 0.05 >= 1.05 / (lum + 0.05) ? '#000' : '#fff';
 }
 
 // ---- API ----------------------------------------------------------------------
