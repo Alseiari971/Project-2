@@ -288,12 +288,17 @@ test('RAWG search drops fan-made entries and puts the real game first', async ()
         { id: 2, slug: 'fortnite-but-bad', name: 'Fortnite..... But Bad', added: 3, stores: [], background_image: 'b.jpg' },
         { id: 3, slug: 'fortnite', name: 'Fortnite', added: 14000, stores: epic, background_image: 'c.jpg' },
         { id: 4, slug: 'fortnite-userjasneet', name: 'Fortnite (UserJasneet)', added: 0, stores: [{ store: { id: 9, slug: 'itch' } }], background_image: 'd.jpg' },
-        { id: 5, slug: 'lego-fortnite', name: 'LEGO Fortnite', added: 120, stores: [], background_image: 'e.jpg' },
+        { id: 5, slug: 'lego-fortnite', name: 'LEGO Fortnite', added: 400, stores: [], background_image: 'e.jpg' },
+        // Cash-in mobile apps: on Google Play, but hardly anyone has them.
+        { id: 6, slug: 'fortnite-vbucks', name: 'Fortnite VBucks', added: 40, stores: [{ store: { id: 8, slug: 'google-play' } }], background_image: 'f.jpg' },
+        { id: 7, slug: 'chest-sim', name: 'Chest Sim for Fortnite', added: 160, stores: [{ store: { id: 4, slug: 'apple-appstore' } }], background_image: 'g.jpg' },
+        // Unpopular but sold on a major store: kept.
+        { id: 8, slug: 'fortnite-tycoon', name: 'Fortnite Tycoon', added: 12, stores: [{ store: { id: 1, slug: 'steam' } }], background_image: 'h.jpg' },
       ],
     };
     return { ok: true, status: 200, json: async () => body };
   };
   const rawg = createRawgProvider('test-key', { fetchImpl: fakeFetch });
   const { results } = await rawg.search({ query: 'fortnite' });
-  assert.deepEqual(results.map((g) => g.name), ['Fortnite', 'Fortnite: Save The World', 'LEGO Fortnite']);
+  assert.deepEqual(results.map((g) => g.name), ['Fortnite', 'Fortnite: Save The World', 'LEGO Fortnite', 'Fortnite Tycoon']);
 });

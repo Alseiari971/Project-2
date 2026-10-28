@@ -39,6 +39,10 @@ Copy `.env.example` to `.env`, fill in either key, and restart with `npm start`.
 
 Steam import only works for profiles whose **Game details** are set to Public in Steam's privacy settings. With the sample catalog, only games in that catalog can be matched; add a RAWG key to match everything.
 
+### Checking search results
+
+If a search shows odd games, `npm run search-debug -- <search words>` prints everything RAWG returned (popularity, stores) and which results GameShelf kept. It uses the RAWG key in your `.env`.
+
 ## Project layout
 
 ```
@@ -57,6 +61,7 @@ public/css/          the stylesheet
 public/fonts/        the Manrope font (SIL Open Font License)
 public/js/main.js    navigation and page routing
 public/js/views/     one file per page (home, browse, game, profile, edit profile, import, community, log in)
+scripts/             developer tools (search-debug)
 test/                automated tests: npm test
 ```
 

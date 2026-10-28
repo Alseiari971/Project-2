@@ -8,12 +8,32 @@ const { steamArt } = require('./steam-art');
 const MATCH_CONCURRENCY = 5;
 const STEAM_STORE_ID = 1;
 
-// RAWG lets anyone submit games, so searches turn up fan-made entries. A game
-// counts as real if a major store sells it (Steam, Xbox, PlayStation, App Store,
-// GOG, Nintendo, Xbox 360, Google Play, Epic) or enough RAWG users have added it.
-const OFFICIAL_STORE_IDS = new Set([1, 2, 3, 4, 5, 6, 7, 8, 11]);
+// RAWG lets anyone submit games, so searches turn up fan-made entries and
+// cash-in mobile apps. "added" is how many RAWG users have the game on a list.
+// RAWG store ids: Steam, Xbox Store, PlayStation Store, GOG, Nintendo, Xbox 360, Epic.
+const MAJOR_STORE_IDS = new Set([1, 2, 3, 5, 6, 7, 11]);
+// App Store and Google Play carry lots of knock-off apps, so they need more proof.
+const MOBILE_STORE_IDS = new Set([4, 8]);
 const MIN_ADDED = 30;
-const isRealGame = (g) => (g.added || 0) >= MIN_ADDED || (g.stores || []).some((s) => OFFICIAL_STORE_IDS.has(s.store.id));
+const MOBILE_MIN_ADDED = 150;
+
+const storeIds = (g) => (g.stores || []).map((s) => s.store.id);
+const onMajorStore = (g) => storeIds(g).some((id) => MAJOR_STORE_IDS.has(id));
+
+function isRealGame(g) {
+  if (onMajorStore(g)) return true;
+  const added = g.added || 0;
+  if (storeIds(g).some((id) => MOBILE_STORE_IDS.has(id))) return added >= MOBILE_MIN_ADDED;
+  return added >= MIN_ADDED;
+}
+
+// When a search matches a big game, results with under 1% of its popularity are
+// almost always knock-offs ("Chest Sim for Fortnite"), unless a major store sells
+// them. Phone-only apps are where most knock-offs live, so they need 5%.
+const RELATIVE_CUTOFF = 0.01;
+const MOBILE_RELATIVE_CUTOFF = 0.05;
+const BIG_GAME_ADDED = 2000;
+const mobileOnly = (g) => !onMajorStore(g) && storeIds(g).some((id) => MOBILE_STORE_IDS.has(id));
 
 const steamAppIdFromUrl = (url) => Number(/store\.steampowered\.com\/app\/(\d+)/.exec(url || '')?.[1]) || null;
 
@@ -114,6 +134,11 @@ function createRawgProvider(apiKey, { fetchImpl = fetch, steamIds = memoryStore(
         // An exact title match comes first, then the games most people have added.
         const target = normalizeTitle(q);
         const rank = (g) => (normalizeTitle(g.name) === target ? 1 : 0);
+        const top = Math.max(0, ...results.map((g) => g.added || 0));
+        if (top >= BIG_GAME_ADDED) {
+          results = results.filter((g) => rank(g) || onMajorStore(g) || g.metacritic ||
+            (g.added || 0) >= top * (mobileOnly(g) ? MOBILE_RELATIVE_CUTOFF : RELATIVE_CUTOFF));
+        }
         results = results
           .map((g, i) => ({ g, i }))
           .sort((a, b) => rank(b.g) - rank(a.g) || Boolean(b.g.background_image) - Boolean(a.g.background_image) ||
