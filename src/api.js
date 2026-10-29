@@ -148,7 +148,7 @@ function createApi({ db, games, prices, steam }) {
       { id: 'trending', title: 'Trending now', sort: 'popular' },
       { id: 'new', title: 'New & notable', sort: 'new' },
       ...(games.name !== 'local' ? [{ id: 'top', title: 'Critically acclaimed', sort: 'top' }] : []),
-      ...['Action', 'RPG', 'Adventure', 'Indie', 'Shooter', 'Strategy'].map((genre) => ({
+      ...['RPG', 'Action', 'Indie', 'Shooter', 'Strategy', 'Adventure'].map((genre) => ({
         id: `genre-${genre.toLowerCase()}`, title: genre, genre, sort: 'popular',
       })),
     ];
@@ -175,17 +175,19 @@ function createApi({ db, games, prices, steam }) {
     // Big recent releases make the best banners; fall back to trending games.
     const featured = take([...listFor('new'), ...listFor('trending')].filter((g) => g.backdrop), 6);
     const rows = [{ id: 'top10', title: 'Top 10 this week', genre: null, games: take(listFor('trending'), 10) }];
-    for (const r of rowDefs) {
-      const trending = r.id === 'trending';
-      rows.push({ id: r.id, title: trending ? 'More trending games' : r.title, genre: r.genre || null, games: take(listFor(r.id), trending ? 12 : 20) });
+    // The rest of the trending list would repeat the Top 10's job, so it isn't a row.
+    for (const r of rowDefs.filter((d) => d.id !== 'trending')) {
+      rows.push({ id: r.id, title: r.title, genre: r.genre || null, games: take(listFor(r.id), 20) });
     }
 
+    // What GameShelf members play, once there are enough members for it to mean something.
     const community = q.communityFavorites.all().map((row) => ({ ...libraryEntry(row), id: row.game_id, players: row.players }));
-    if (community.length) {
-      rows.splice(1, 0, { id: 'community', title: 'Popular on GameShelf', genre: null, games: community });
+    if (community.filter((g) => g.players > 1).length >= 4) {
+      rows.splice(2, 0, { id: 'community', title: 'Popular on GameShelf', genre: null, games: community });
     }
-    // A row needs a few games to be worth showing.
-    const visibleRows = rows.filter((r) => r.games.length >= 4);
+    // A row needs a few games to be worth showing, and four genre rows is plenty.
+    let genreRows = 0;
+    const visibleRows = rows.filter((r) => r.games.length >= 6 && (!r.genre || ++genreRows <= 4));
 
     // Official Steam store art for every game on the page. The same objects
     // appear in several rows, so de-duplicate first.
@@ -249,6 +251,11 @@ function createApi({ db, games, prices, steam }) {
     const { id } = req.params;
     const game = GAME_ID_RE.test(id) ? await games.getGame(id) : null;
     if (!game) return res.status(404).json({ error: 'Game not found.' });
+    // The price service covers PC stores. A console-only game can still match a
+    // console key sold on one of them, so don't show "PC prices" for it.
+    if (game.platforms.length && !game.platforms.includes('PC')) {
+      return res.json({ currency: 'USD', deals: [], lowestEver: null });
+    }
     const result = await prices.pricesFor({ steamAppId: game.steamAppId, name: game.name });
     res.json(result || { currency: 'USD', deals: [], lowestEver: null });
   }));

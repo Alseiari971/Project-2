@@ -1,5 +1,5 @@
 import { html, api, mount, state, year, gameHref } from '../lib.js';
-import { gameTile, libraryTile, rankTile, row, enableRows, titleArt } from '../components.js';
+import { gameTile, libraryTile, rankTile, row, enableRows } from '../components.js';
 import { icon } from '../icons.js';
 
 const NEW_DAYS = 60;
@@ -22,8 +22,9 @@ function featured(games) {
             <span class="feature-shade"></span>
             ${isNew(g.released) ? html`<span class="tag tag-new feature-tag">NEW</span>` : ''}
             <span class="feature-info">
-              ${titleArt(g, 'span')}
-              <span class="feature-meta">${year(g.released)} · ${g.genres.slice(0, 2).join(', ')}</span>
+              <span class="visually-hidden">${g.name}</span>
+              <span class="feature-meta">${[year(g.released), ...g.genres.slice(0, 2)].join(' · ')}</span>
+              <span class="pill-btn pill-light feature-cta">View game</span>
             </span>
           </a>`)}
       </div>
@@ -87,9 +88,7 @@ export async function homeView(app) {
     return row({
       title: r.title,
       href: r.genre ? `#/browse?genre=${encodeURIComponent(r.genre)}` : r.id === 'community' ? null : `#/browse?sort=${r.id === 'new' ? 'new' : 'popular'}`,
-      items: r.games.map((g) => gameTile(g, {
-        tag: g.players ? `${g.players} ${g.players === 1 ? 'player' : 'players'}` : isNew(g.released) ? 'New' : '',
-      })),
+      items: r.games.map((g) => gameTile(g, { tag: g.players > 1 ? `${g.players} players` : '' })),
     });
   });
 
@@ -100,9 +99,8 @@ export async function homeView(app) {
       ${state.library.length
         ? row({ title: 'My games', href: '#/library', cls: 'row-small', items: state.library.slice(0, 20).map(libraryTile) })
         : ''}
-      ${gameRows.slice(0, 2)}
+      ${gameRows}
       ${tips(backdrops)}
-      ${gameRows.slice(2)}
       <section class="row">
         <div class="row-head"><h2>Browse by genre</h2></div>
         <div class="genre-grid">

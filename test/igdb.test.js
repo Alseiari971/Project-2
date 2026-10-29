@@ -126,7 +126,7 @@ test('search uses looked-up game types and maps art, genres and platforms', asyn
   assert.equal(elden.released, '2022-02-25');
   // On Steam: Steam's store banner and logo, IGDB's art as the fallback.
   assert.equal(elden.image, `${STEAM_CDN}/1245620/capsule_616x353.jpg`);
-  assert.equal(elden.logo, `${STEAM_CDN}/1245620/logo.png`);
+  assert.equal(elden.logo, null);
   assert.equal(elden.fallbackImage, `${IGDB_IMG}/t_screenshot_big/ar1.jpg`);
   assert.equal(elden.artHasTitle, true);
   assert.equal(elden.poster, `${IGDB_IMG}/t_cover_big_2x/co1.jpg`);
@@ -233,4 +233,19 @@ test('one entry per game: platform duplicates and placeholders are dropped', asy
     'God of War 2005',
     'God of War Ragnarök 2022',
   ]);
+});
+
+test('adult games and test builds are hidden from lists', async () => {
+  const rows = [
+    { id: 1, name: 'Hollow Knight', slug: 'hollow-knight', total_rating_count: 900, cover: {}, themes: [{ name: 'Action' }] },
+    { id: 2, name: 'Some Adult Game', slug: 'adult', total_rating_count: 50, cover: {}, themes: [{ name: 'Erotic' }] },
+    { id: 3, name: 'Shooter Beta', slug: 'shooter-beta', total_rating_count: 40, cover: {} },
+  ];
+  const fetchImpl = async (url) => {
+    const u = new URL(url);
+    if (u.hostname === 'id.twitch.tv') return { ok: true, status: 200, json: async () => ({ access_token: 't', expires_in: 99999 }) };
+    return { ok: true, status: 200, json: async () => (u.pathname.endsWith('/games') ? rows : []) };
+  };
+  const igdb = createIgdbProvider('client', 'secret', { fetchImpl, minIntervalMs: 0 });
+  assert.deepEqual((await igdb.search({ sort: 'top' })).results.map((g) => g.name), ['Hollow Knight']);
 });

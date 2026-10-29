@@ -316,3 +316,8 @@ test('RAWG search drops fan-made entries and puts the real game first', async ()
   assert.deepEqual(await names('mario'), ['Super Mario Odyssey', 'Super Mario Bros.']);
   assert.deepEqual(await names('tinyindie'), ['Tiny Indie']);
 });
+
+test('console-only games get no PC prices', async () => {
+  const { body } = await client()('/api/games/the-legend-of-zelda-breath-of-the-wild/prices');
+  assert.deepEqual(body.deals, []);
+});

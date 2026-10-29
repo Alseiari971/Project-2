@@ -86,6 +86,12 @@ const popularity = (g) => (g.total_rating_count || 0) + (g.hypes || 0);
 // Special editions ("Collector's Edition") are versions of another game.
 const NOT_AN_EDITION = 'version_parent = null';
 
+// Hidden everywhere except a direct link: adult games (IGDB's "Erotic" theme)
+// and test builds.
+const NOT_A_RELEASE = /\b(beta|demo|playtest|test server|alpha)\s*$/i;
+const listable = (g) =>
+  !(g.themes || []).some((t) => /erotic/i.test(t.name)) && !NOT_A_RELEASE.test(g.name);
+
 const yearOf = (g) => (g.first_release_date ? new Date(g.first_release_date * 1000).getUTCFullYear() : null);
 
 /**
@@ -228,7 +234,7 @@ function createIgdbProvider(clientId, clientSecret, { fetchImpl = fetch, minInte
     };
     if (steamAppId) {
       const art = steamArt(steamAppId);
-      Object.assign(summary, { image: art.image, fallbackImage: wide, logo: art.logo, artHasTitle: true });
+      Object.assign(summary, { image: art.image, fallbackImage: wide, artHasTitle: true });
       if (!summary.backdrop) summary.backdrop = art.backdrop;
     }
     return summary;
@@ -261,7 +267,7 @@ function createIgdbProvider(clientId, clientSecret, { fetchImpl = fetch, minInte
   /** Summaries for these game IDs, in the same order. */
   async function gamesByIds(ids, l) {
     const byId = await rowsByIds(ids);
-    return dedupeByName(ids.map((id) => byId.get(id)).filter(Boolean)).map((g) => toSummary(g, l));
+    return dedupeByName(ids.map((id) => byId.get(id)).filter(Boolean).filter(listable)).map((g) => toSummary(g, l));
   }
 
   return {
@@ -290,7 +296,7 @@ function createIgdbProvider(clientId, clientSecret, { fetchImpl = fetch, minInte
           page === 1 ? query('games', `search ${quote(q)}; fields ${SUMMARY_FIELDS}; where ${where}; limit ${SEARCH_LIMIT};`) : [],
         ]);
         const seen = new Set();
-        const rows = [...byName, ...bySearch].filter((g) => !seen.has(g.id) && seen.add(g.id))
+        const rows = [...byName, ...bySearch].filter((g) => !seen.has(g.id) && seen.add(g.id)).filter(listable)
           // Entries with no date, no cover and no interest are placeholders.
           .filter((g) => g.first_release_date || g.cover || popularity(g));
         const target = normalizeTitle(q);
@@ -329,7 +335,7 @@ function createIgdbProvider(clientId, clientSecret, { fetchImpl = fetch, minInte
       }[sort] || { where: ' & total_rating_count >= 5', order: 'total_rating_count desc' };
       const rows = await query('games',
         `fields ${SUMMARY_FIELDS}; where ${browseWhere}${genreWhere}${bySort.where}; sort ${bySort.order}; limit ${pageSize}; offset ${offset};`);
-      return { count: rows.length, hasMore: rows.length === pageSize, results: dedupeByName(rows).map((g) => toSummary(g, l)) };
+      return { count: rows.length, hasMore: rows.length === pageSize, results: dedupeByName(rows.filter(listable)).map((g) => toSummary(g, l)) };
     },
 
     // Art comes with every IGDB result already (including Steam's when the game is on Steam).
