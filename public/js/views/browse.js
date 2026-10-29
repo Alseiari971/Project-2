@@ -19,7 +19,7 @@ export async function browseView(app, params) {
   const fetchPage = (page) => api(`/games?${new URLSearchParams({ search: query, genre, sort, page })}`);
 
   const [info, data] = await Promise.all([api('/info'), fetchPage(1)]);
-  const sorts = info.source === 'rawg' ? SORTS : { popular: SORTS.popular, new: SORTS.new };
+  const sorts = info.source !== 'local' ? SORTS : { popular: SORTS.popular, new: SORTS.new };
   const title = query ? `Results for “${query}”` : genre ? `${genre} games` : 'Browse';
 
   const meta = (g) => [g.released ? year(g.released) : '', (g.genres || []).slice(0, 3).join(', ')];

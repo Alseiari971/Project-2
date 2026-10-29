@@ -2,7 +2,7 @@
 
 Look up any game in the world, see where to buy it, and keep a public list of the games you've played.
 
-- **Every game:** search and browse 500,000+ games across PC, console and mobile (through the free [RAWG](https://rawg.io) database).
+- **Every game:** search and browse games on every platform, PC, PlayStation, Xbox, Nintendo and mobile, through [IGDB](https://www.igdb.com), the free game database run by Twitch.
 - **We don't sell anything:** each game page has "Where to buy" links to the real stores (Steam, Epic, GOG, PlayStation Store, Xbox, Nintendo eShop, itch.io, App Store, Google Play).
 - **Live prices:** the best current PC price, every store's price and the all-time low, from [CheapShark](https://www.cheapshark.com) (free, no key needed, US dollars).
 - **Steam import:** paste your Steam profile link to bring in your games and hours played.
@@ -28,20 +28,38 @@ Then open http://localhost:3000.
 
 Out of the box the site uses a small built-in catalog of about 35 popular games, so you can try it right away.
 
-### Optional keys
+### Connect the full game database (IGDB)
 
-Copy `.env.example` to `.env`, fill in either key, and restart with `npm start`.
+Out of the box GameShelf shows a 35-game sample. Connect IGDB, the game database run by Twitch, to get every game on every platform with official cover art. It's free:
+
+1. Sign in at https://dev.twitch.tv/console/apps with a Twitch account. Twitch requires two-factor login for this; turn it on in your Twitch security settings if it asks.
+2. Click **Register Your Application** and fill in:
+   - **Name:** anything unique, for example `GameShelf-yourname`
+   - **OAuth Redirect URLs:** `http://localhost`
+   - **Category:** Website Integration
+   - **Client Type:** Confidential
+3. Click **Create**, then **Manage** next to the new app. Copy the **Client ID**, then click **New Secret** and copy the **Client Secret**.
+4. Put both in your `.env` file (copy `.env.example` if you don't have one):
+   ```
+   IGDB_CLIENT_ID=your-client-id
+   IGDB_CLIENT_SECRET=your-client-secret
+   ```
+5. Restart with `npm start`. The terminal should say `Game data: IGDB.`
+
+Keep the Client Secret private: don't share it or commit it. `.env` is excluded from git.
+
+### Other optional keys
 
 | Setting | What it unlocks | Where to get it (free) |
 | --- | --- | --- |
-| `RAWG_API_KEY` | Search every game in the world instead of the 35-game sample | https://rawg.io/apidocs |
 | `STEAM_API_KEY` | "Import from Steam" | https://steamcommunity.com/dev/apikey (any domain works, e.g. `localhost`) |
+| `RAWG_API_KEY` | Older alternative game database, used only when IGDB isn't set up | https://rawg.io/apidocs |
 
-Steam import only works for profiles whose **Game details** are set to Public in Steam's privacy settings. With the sample catalog, only games in that catalog can be matched; add a RAWG key to match everything.
+Steam import only works for profiles whose **Game details** are set to Public in Steam's privacy settings. With IGDB, Steam games are matched exactly by their Steam ID.
 
 ### Checking search results
 
-If a search shows odd games, `npm run search-debug -- <search words>` prints everything RAWG returned (popularity, stores) and which results GameShelf kept. It uses the RAWG key in your `.env`.
+When using RAWG, if a search shows odd games, `npm run search-debug -- <search words>` prints everything RAWG returned (popularity, stores) and which results GameShelf kept. It uses the RAWG key in your `.env`.
 
 ## Project layout
 
@@ -53,7 +71,8 @@ src/steam.js         reading a Steam library
 src/prices.js        live prices from CheapShark
 src/auth.js          passwords, login sessions
 src/db.js            SQLite database built into Node (saved to data/gameshelf.db, upgraded automatically)
-src/games/rawg.js    the RAWG game database (every game)
+src/games/igdb.js    the IGDB game database (every game, every platform)
+src/games/rawg.js    the RAWG game database (older alternative)
 src/games/local.js   built-in sample catalog (data/games.json)
 src/games/stores.js  "where to buy" store links
 src/games/genres.js  genres you can browse by

@@ -180,10 +180,11 @@ document.addEventListener('library-changed', renderSidebar);
   }
   renderChrome();
   api('/info').then(({ source }) => {
-    if (source === 'rawg') {
-      mount(document.getElementById('data-credit'),
-        html`Game data from <a href="https://rawg.io" target="_blank" rel="noopener noreferrer">RAWG</a>.`);
-    }
+    const credit = {
+      igdb: html`Game data from <a href="https://www.igdb.com" target="_blank" rel="noopener noreferrer">IGDB</a>.`,
+      rawg: html`Game data from <a href="https://rawg.io" target="_blank" rel="noopener noreferrer">RAWG</a>.`,
+    }[source];
+    if (credit) mount(document.getElementById('data-credit'), credit);
   }).catch(() => {});
   await route();
 })();

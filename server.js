@@ -1,6 +1,6 @@
 const path = require('node:path');
 
-// Read settings such as RAWG_API_KEY from a .env file when there is one.
+// Read settings such as IGDB_CLIENT_ID from a .env file when there is one.
 try {
   process.loadEnvFile(path.join(__dirname, '.env'));
 } catch {}
@@ -15,7 +15,7 @@ const { createSteamService } = require('./src/steam');
 
 function createApp({
   db = openDatabase(),
-  games = createGameProvider(process.env.RAWG_API_KEY, { db }),
+  games = createGameProvider(process.env, { db }),
   prices = createPriceService(),
   steam = createSteamService(),
 } = {}) {
@@ -54,11 +54,13 @@ function createApp({
 if (require.main === module) {
   const port = Number(process.env.PORT) || 3000;
   const db = openDatabase();
-  const games = createGameProvider(process.env.RAWG_API_KEY, { db });
+  const games = createGameProvider(process.env, { db });
   createApp({ db, games }).listen(port, () => {
     console.log(`GameShelf running at http://localhost:${port}`);
+    const source = { igdb: 'IGDB', rawg: 'RAWG', local: 'the built-in 35-game sample catalog' }[games.name];
+    console.log(`Game data: ${source}.`);
     if (games.name === 'local') {
-      console.log('Using the built-in sample catalog. Set RAWG_API_KEY to search every game (see README).');
+      console.log('Set IGDB_CLIENT_ID and IGDB_CLIENT_SECRET to search every game (see README).');
     }
     if (!process.env.STEAM_API_KEY) {
       console.log('Steam import is off. Set STEAM_API_KEY to turn it on (see README).');

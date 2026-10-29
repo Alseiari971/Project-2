@@ -146,7 +146,7 @@ function createApi({ db, games, prices, steam }) {
     const rowDefs = [
       { id: 'trending', title: 'Trending now', sort: 'popular' },
       { id: 'new', title: 'New & notable', sort: 'new' },
-      ...(games.name === 'rawg' ? [{ id: 'top', title: 'Critically acclaimed', sort: 'top' }] : []),
+      ...(games.name !== 'local' ? [{ id: 'top', title: 'Critically acclaimed', sort: 'top' }] : []),
       ...['Action', 'RPG', 'Adventure', 'Indie', 'Shooter', 'Strategy'].map((genre) => ({
         id: `genre-${genre.toLowerCase()}`, title: genre, genre, sort: 'popular',
       })),
@@ -198,9 +198,10 @@ function createApi({ db, games, prices, steam }) {
     if (!game) return res.status(404).json({ error: 'Game not found.' });
 
     // "More like this" is a nice extra; never fail the page over it.
-    let similar = [];
+    // IGDB lists similar games itself; otherwise use popular games in the same genre.
+    let similar = game.similar || [];
     const genre = game.genres.map(findGenre).find(Boolean);
-    if (genre) {
+    if (!similar.length && genre) {
       try {
         const data = await games.search({ genre: genre.name, pageSize: 13 });
         similar = data.results.filter((g) => g.id !== game.id).slice(0, 12);

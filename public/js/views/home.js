@@ -114,7 +114,7 @@ export async function homeView(app) {
         </div>
       </section>
       ${home.source === 'local' ? html`
-        <p class="catalog-note">This is a 35-game sample catalog. Add a free RAWG API key (see the README) to search all 500,000+ games.</p>` : ''}
+        <p class="catalog-note">This is a 35-game sample catalog. Connect IGDB (free, see the README) to search every game on every platform.</p>` : ''}
     </div>
   `);
   enableRows(app);
