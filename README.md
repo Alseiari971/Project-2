@@ -35,9 +35,9 @@ Out of the box GameShelf shows a 35-game sample. Connect IGDB, the game database
 1. Sign in at https://dev.twitch.tv/console/apps with a Twitch account. Twitch requires two-factor login for this; turn it on in your Twitch security settings if it asks.
 2. Click **Register Your Application** and fill in:
    - **Name:** anything unique, for example `GameShelf-yourname`
-   - **OAuth Redirect URLs:** `http://localhost`
+   - **OAuth Redirect URLs:** `https://localhost` (GameShelf doesn't use it, but Twitch requires one; leave no empty rows)
    - **Category:** Website Integration
-   - **Client Type:** Confidential
+   - **Client Type:** Confidential (not Public: public apps get no Client Secret)
 3. Click **Create**, then **Manage** next to the new app. Copy the **Client ID**, then click **New Secret** and copy the **Client Secret**.
 4. Put both in your `.env` file (copy `.env.example` if you don't have one):
    ```
