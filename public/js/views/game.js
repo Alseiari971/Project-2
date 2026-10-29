@@ -70,12 +70,16 @@ function mediaSection(media) {
   return html`
     <section class="panel media" id="media" aria-label="Trailers and screenshots">
       <div class="media-stage" id="media-stage">${stage(first)}</div>
-      <div class="media-strip" role="list">
+      <div class="media-strip-wrap at-start">
+        <button type="button" class="strip-arrow prev" aria-label="Earlier">${icon('left')}</button>
+        <div class="media-strip" role="list">
         ${media.map((m, i) => html`
           <button type="button" class="media-thumb ${i === 0 ? 'active' : ''}" data-media="${i}" aria-label="${m.type === 'video' ? `Play ${m.name}` : `Screenshot ${i + 1}`}">
             <img src="${m.thumb}" alt="" loading="lazy" referrerpolicy="no-referrer">
             ${m.type === 'video' ? html`<span class="media-play">${icon('play')}</span>` : ''}
           </button>`)}
+        </div>
+        <button type="button" class="strip-arrow next" aria-label="Later">${icon('right')}</button>
       </div>
     </section>`;
 }
@@ -104,8 +108,23 @@ function wireMedia(root) {
   const show = (i, play = false) => {
     current = i;
     media.forEach((b, n) => b.classList.toggle('active', n === i));
+    // Keep the chosen thumbnail in view without moving the page.
+    const thumb = media[i];
+    const left = thumb.offsetLeft - (strip.clientWidth - thumb.offsetWidth) / 2;
+    strip.scrollTo({ left, behavior: 'smooth' });
     mount(stageEl, stage(gameMedia[i], play));
   };
+
+  // Arrow buttons and faded edges, like the rows on the home page.
+  const wrap = strip.parentElement;
+  const update = () => {
+    wrap.classList.toggle('at-start', strip.scrollLeft < 4);
+    wrap.classList.toggle('at-end', strip.scrollLeft + strip.clientWidth > strip.scrollWidth - 4);
+  };
+  wrap.querySelector('.prev').addEventListener('click', () => strip.scrollBy({ left: -strip.clientWidth * 0.8, behavior: 'smooth' }));
+  wrap.querySelector('.next').addEventListener('click', () => strip.scrollBy({ left: strip.clientWidth * 0.8, behavior: 'smooth' }));
+  strip.addEventListener('scroll', update, { passive: true });
+  update();
   const gameMedia = root.__media;
   strip.addEventListener('click', (e) => {
     const b = e.target.closest('[data-media]');
