@@ -371,8 +371,25 @@ export async function gameView(app, id, params) {
       mount(document.getElementById('scores'), scoresSection(game, steam));
       mount(document.getElementById('side-extras'), sideSections(game, steam));
       if (steam.about.length) {
-        mount(document.getElementById('about-body'), html`${aboutBlocks(steam.about)}
+        // Long descriptions open folded, with a "Read more" button, like Steam's.
+        const body = document.getElementById('about-body');
+        mount(body, html`<div class="fold" id="about-fold">${aboutBlocks(steam.about)}</div>
+          <button type="button" class="pill-btn fold-btn" id="about-more" hidden>Read more</button>
           <p class="source-note">From the game's <a href="${steam.storeUrl}" target="_blank" rel="noopener noreferrer">Steam store page</a>, provided by the publisher.</p>`);
+        const fold = document.getElementById('about-fold');
+        const more = document.getElementById('about-more');
+        const check = () => {
+          if (fold.scrollHeight > fold.clientHeight + 40) more.hidden = false;
+          else if (!fold.classList.contains('open')) fold.classList.add('open', 'short');
+        };
+        // Images change the height as they load.
+        fold.querySelectorAll('img, video').forEach((m) => m.addEventListener('load', check, { once: true }));
+        check();
+        more.addEventListener('click', () => {
+          const open = fold.classList.toggle('open');
+          more.textContent = open ? 'Show less' : 'Read more';
+          if (!open) document.getElementById('about').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
       }
       mount(document.getElementById('requirements'), requirementsSection(steam));
     });
