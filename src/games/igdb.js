@@ -26,12 +26,13 @@ const quote = (text) => `"${String(text).replace(/["\\]/g, ' ')}"`;
 // IGDB moved these codes from fixed numbers into lookup tables in 2025. They are
 // looked up by name at startup; these are the old fixed numbers, used if that fails.
 const FALLBACK = {
-  // Main game, standalone expansion, remake, remaster, expanded game, port.
-  gameTypes: [0, 4, 8, 9, 10, 11],
+  // Main game, standalone expansion, remake, remaster, expanded game. Ports are
+  // left out: they are the same game on another platform, listed separately.
+  gameTypes: [0, 4, 8, 9, 10],
   steamSource: 1,
   websites: { official: 1, iphone: 10, ipad: 11, android: 12, steam: 13, itch: 15, epic: 16, gog: 17 },
 };
-const PLAYABLE_GAME_TYPES = ['main game', 'standalone expansion', 'remake', 'remaster', 'expanded game', 'port'];
+const PLAYABLE_GAME_TYPES = ['main game', 'standalone expansion', 'remake', 'remaster', 'expanded game'];
 
 // IGDB platform names are specific ("PlayStation 5"); the site shows families.
 const PLATFORM_FAMILIES = [
@@ -65,8 +66,8 @@ const matchesGenre = (genre, lowerNames) =>
   [...(genre.igdb.genres || []), ...(genre.igdb.themes || [])].some((token) => lowerNames.some((n) => n.includes(token)));
 
 const SUMMARY_FIELDS = [
-  'name', 'slug', 'first_release_date', 'total_rating_count', 'summary',
-  'cover.image_id', 'artworks.image_id', 'screenshots.image_id',
+  'name', 'slug', 'first_release_date', 'total_rating_count', 'hypes', 'summary',
+  'cover.image_id', 'artworks.image_id', 'artworks.alpha_channel', 'screenshots.image_id',
   'genres.name', 'themes.name', 'platforms.name',
   'external_games.uid', 'external_games.external_game_source',
 ].join(',');
@@ -77,6 +78,39 @@ const DETAIL_FIELDS = [
 ].join(',');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Ratings for released games plus "hypes" (follows before release), so an
+// upcoming game like a new sequel isn't ranked as if nobody cared about it.
+const popularity = (g) => (g.total_rating_count || 0) + (g.hypes || 0);
+
+// Special editions ("Collector's Edition") are versions of another game.
+const NOT_AN_EDITION = 'version_parent = null';
+
+const yearOf = (g) => (g.first_release_date ? new Date(g.first_release_date * 1000).getUTCFullYear() : null);
+
+/**
+ * IGDB sometimes lists one game several times (once per platform). Keeps the
+ * first entry for each name; a later one with the same name stays only if it's
+ * from a different year and has real interest of its own (God of War 2005 and
+ * the 2018 reboot both stay; a barely-known duplicate goes). Order is kept.
+ */
+function dedupeByName(rows) {
+  const kept = new Map();
+  return rows.filter((g) => {
+    const key = normalizeTitle(g.name);
+    const same = kept.get(key);
+    if (!same) {
+      kept.set(key, [g]);
+      return true;
+    }
+    const distinctYear = same.every((s) => yearOf(s) !== yearOf(g));
+    if (distinctYear && popularity(g) > 0 && popularity(g) >= popularity(same[0]) * 0.1) {
+      same.push(g);
+      return true;
+    }
+    return false;
+  });
+}
 
 function createIgdbProvider(clientId, clientSecret, { fetchImpl = fetch, minIntervalMs = MIN_INTERVAL_MS } = {}) {
   const cache = new Map();
@@ -152,7 +186,8 @@ function createIgdbProvider(clientId, clientSecret, { fetchImpl = fetch, minInte
       const byLabel = (rows, label, words) => rows.filter((r) => words.some((w) => String(r[label]).toLowerCase() === w)).map((r) => r.id);
       const playable = byLabel(gameTypes, 'type', PLAYABLE_GAME_TYPES);
       const steam = sources.find((s) => String(s.name).toLowerCase() === 'steam')?.id;
-      const site = (word) => websiteTypes.find((w) => String(w.type).toLowerCase().includes(word))?.id;
+      // Whole words only: "itch" must not match "Twitch".
+      const site = (word) => websiteTypes.find((w) => new RegExp(`\\b${word}\\b`, 'i').test(String(w.type)))?.id;
       const visits = popularityTypes.find((p) => /visit/i.test(p.name))?.id ?? null;
       return {
         gameTypes: playable.length ? playable : FALLBACK.gameTypes,
@@ -169,7 +204,8 @@ function createIgdbProvider(clientId, clientSecret, { fetchImpl = fetch, minInte
   function toSummary(g, l) {
     const steam = (g.external_games || []).find((e) => e.external_game_source === l.steamSource && /^\d+$/.test(e.uid || ''));
     const steamAppId = steam ? Number(steam.uid) : null;
-    const artworkId = g.artworks?.[0]?.image_id;
+    // Artworks with transparency are logos, which make poor backgrounds.
+    const artworkId = (g.artworks || []).find((a) => !a.alpha_channel)?.image_id;
     const shotId = g.screenshots?.[0]?.image_id;
     const wide = image(artworkId || shotId, 'screenshot_big');
     const summary = {
@@ -188,7 +224,7 @@ function createIgdbProvider(clientId, clientSecret, { fetchImpl = fetch, minInte
       platforms: platformFamilies(g.platforms),
       description: g.summary || null,
       steamAppId,
-      popularity: g.total_rating_count || 0,
+      popularity: popularity(g),
     };
     if (steamAppId) {
       const art = steamArt(steamAppId);
@@ -225,7 +261,7 @@ function createIgdbProvider(clientId, clientSecret, { fetchImpl = fetch, minInte
   /** Summaries for these game IDs, in the same order. */
   async function gamesByIds(ids, l) {
     const byId = await rowsByIds(ids);
-    return ids.map((id) => byId.get(id)).filter(Boolean).map((g) => toSummary(g, l));
+    return dedupeByName(ids.map((id) => byId.get(id)).filter(Boolean)).map((g) => toSummary(g, l));
   }
 
   return {
@@ -235,6 +271,7 @@ function createIgdbProvider(clientId, clientSecret, { fetchImpl = fetch, minInte
       const l = await lookups();
       const q = text.trim();
       const playable = `game_type = (${l.gameTypes.join(',')})`;
+      const browseWhere = `${playable} & ${NOT_AN_EDITION}`;
       const offset = (page - 1) * pageSize;
       let genreWhere = '';
       if (genre) {
@@ -244,15 +281,30 @@ function createIgdbProvider(clientId, clientSecret, { fetchImpl = fetch, minInte
       }
 
       if (q) {
-        const rows = await query('games', `search ${quote(q)}; fields ${SUMMARY_FIELDS}; where ${playable}${genreWhere}; limit ${SEARCH_LIMIT}; offset ${(page - 1) * SEARCH_LIMIT};`);
-        // An exact title match first, then the games the most people have rated.
+        const where = `${playable} & ${NOT_AN_EDITION}${genreWhere}`;
+        // IGDB's own search favours short names and can miss the big games
+        // entirely (its top 30 for "zelda" has no Breath of the Wild), so also
+        // ask for the most popular games whose name contains the words.
+        const [byName, bySearch] = await Promise.all([
+          query('games', `fields ${SUMMARY_FIELDS}; where ${where} & name ~ *${quote(q)}*; sort total_rating_count desc; limit ${SEARCH_LIMIT}; offset ${(page - 1) * SEARCH_LIMIT};`),
+          page === 1 ? query('games', `search ${quote(q)}; fields ${SUMMARY_FIELDS}; where ${where}; limit ${SEARCH_LIMIT};`) : [],
+        ]);
+        const seen = new Set();
+        const rows = [...byName, ...bySearch].filter((g) => !seen.has(g.id) && seen.add(g.id))
+          // Entries with no date, no cover and no interest are placeholders.
+          .filter((g) => g.first_release_date || g.cover || popularity(g));
         const target = normalizeTitle(q);
-        const exact = (g) => (normalizeTitle(g.name) === target ? 1 : 0);
-        const results = rows
+        const top = Math.max(0, ...rows.map(popularity));
+        // An exact title match comes first, but only if people actually play it
+        // (an obscure 1989 game called "Zelda" shouldn't beat the series).
+        const exact = (g) => (normalizeTitle(g.name) === target && popularity(g) >= top * 0.05 ? 1 : 0);
+        const ranked = rows
           .map((g, i) => ({ g, i }))
-          .sort((a, b) => exact(b.g) - exact(a.g) || (b.g.total_rating_count || 0) - (a.g.total_rating_count || 0) || a.i - b.i)
-          .map(({ g }) => toSummary(g, l));
-        return { count: results.length, hasMore: rows.length === SEARCH_LIMIT, results };
+          .sort((a, b) => exact(b.g) - exact(a.g) || popularity(b.g) - popularity(a.g) ||
+            Boolean(b.g.screenshots || b.g.artworks) - Boolean(a.g.screenshots || a.g.artworks) || a.i - b.i)
+          .map(({ g }) => g);
+        const results = dedupeByName(ranked).map((g) => toSummary(g, l));
+        return { count: results.length, hasMore: byName.length === SEARCH_LIMIT, results };
       }
 
       // "Trending": what people are looking at on IGDB right now.
@@ -276,8 +328,8 @@ function createIgdbProvider(clientId, clientSecret, { fetchImpl = fetch, minInte
         popular: { where: ' & total_rating_count >= 5', order: 'total_rating_count desc' },
       }[sort] || { where: ' & total_rating_count >= 5', order: 'total_rating_count desc' };
       const rows = await query('games',
-        `fields ${SUMMARY_FIELDS}; where ${playable}${genreWhere}${bySort.where}; sort ${bySort.order}; limit ${pageSize}; offset ${offset};`);
-      return { count: rows.length, hasMore: rows.length === pageSize, results: rows.map((g) => toSummary(g, l)) };
+        `fields ${SUMMARY_FIELDS}; where ${browseWhere}${genreWhere}${bySort.where}; sort ${bySort.order}; limit ${pageSize}; offset ${offset};`);
+      return { count: rows.length, hasMore: rows.length === pageSize, results: dedupeByName(rows).map((g) => toSummary(g, l)) };
     },
 
     // Art comes with every IGDB result already (including Steam's when the game is on Steam).
@@ -328,7 +380,9 @@ function createIgdbProvider(clientId, clientSecret, { fetchImpl = fetch, minInte
       const companies = g.involved_companies || [];
       let similar = [];
       try {
-        similar = await gamesByIds((g.similar_games || []).slice(0, 12), l);
+        similar = (await gamesByIds((g.similar_games || []).slice(0, 16), l))
+          .filter((s) => s.id !== g.slug && normalizeTitle(s.name) !== normalizeTitle(g.name))
+          .slice(0, 12);
       } catch (err) {
         console.error('Could not load similar games:', err.message);
       }

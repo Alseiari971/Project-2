@@ -136,8 +136,10 @@ test('home screen has a featured carousel and rows', async () => {
   assert.equal(status, 200);
   assert.ok(body.featured.length > 0);
   assert.ok(body.featured.every((g) => g.backdrop));
-  assert.ok(body.rows.some((r) => r.id === 'trending'));
-  assert.ok(body.rows.some((r) => r.genre === 'RPG'));
+  assert.ok(body.rows.some((r) => r.id === 'top10'));
+  // Every game appears once across the carousel and the rows.
+  const ids = [...body.featured, ...body.rows.flatMap((r) => r.games)].map((g) => g.id);
+  assert.equal(new Set(ids).size, ids.length);
   assert.ok(body.genres.find((g) => g.name === 'RPG').image);
 
   const rpg = await client()('/api/games?genre=rpg');

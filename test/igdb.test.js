@@ -199,7 +199,7 @@ test('falls back to IGDB\'s old fixed numbers if the lookup tables fail', async 
   const igdb = provider(fake);
   const { results } = await igdb.search({ query: 'elden ring' });
   const search = fake.calls.find((c) => c.endpoint === 'games' && c.body.startsWith('search'));
-  assert.match(search.body, /game_type = \(0,4,8,9,10,11\)/);
+  assert.match(search.body, /game_type = \(0,4,8,9,10\)/);
   // Steam source 1 doesn't match the fake's 7, so no Steam art, but the page still works.
   assert.equal(results[0].name, 'Elden Ring');
 });
@@ -209,4 +209,28 @@ test('groups platforms into families', () => {
     platformFamilies([{ name: 'PlayStation 5' }, { name: 'PlayStation 4' }, { name: 'Nintendo Switch 2' }, { name: 'Mac' }, { name: 'Stadia' }]),
     ['PlayStation', 'Nintendo', 'macOS', 'Stadia'],
   );
+});
+
+test('one entry per game: platform duplicates and placeholders are dropped', async () => {
+  // Real IGDB numbers for "god of war" (total_rating_count).
+  const rows = [
+    { id: 10, name: 'God of War', slug: 'god-of-war--1', first_release_date: 1111449600, total_rating_count: 1069, cover: {} },
+    { id: 11, name: 'God of War', slug: 'god-of-war', first_release_date: 1524182400, total_rating_count: 3640, cover: {} },
+    { id: 12, name: 'God of War', slug: 'god-of-war--2', first_release_date: 1258416000, total_rating_count: 98, cover: {} },
+    { id: 13, name: 'God of War Ragnarök', slug: 'god-of-war-ragnarok', first_release_date: 1667952000, total_rating_count: 1197, cover: {} },
+    { id: 14, name: 'God Wars 2', slug: 'god-wars-2' },
+  ];
+  const fetchImpl = async (url) => {
+    const u = new URL(url);
+    if (u.hostname === 'id.twitch.tv') return { ok: true, status: 200, json: async () => ({ access_token: 't', expires_in: 99999 }) };
+    return { ok: true, status: 200, json: async () => (u.pathname.endsWith('/games') ? rows : []) };
+  };
+  const igdb = createIgdbProvider('client', 'secret', { fetchImpl, minIntervalMs: 0 });
+  const { results } = await igdb.search({ query: 'god of war' });
+  // Exact name matches first (both real God of War games), then by popularity.
+  assert.deepEqual(results.map((g) => `${g.name} ${g.released.slice(0, 4)}`), [
+    'God of War 2018',
+    'God of War 2005',
+    'God of War Ragnarök 2022',
+  ]);
 });

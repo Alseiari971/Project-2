@@ -14,6 +14,7 @@ const { GENRES, findGenre } = require('./games/genres');
 const profile = require('./profile');
 const { SteamError } = require('./steam');
 const { transaction } = require('./db');
+const { normalizeTitle } = require('./text');
 const { steamArt } = require('./games/steam-art');
 
 const STATUSES = ['playing', 'completed', 'played', 'want', 'dropped'];
@@ -151,20 +152,41 @@ function createApi({ db, games, prices, steam }) {
         id: `genre-${genre.toLowerCase()}`, title: genre, genre, sort: 'popular',
       })),
     ];
-    const results = await Promise.all(rowDefs.map((r) => games.search({ genre: r.genre, sort: r.sort, pageSize: 20 })));
-    const rows = rowDefs
-      .map((r, i) => ({ id: r.id, title: r.title, genre: r.genre || null, games: results[i].results }))
-      .filter((r) => r.games.length >= 3);
+    const results = await Promise.all(rowDefs.map((r) => games.search({ genre: r.genre, sort: r.sort, pageSize: 30 })));
+    const listFor = (id) => results[rowDefs.findIndex((r) => r.id === id)]?.results || [];
 
-    // Netflix-style "Top 10" row with tall posters, taken from the trending list.
-    rows.splice(1, 0, { id: 'top10', title: 'Top 10 this week', genre: null, games: results[0].results.slice(0, 10) });
+    // Every game appears once on the page: the carousel, then the Top 10, then
+    // each row skips games already shown higher up. Names are compared too,
+    // since databases sometimes list one game more than once.
+    const shown = new Set();
+    const key = (g) => normalizeTitle(g.name);
+    const take = (list, max) => {
+      const picked = [];
+      for (const g of list) {
+        if (picked.length >= max) break;
+        if (shown.has(g.id) || shown.has(key(g))) continue;
+        shown.add(g.id);
+        shown.add(key(g));
+        picked.push(g);
+      }
+      return picked;
+    };
+
+    // Big recent releases make the best banners; fall back to trending games.
+    const featured = take([...listFor('new'), ...listFor('trending')].filter((g) => g.backdrop), 6);
+    const rows = [{ id: 'top10', title: 'Top 10 this week', genre: null, games: take(listFor('trending'), 10) }];
+    for (const r of rowDefs) {
+      const trending = r.id === 'trending';
+      rows.push({ id: r.id, title: trending ? 'More trending games' : r.title, genre: r.genre || null, games: take(listFor(r.id), trending ? 12 : 20) });
+    }
 
     const community = q.communityFavorites.all().map((row) => ({ ...libraryEntry(row), id: row.game_id, players: row.players }));
     if (community.length) {
-      rows.splice(2, 0, { id: 'community', title: 'Popular on GameShelf', genre: null, games: community });
+      rows.splice(1, 0, { id: 'community', title: 'Popular on GameShelf', genre: null, games: community });
     }
+    // A row needs a few games to be worth showing.
+    const visibleRows = rows.filter((r) => r.games.length >= 4);
 
-    const featured = results[0].results.filter((g) => g.backdrop).slice(0, 6);
     // Official Steam store art for every game on the page. The same objects
     // appear in several rows, so de-duplicate first.
     await games.addSteamArt([...new Set(results.flatMap((r) => r.results))]);
@@ -177,7 +199,7 @@ function createApi({ db, games, prices, steam }) {
       if (game) used.add(game.id);
       return { name, image: game ? game.backdrop || game.image : null };
     });
-    res.json({ source: games.name, featured, rows, genres });
+    res.json({ source: games.name, featured, rows: visibleRows, genres });
   }));
 
   api.get('/games', asyncRoute(async (req, res) => {
