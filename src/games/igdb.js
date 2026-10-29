@@ -34,6 +34,14 @@ const FALLBACK = {
 };
 const PLAYABLE_GAME_TYPES = ['main game', 'standalone expansion', 'remake', 'remaster', 'expanded game'];
 
+// Old fixed website type numbers, used to name links when the lookup table fails.
+const LEGACY_WEBSITE_NAMES = {
+  1: 'Official site', 2: 'Fandom wiki', 3: 'Wikipedia', 4: 'Facebook', 5: 'X', 6: 'Twitch', 8: 'Instagram',
+  9: 'YouTube', 14: 'Reddit', 18: 'Discord', 19: 'Bluesky',
+};
+// Store links are shown under "Where to buy", not with the official links.
+const STORE_SITE = /steam|epic|gog|itch|iphone|ipad|android|app ?store|google play/i;
+
 // IGDB platform names are specific ("PlayStation 5"); the site shows families.
 const PLATFORM_FAMILIES = [
   [/PC|Windows|DOS/i, 'PC'],
@@ -73,6 +81,13 @@ const SUMMARY_FIELDS = [
 ].join(',');
 const DETAIL_FIELDS = [
   SUMMARY_FIELDS, 'storyline', 'similar_games',
+  'videos.video_id', 'videos.name',
+  'aggregated_rating', 'aggregated_rating_count', 'rating', 'rating_count',
+  'game_modes.name', 'player_perspectives.name',
+  'language_supports.language.name', 'language_supports.language_support_type.name',
+  'dlcs.name', 'dlcs.slug', 'dlcs.cover.image_id',
+  'expansions.name', 'expansions.slug', 'expansions.cover.image_id',
+  'standalone_expansions.name', 'standalone_expansions.slug', 'standalone_expansions.cover.image_id',
   'involved_companies.company.name', 'involved_companies.developer', 'involved_companies.publisher',
   'websites.url', 'websites.type',
 ].join(',');
@@ -199,6 +214,7 @@ function createIgdbProvider(clientId, clientSecret, { fetchImpl = fetch, minInte
         gameTypes: playable.length ? playable : FALLBACK.gameTypes,
         steamSource: steam ?? FALLBACK.steamSource,
         websites: Object.fromEntries(Object.entries(FALLBACK.websites).map(([k, id]) => [k, site(k) ?? id])),
+        websiteNames: new Map(websiteTypes.map((w) => [w.id, String(w.type)])),
         popularityType: visits,
         genres,
         themes,
@@ -393,6 +409,58 @@ function createIgdbProvider(clientId, clientSecret, { fetchImpl = fetch, minInte
         console.error('Could not load similar games:', err.message);
       }
 
+      // Media: trailers first, then screenshots and artwork.
+      const media = [
+        ...(g.videos || []).filter((v) => /^[\w-]{6,20}$/.test(v.video_id || '')).slice(0, 4).map((v) => ({
+          type: 'video',
+          youtubeId: v.video_id,
+          name: v.name || 'Trailer',
+          thumb: `https://i.ytimg.com/vi/${v.video_id}/hqdefault.jpg`,
+        })),
+        ...[...(g.screenshots || []), ...(g.artworks || []).filter((a) => !a.alpha_channel)].slice(0, 14).map((im) => ({
+          type: 'image',
+          thumb: image(im.image_id, 'screenshot_med'),
+          full: image(im.image_id, '1080p'),
+        })),
+      ];
+
+      const score = (value, count) => (value && count ? { score: Math.round(value), count } : null);
+
+      // "English: Interface, Audio, Subtitles" rows from IGDB's language support list.
+      const languages = new Map();
+      for (const ls of g.language_supports || []) {
+        const name = ls.language?.name;
+        const kind = String(ls.language_support_type?.name || '').toLowerCase();
+        if (!name) continue;
+        const row = languages.get(name) || { name, interface: false, audio: false, subtitles: false };
+        if (kind.includes('interface')) row.interface = true;
+        if (kind.includes('audio')) row.audio = true;
+        if (kind.includes('subtitle')) row.subtitles = true;
+        languages.set(name, row);
+      }
+
+      const linkName = (w) => l.websiteNames?.get(w.type) || LEGACY_WEBSITE_NAMES[w.type] || null;
+      const links = (g.websites || [])
+        .map((w) => ({ label: linkName(w), url: w.url }))
+        .filter((w) => w.label && !STORE_SITE.test(w.label) && /^https?:\/\//.test(w.url))
+        .map((w) => ({ ...w, label: /official/i.test(w.label) ? 'Official website' : w.label }));
+
+      const addon = (kind) => (a) => ({ id: a.slug, name: a.name, kind, image: image(a.cover?.image_id, 'cover_big') });
+      const addons = [
+        ...(g.expansions || []).map(addon('Expansion')),
+        ...(g.standalone_expansions || []).map(addon('Standalone')),
+        ...(g.dlcs || []).map(addon('DLC')),
+      ].filter((a) => a.id).slice(0, 12);
+
+      // Special editions are separate IGDB entries that point back at this game.
+      let editions = [];
+      try {
+        editions = (await query('games', `fields name,slug,cover.image_id; where version_parent = ${g.id}; limit 8;`))
+          .map(addon('Edition'));
+      } catch (err) {
+        console.error('Could not load editions:', err.message);
+      }
+
       return {
         ...summary,
         description: g.summary || g.storyline || null,
@@ -401,6 +469,16 @@ function createIgdbProvider(clientId, clientSecret, { fetchImpl = fetch, minInte
         website: site(l.websites.official) || null,
         buy: buildBuyLinks(g.name, stores),
         similar,
+        media,
+        scores: {
+          critics: score(g.aggregated_rating, g.aggregated_rating_count),
+          players: score(g.rating, g.rating_count),
+        },
+        features: [...(g.game_modes || []), ...(g.player_perspectives || [])].map((m) => m.name),
+        languages: [...languages.values()],
+        links,
+        editions,
+        addons,
       };
     },
   };

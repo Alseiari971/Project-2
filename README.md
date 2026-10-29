@@ -69,6 +69,7 @@ src/api.js           JSON API (games, accounts, lists, profiles, comments)
 src/profile.js       profile customization, levels and badges
 src/steam.js         reading a Steam library
 src/prices.js        live prices from CheapShark
+src/steam-store.js   About, requirements, Metacritic and achievements from Steam store pages
 src/auth.js          passwords, login sessions
 src/db.js            SQLite database built into Node (saved to data/gameshelf.db, upgraded automatically)
 src/games/igdb.js    the IGDB game database (every game, every platform)
@@ -80,10 +81,21 @@ public/css/          the stylesheet
 public/fonts/        the Manrope font (SIL Open Font License)
 public/js/main.js    navigation and page routing
 public/js/palette.js the search pop-up
-public/js/views/     one file per page (home, browse, game, library, profile, edit profile, import, community, log in)
+public/js/views/     one file per page (home, browse, game, library, profile, edit profile, import, community, log in, about & legal)
 scripts/             developer tools (search-debug)
 test/                automated tests: npm test
 ```
+
+## Data sources and legal notes
+
+GameShelf credits each source where its data appears and on the About & legal page (`#/legal`):
+
+- **IGDB** (Twitch): game data, covers, screenshots and trailers. IGDB's terms require attribution; using it in a product that makes money needs a separate agreement with Twitch.
+- **CheapShark**: prices. Buy buttons use CheapShark's own redirect links, as its terms ask.
+- **Steam store pages**: "About this game", system requirements, achievements, features and Metacritic scores, credited and linked back to the store page.
+- **YouTube**: trailers play in YouTube's official embedded player (privacy-enhanced mode), only after the visitor presses play.
+
+Users can delete their account and all their data from Edit profile. This isn't legal advice; check each service's current terms before launching publicly.
 
 ## API (for the future mobile app)
 

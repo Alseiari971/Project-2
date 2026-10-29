@@ -12,12 +12,14 @@ const { createGameProvider } = require('./src/games');
 const { createApi } = require('./src/api');
 const { createPriceService } = require('./src/prices');
 const { createSteamService } = require('./src/steam');
+const { createSteamStore } = require('./src/steam-store');
 
 function createApp({
   db = openDatabase(),
   games = createGameProvider(process.env, { db }),
   prices = createPriceService(),
   steam = createSteamService(),
+  steamStore = createSteamStore(),
 } = {}) {
   const app = express();
   app.disable('x-powered-by');
@@ -28,7 +30,9 @@ function createApp({
       'X-Content-Type-Options': 'nosniff',
       'Referrer-Policy': 'strict-origin-when-cross-origin',
       'Content-Security-Policy':
-        "default-src 'self'; img-src 'self' https: data:; style-src 'self'; script-src 'self'; frame-ancestors 'none'",
+        "default-src 'self'; img-src 'self' https: data:; style-src 'self'; script-src 'self'; frame-ancestors 'none'; " +
+        // Trailers play in YouTube's privacy-friendly player; Steam's short clips stream from its servers.
+        "frame-src https://www.youtube-nocookie.com; media-src https://*.steamstatic.com",
     });
     next();
   });
@@ -36,7 +40,7 @@ function createApp({
   // Large enough for a resized avatar image.
   app.use(express.json({ limit: '500kb' }));
   app.use(loadUser(db));
-  app.use('/api', createApi({ db, games, prices, steam }));
+  app.use('/api', createApi({ db, games, prices, steam, steamStore }));
   app.use(express.static(path.join(__dirname, 'public')));
 
   app.use((err, _req, res, _next) => {

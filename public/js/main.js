@@ -11,6 +11,7 @@ import { customizeView } from './views/customize.js';
 import { communityView } from './views/community.js';
 import { authView } from './views/auth.js';
 import { importView } from './views/import.js';
+import { legalView } from './views/legal.js';
 
 const app = document.getElementById('app');
 const SIDEBAR_GAMES = 12;
@@ -152,6 +153,7 @@ async function route() {
       case 'u': await profileView(app, parts[1], params); break;
       case 'customize': await customizeView(app); break;
       case 'import': await importView(app); break;
+      case 'legal': await legalView(app); break;
       case 'community': await communityView(app, params); break;
       case 'login': await authView(app, 'login'); break;
       case 'register': await authView(app, 'register'); break;
@@ -181,7 +183,7 @@ document.addEventListener('library-changed', renderSidebar);
   renderChrome();
   api('/info').then(({ source }) => {
     const credit = {
-      igdb: html`Game data from <a href="https://www.igdb.com" target="_blank" rel="noopener noreferrer">IGDB</a>.`,
+      igdb: html`Game data from <a href="https://www.igdb.com" target="_blank" rel="noopener noreferrer">IGDB</a>. Prices from <a href="https://www.cheapshark.com" target="_blank" rel="noopener noreferrer">CheapShark</a>.`,
       rawg: html`Game data from <a href="https://rawg.io" target="_blank" rel="noopener noreferrer">RAWG</a>.`,
     }[source];
     if (credit) mount(document.getElementById('data-credit'), credit);

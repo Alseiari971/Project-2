@@ -19,6 +19,7 @@ export async function authView(app, mode) {
           <input class="input" name="password" type="password" required minlength="8" autocomplete="${isLogin ? 'current-password' : 'new-password'}">
         </label>
         <p class="form-error" id="auth-error" role="alert"></p>
+        ${isLogin ? '' : html`<p class="muted small">By creating an account you agree to the <a href="#/legal">terms, community rules and privacy notice</a>.</p>`}
         <button class="btn btn-light btn-lg btn-block" type="submit">${isLogin ? 'Log in' : 'Create account'}</button>
         <p class="muted small center">${isLogin
           ? html`New here? <a href="#/register">Create an account</a>`

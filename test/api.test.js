@@ -321,3 +321,21 @@ test('console-only games get no PC prices', async () => {
   const { body } = await client()('/api/games/the-legend-of-zelda-breath-of-the-wild/prices');
   assert.deepEqual(body.deals, []);
 });
+
+test('deleting an account removes the user, their list and their comments', async () => {
+  const del = client();
+  await del('/api/auth/register', { method: 'POST', body: { username: 'leaving', password: 'password123' } });
+  const before = (await client()('/api/games/hades')).body.community.count;
+  await del('/api/me/library/hades', { method: 'PUT', body: { status: 'played' } });
+  const other = client();
+  await other('/api/auth/register', { method: 'POST', body: { username: 'staying', password: 'password123' } });
+  await del('/api/users/staying/comments', { method: 'POST', body: { body: 'bye!' } });
+
+  assert.equal((await del('/api/me', { method: 'DELETE', body: { password: 'wrong-password' } })).status, 401);
+  assert.equal((await del('/api/me', { method: 'DELETE', body: { password: 'password123' } })).status, 200);
+
+  assert.equal((await client()('/api/users/leaving')).status, 404);
+  assert.equal((await client()('/api/users/staying')).body.comments.length, 0);
+  assert.equal((await del('/api/me')).body.user, null);
+  assert.equal((await client()('/api/games/hades')).body.community.count, before);
+});

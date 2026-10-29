@@ -216,6 +216,14 @@ export async function customizeView(app) {
           <section class="panel" id="background"><h2>Profile background</h2><div id="background-section">${backgroundSection()}</div></section>
           <section class="panel" id="theme"><h2>Theme color</h2><div id="theme-section">${themeSection()}</div></section>
           <section class="panel" id="showcases"><h2>Showcases</h2><div id="showcases-section">${showcasesSection()}</div></section>
+          <section class="panel danger-zone">
+            <h2>Delete account</h2>
+            <p class="muted">This permanently removes your account, game list, profile and every comment you've written. It can't be undone.</p>
+            <form class="delete-form" id="delete-form">
+              <input class="input" type="password" name="password" placeholder="Your password" autocomplete="current-password" required aria-label="Your password">
+              <button class="pill-btn pill-danger" type="submit">Delete my account</button>
+            </form>
+          </section>
         </div>
       </div>
       <div class="save-bar" id="save-bar">
@@ -324,6 +332,19 @@ export async function customizeView(app) {
     runCleanups();
     customizeView(app);
   });
+  $('delete-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!window.confirm('Delete your GameShelf account and everything in it? This can\u2019t be undone.')) return;
+    try {
+      await api('/me', { method: 'DELETE', body: { password: new FormData(e.target).get('password') } });
+      saved = JSON.stringify(draft); // nothing left to warn about
+      location.hash = '#/';
+      location.reload();
+    } catch (err) {
+      toast(err.message, { error: true });
+    }
+  });
+
   $('save').addEventListener('click', async () => {
     const button = $('save');
     button.disabled = true;

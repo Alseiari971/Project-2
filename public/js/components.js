@@ -265,6 +265,18 @@ document.addEventListener('error', (e) => {
     return;
   }
 
+  // Optional pictures (add-on covers, images inside a description) just disappear.
+  if (img.closest('.addon')) {
+    const blank = document.createElement('span');
+    blank.className = 'addon-blank';
+    img.replaceWith(blank);
+    return;
+  }
+  if (img.closest('.rich')) {
+    img.remove();
+    return;
+  }
+
   // Missing official poster: build a poster card from the game's wide image.
   if (img.classList.contains('poster-art')) {
     const poster = img.parentElement;

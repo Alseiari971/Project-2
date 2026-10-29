@@ -60,7 +60,7 @@ const libraryEntry = (row) => ({
   updatedAt: row.updated_at,
 });
 
-function createApi({ db, games, prices, steam }) {
+function createApi({ db, games, prices, steam, steamStore }) {
   const api = express.Router();
   const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30 });
   const commentLimiter = rateLimit({ windowMs: 60 * 1000, max: 10 });
@@ -71,6 +71,7 @@ function createApi({ db, games, prices, steam }) {
   const q = {
     userByName: db.prepare('SELECT * FROM users WHERE username = ?'),
     userById: db.prepare('SELECT * FROM users WHERE id = ?'),
+    deleteUser: db.prepare('DELETE FROM users WHERE id = ?'),
     insertUser: db.prepare('INSERT INTO users (username, display_name, password_hash, accent) VALUES (?, ?, ?, ?)'),
     updateProfile: db.prepare(`
       UPDATE users SET display_name = @displayName, headline = @headline, bio = @bio, country = @country,
@@ -260,6 +261,15 @@ function createApi({ db, games, prices, steam }) {
     res.json(result || { currency: 'USD', deals: [], lowestEver: null });
   }));
 
+  // Extra details from the game's Steam store page (requirements, About, achievements).
+  api.get('/games/:id/steam', asyncRoute(async (req, res) => {
+    const { id } = req.params;
+    const game = GAME_ID_RE.test(id) ? await games.getGame(id) : null;
+    if (!game) return res.status(404).json({ error: 'Game not found.' });
+    const details = game.steamAppId && steamStore ? await steamStore.details(game.steamAppId).catch(() => null) : null;
+    res.json({ steam: details });
+  }));
+
   // ---- Accounts --------------------------------------------------------------
 
   api.post('/auth/register', authLimiter, (req, res) => {
@@ -311,6 +321,18 @@ function createApi({ db, games, prices, steam }) {
         maxCollection: profile.MAX_COLLECTION,
       },
     });
+  });
+
+  // Deletes the account and everything tied to it: sessions, game list,
+  // comments written and received. Asks for the password to confirm.
+  api.delete('/me', requireUser, authLimiter, (req, res) => {
+    const user = q.userById.get(req.user.id);
+    if (!verifyPassword(String(req.body?.password || ''), user.password_hash)) {
+      return res.status(401).json({ error: 'That password is not right.' });
+    }
+    q.deleteUser.run(user.id);
+    destroySession(db, req, res);
+    res.json({ ok: true });
   });
 
   api.patch('/me', requireUser, (req, res) => {
