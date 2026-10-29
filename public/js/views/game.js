@@ -246,13 +246,14 @@ export async function gameView(app, id, params) {
     ['Genres', game.genres.join(', ')],
   ].filter((f) => f && f[1]);
 
-  // Small all-caps stats on the right of the header, launcher style.
-  const stats = [
-    ['Released', game.released ? year(game.released) : 'TBA'],
-    ['Developer', game.developers[0]],
-    ['On GameShelf', `${game.community.count} ${game.community.count === 1 ? 'player' : 'players'}`],
-    game.myEntry?.playtime ? ['Your hours', formatHours(game.myEntry.playtime)] : ['Platforms', game.platforms.slice(0, 2).join(', ')],
-  ].filter(([, v]) => v);
+  // One short line of key facts under the title.
+  const facts = [
+    game.released ? year(game.released) : 'TBA',
+    game.developers[0],
+    game.platforms.join(', '),
+    game.myEntry?.playtime ? `${formatHours(game.myEntry.playtime)} played` : null,
+    game.community.count ? `${game.community.count} ${game.community.count === 1 ? 'player' : 'players'} here` : null,
+  ].filter(Boolean);
   const cover = game.poster || game.image;
 
   const addons = [...(game.editions || []), ...(game.addons || [])];
@@ -270,25 +271,24 @@ export async function gameView(app, id, params) {
       ${game.backdrop || game.image ? html`<div class="gp-backdrop" data-bg="${game.backdrop || game.image}"></div>` : ''}
       <div class="page gp">
         <header class="gp-head">
-          <div class="gp-ident">
-            ${cover
-              ? html`<img class="gp-cover ${game.poster ? 'tall' : ''}" src="${cover}" alt="" referrerpolicy="no-referrer">`
-              : html`<span class="gp-cover art-fallback" data-hue="${hueFor(game.name)}"></span>`}
-            <div class="gp-titles">
-              <h1>${game.name}</h1>
-              <div class="tag-row">${game.genres.slice(0, 5).map((g) => html`<a class="tag" href="#/browse?genre=${encodeURIComponent(g)}">${g}</a>`)}</div>
+          ${cover
+            ? html`<img class="gp-cover ${game.poster ? 'tall' : ''}" src="${cover}" alt="" referrerpolicy="no-referrer">`
+            : html`<span class="gp-cover art-fallback" data-hue="${hueFor(game.name)}"></span>`}
+          <div class="gp-main-head">
+            <h1>${game.name}</h1>
+            <div class="gp-meta">
+              <div class="tag-row">${game.genres.slice(0, 4).map((g) => html`<a class="tag" href="#/browse?genre=${encodeURIComponent(g)}">${g}</a>`)}</div>
+              <span class="gp-facts">${facts.join(' · ')}</span>
+            </div>
+            <div class="gp-actions">
+              ${listActions(game)}
+              <div class="gp-buy">
+                ${game.website ? html`<a class="round-btn" href="${game.website}" target="_blank" rel="noopener noreferrer" aria-label="Official website" title="Official website">${icon('link')}</a>` : ''}
+                <a class="pill-btn pill-light pill-lg" id="buy-btn" href="#buy">Where to buy</a>
+              </div>
             </div>
           </div>
-          <dl class="gp-stats">${stats.map(([k, v]) => html`<div><dt>${k}</dt><dd>${v}</dd></div>`)}</dl>
         </header>
-
-        <div class="gp-actions">
-          ${listActions(game)}
-          <div class="gp-buy">
-            ${game.website ? html`<a class="round-btn" href="${game.website}" target="_blank" rel="noopener noreferrer" aria-label="Official website" title="Official website">${icon('link')}</a>` : ''}
-            <a class="pill-btn pill-light pill-lg" id="buy-btn" href="#buy">Where to buy</a>
-          </div>
-        </div>
 
         <nav class="gp-tabs pill-group" aria-label="Sections">
           ${tabs.map(([key, label], i) => html`<a href="#${key}" data-jump="${key}" class="${i === 0 ? 'active' : ''}">${label}</a>`)}

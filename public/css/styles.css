@@ -561,20 +561,19 @@ a.tag:hover { background: #3a3c43; }
 
 /* ---- Game page ---- */
 .game-page { position: relative; }
-.gp-backdrop { position: absolute; inset: 0 0 auto; height: 480px; background-size: cover; background-position: center 25%; opacity: 0.38; -webkit-mask-image: linear-gradient(180deg, #000 20%, transparent); mask-image: linear-gradient(180deg, #000 20%, transparent); pointer-events: none; }
+.gp-backdrop { position: absolute; inset: 0 0 auto; height: 380px; background-size: cover; background-position: center 25%; opacity: 0.38; -webkit-mask-image: linear-gradient(180deg, #000 20%, transparent); mask-image: linear-gradient(180deg, #000 20%, transparent); pointer-events: none; }
 .gp { position: relative; }
-.gp-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; margin-bottom: 24px; }
-.gp-ident { display: flex; align-items: center; gap: 24px; min-width: 0; }
-.gp-cover { width: 220px; aspect-ratio: 16 / 9; flex: none; border-radius: var(--radius-sm); object-fit: cover; background: var(--panel); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5); }
-.gp-cover.tall { width: 120px; aspect-ratio: 2 / 3; }
-.gp-titles h1 { font-size: clamp(28px, 3vw, 40px); letter-spacing: -0.03em; }
-.tag-row { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 12px; }
-.gp-stats { display: grid; grid-template-columns: repeat(2, minmax(120px, auto)); gap: 16px 48px; margin: 0; flex: none; }
-.gp-stats dt { color: var(--dim); font-size: 11px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; }
-.gp-stats dd { margin: 4px 0 0; font-weight: 800; max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.gp-actions { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; margin-bottom: 24px; }
+.gp-head { display: flex; align-items: flex-end; gap: 24px; margin-bottom: 24px; }
+.gp-cover { width: 240px; aspect-ratio: 16 / 9; flex: none; align-self: center; border-radius: var(--radius-sm); object-fit: cover; background: var(--panel); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5); }
+.gp-cover.tall { width: 128px; aspect-ratio: 2 / 3; }
+.gp-main-head { flex: 1; min-width: 0; display: grid; gap: 12px; }
+.gp-main-head h1 { font-size: clamp(26px, 2.6vw, 38px); letter-spacing: -0.03em; }
+.gp-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; }
+.tag-row { display: flex; flex-wrap: wrap; gap: 4px; }
+.gp-facts { color: #d6d7db; font-size: 14px; font-weight: 700; min-width: 0; }
+.gp-actions { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px 16px; margin-top: 4px; }
 .gp-buy { display: flex; align-items: center; gap: 8px; }
-.gp-tabs { margin-bottom: 24px; }
+.gp-tabs { margin-bottom: 16px; }
 .gp-layout { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 24px; align-items: start; margin-bottom: 32px; }
 .gp-main { display: grid; gap: 16px; min-width: 0; }
 .panel h2 { font-size: 17px; margin-bottom: 16px; }
@@ -1174,7 +1173,6 @@ label { display: grid; gap: 8px; font-size: 13px; font-weight: 700; color: var(-
 /* ---- Small laptops and tablets ---- */
 @media (max-width: 1180px) {
   :root { --sidebar-w: 216px; --gutter: 24px; }
-  .gp-head { flex-direction: column; }
   .gp-layout { grid-template-columns: 1fr; }
   .profile-layout { grid-template-columns: 1fr; }
   .profile-side { position: static; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
@@ -1221,10 +1219,9 @@ label { display: grid; gap: 8px; font-size: 13px; font-weight: 700; color: var(-
   .list-col { display: none; }
   .list-thumb { width: 56px; height: 32px; }
   .sk-feature { grid-template-columns: 1fr; }
-  .gp-ident { gap: 16px; }
-  .gp-cover { width: 140px; }
-  .gp-cover.tall { width: 88px; }
-  .gp-stats { gap: 12px 24px; }
+  .gp-head { align-items: flex-start; gap: 16px; }
+  .gp-cover { width: 120px; align-self: flex-start; }
+  .gp-cover.tall { width: 84px; }
   .gp-actions { flex-direction: column; align-items: stretch; }
   .gp-buy { justify-content: stretch; }
   .gp-buy .pill-btn { flex: 1; }
