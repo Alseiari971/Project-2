@@ -17,7 +17,7 @@ Look up any game in the world, see where to buy it, and keep a public list of th
 
 ## Run it
 
-You need [Node.js](https://nodejs.org) 20.12 or newer.
+You need [Node.js](https://nodejs.org) 22.13 or newer (the LTS download is fine). Nothing gets compiled during install: the database is the SQLite built into Node.
 
 ```bash
 npm install
@@ -52,7 +52,7 @@ src/profile.js       profile customization, levels and badges
 src/steam.js         reading a Steam library
 src/prices.js        live prices from CheapShark
 src/auth.js          passwords, login sessions
-src/db.js            SQLite database (saved to data/gameshelf.db, upgraded automatically)
+src/db.js            SQLite database built into Node (saved to data/gameshelf.db, upgraded automatically)
 src/games/rawg.js    the RAWG game database (every game)
 src/games/local.js   built-in sample catalog (data/games.json)
 src/games/stores.js  "where to buy" store links

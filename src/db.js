@@ -1,6 +1,26 @@
 const path = require('node:path');
 const fs = require('node:fs');
-const Database = require('better-sqlite3');
+
+// SQLite is built into Node.js 22.13 and newer, so nothing has to be compiled
+// when installing GameShelf. Some Node versions still label it "experimental"
+// in a startup warning; it works fine for us, so that one message is hidden.
+function loadSqlite() {
+  const emitWarning = process.emitWarning;
+  process.emitWarning = function (warning, ...args) {
+    if (String(warning?.message ?? warning).includes('SQLite is an experimental feature')) return;
+    return emitWarning.call(this, warning, ...args);
+  };
+  try {
+    return require('node:sqlite').DatabaseSync;
+  } catch {
+    console.error(`GameShelf needs Node.js 22.13 or newer, and this computer has ${process.version}.`);
+    console.error('Download the LTS version from https://nodejs.org, install it, then run npm start again.');
+    process.exit(1);
+  } finally {
+    process.emitWarning = emitWarning;
+  }
+}
+const DatabaseSync = loadSqlite();
 
 // Columns added after the first release. Existing databases get them added on
 // startup, so nobody loses their account or list when they update.
@@ -35,9 +55,9 @@ function migrate(db) {
 
 function openDatabase(file = process.env.DB_FILE || path.join(__dirname, '..', 'data', 'gameshelf.db')) {
   if (file !== ':memory:') fs.mkdirSync(path.dirname(file), { recursive: true });
-  const db = new Database(file);
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
+  const db = new DatabaseSync(file);
+  db.exec('PRAGMA journal_mode = WAL');
+  db.exec('PRAGMA foreign_keys = ON');
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS users (
@@ -105,4 +125,17 @@ function steamIdStore(db) {
   };
 }
 
-module.exports = { openDatabase, steamIdStore };
+/** Runs fn inside a transaction: every change is saved, or none are. */
+function transaction(db, fn) {
+  db.exec('BEGIN');
+  try {
+    const result = fn();
+    db.exec('COMMIT');
+    return result;
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+}
+
+module.exports = { openDatabase, steamIdStore, transaction };

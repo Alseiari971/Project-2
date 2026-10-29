@@ -3,12 +3,12 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const Database = require('better-sqlite3');
 const { openDatabase } = require('../src/db');
+const { DatabaseSync } = require('node:sqlite');
 
 test('upgrades a database from the first version without losing data', () => {
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'gameshelf-')), 'old.db');
-  const old = new Database(file);
+  const old = new DatabaseSync(file);
   old.exec(`
     CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE COLLATE NOCASE,
       display_name TEXT NOT NULL, bio TEXT NOT NULL DEFAULT '', password_hash TEXT NOT NULL,

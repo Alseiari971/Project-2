@@ -13,6 +13,7 @@ const {
 const { GENRES, findGenre } = require('./games/genres');
 const profile = require('./profile');
 const { SteamError } = require('./steam');
+const { transaction } = require('./db');
 const { steamArt } = require('./games/steam-art');
 
 const STATUSES = ['playing', 'completed', 'played', 'want', 'dropped'];
@@ -402,7 +403,7 @@ function createApi({ db, games, prices, steam }) {
 
     let added = 0;
     let updated = 0;
-    db.transaction(() => {
+    transaction(db, () => {
       for (const pick of chosen) {
         const item = byAppId.get(Number(pick?.appid));
         if (!item || !STATUSES.includes(pick.status)) continue;
@@ -423,7 +424,7 @@ function createApi({ db, games, prices, steam }) {
         if (item.existingStatus) updated++;
         else added++;
       }
-    })();
+    });
     previews.delete(req.body.previewId);
     res.json({ added, updated });
   });
@@ -476,7 +477,7 @@ function createApi({ db, games, prices, steam }) {
       // The URL carries a version number, so it can be cached for good.
       'Cache-Control': 'public, max-age=31536000, immutable',
     });
-    res.send(user.avatar);
+    res.send(Buffer.from(user.avatar));
   });
 
   api.post('/users/:username/comments', requireUser, commentLimiter, (req, res) => {
