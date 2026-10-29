@@ -8,8 +8,9 @@ export const STATUS_LABELS = {
   dropped: 'Dropped',
 };
 
-// The logged-in user (or null), plus their editable profile settings.
-export const state = { user: null, showcases: [], options: null };
+// The logged-in user (or null), their editable profile settings, and their
+// game list (shown in the sidebar and the search palette).
+export const state = { user: null, showcases: [], options: null, library: [] };
 
 // ---- Safe HTML ----------------------------------------------------------------
 
@@ -88,6 +89,38 @@ export async function refreshMe() {
   state.showcases = data.showcases || [];
   state.options = data.options || null;
   return data;
+}
+
+/** Reloads the logged-in user's game list and tells the sidebar. */
+export async function refreshLibrary() {
+  state.library = state.user
+    ? (await api(`/users/${encodeURIComponent(state.user.username)}`).catch(() => ({ library: [] }))).library
+    : [];
+  document.dispatchEvent(new Event('library-changed'));
+  return state.library;
+}
+
+// ---- Recently viewed games (this browser only) -----------------------------------
+
+const RECENT_KEY = 'gameshelf-recent';
+const RECENT_MAX = 6;
+
+export function recentGames() {
+  try {
+    return JSON.parse(localStorage.getItem(RECENT_KEY)) || [];
+  } catch {
+    return [];
+  }
+}
+
+export function rememberGame(game) {
+  const entry = { id: game.id, name: game.name, image: game.image || null };
+  const list = [entry, ...recentGames().filter((g) => g.id !== game.id)].slice(0, RECENT_MAX);
+  try {
+    localStorage.setItem(RECENT_KEY, JSON.stringify(list));
+  } catch {
+    // Storage can be unavailable (private mode); recents are just a convenience.
+  }
 }
 
 // ---- Small utilities ------------------------------------------------------------

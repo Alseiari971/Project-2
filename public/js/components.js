@@ -60,28 +60,76 @@ export function wireStarInput(el, onPick) {
   el.addEventListener('mouseleave', () => show(Number(el.dataset.value)));
 }
 
-/** Landscape game tile with a caption underneath (Apple TV style). */
-export function gameTile(game, { badge = '', caption = true } = {}) {
+/**
+ * Wide game card, launcher style: just the artwork. Art without the game's
+ * name gets the title bottom-left; `tag` sits top-left and `corner` bottom-right.
+ */
+export function gameTile(game, { tag = '', corner = '' } = {}) {
   const id = game.id || game.gameId;
-  const meta = [
-    game.released !== undefined ? year(game.released) : null,
-    game.genres?.length ? game.genres.slice(0, 2).join(', ') : null,
-  ].filter(Boolean).join(' · ');
-  // Screenshots without the game's name get the title laid over them, like
-  // streaming apps do. The caption then skips the name so it isn't shown twice.
+  // Placeholders without an image already show the name, so they need no overlay.
   const overlay = Boolean(game.image) && !hasTitleArt(game);
   return html`
     <a class="tile" href="${gameHref(id)}" title="${game.name}">
       <div class="tile-frame ${overlay ? 'needs-title' : ''}">
         ${art(game)}
-        ${game.image ? html`<span class="tile-overlay-title" aria-hidden="true">${game.name}</span>` : ''}
-        ${badge}
+        ${tag ? html`<span class="card-tag">${tag}</span>` : ''}
+        <span class="tile-overlay-title ${overlay ? '' : 'visually-hidden'}">${game.name}</span>
+        ${corner ? html`<span class="card-corner">${corner}</span>` : ''}
       </div>
-      ${caption ? html`<div class="tile-caption">
-        <div class="tile-title ${overlay ? 'visually-hidden' : ''}">${game.name}</div>
-        ${meta ? html`<div class="tile-meta">${meta}</div>` : ''}
-      </div>` : ''}
     </a>`;
+}
+
+/** One line in a list view: thumbnail, name, then whatever columns the page passes. */
+export function gameListRow(game, columns = []) {
+  const id = game.id || game.gameId;
+  return html`
+    <a class="list-row" href="${gameHref(id)}" title="${game.name}">
+      ${game.image ? html`<img class="list-thumb" src="${game.image}" alt="" loading="lazy" referrerpolicy="no-referrer">` : html`<span class="list-thumb"></span>`}
+      <span class="list-name">${game.name}</span>
+      ${columns.map((c) => html`<span class="list-col">${c}</span>`)}
+    </a>`;
+}
+
+/**
+ * A group of pill toggles (All / Favorites, or Popular / New). Each option is
+ * { key, label, href?, count? }; links when href is given, buttons otherwise.
+ */
+export function pillGroup(options, active, { label = '', name = '' } = {}) {
+  return html`
+    <div class="pill-group" ${name ? html`data-group="${name}"` : ''}>
+      ${label ? html`<span class="pill-group-label">${label}</span>` : ''}
+      ${options.map((o) => {
+        const inner = html`${o.label}${o.count !== undefined ? html`<span class="pill-count">${o.count}</span>` : ''}`;
+        return o.href
+          ? html`<a class="${o.key === active ? 'active' : ''}" href="${o.href}">${inner}</a>`
+          : html`<button type="button" class="${o.key === active ? 'active' : ''}" data-value="${o.key}">${inner}</button>`;
+      })}
+    </div>`;
+}
+
+/** Grid / list switch, top-right of a page. The choice is remembered per browser. */
+export function viewToggle(view) {
+  return html`
+    <div class="view-toggle" role="group" aria-label="View">
+      <button type="button" class="${view === 'grid' ? 'active' : ''}" data-view="grid" aria-label="Grid view" aria-pressed="${view === 'grid'}">${icon('grid')}</button>
+      <button type="button" class="${view === 'list' ? 'active' : ''}" data-view="list" aria-label="List view" aria-pressed="${view === 'list'}">${icon('list')}</button>
+    </div>`;
+}
+
+const VIEW_KEY = 'gameshelf-view';
+export function savedView() {
+  try {
+    return localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'grid';
+  } catch {
+    return 'grid';
+  }
+}
+export function saveView(view) {
+  try {
+    localStorage.setItem(VIEW_KEY, view);
+  } catch {
+    // Not remembering the choice is fine.
+  }
 }
 
 /**
@@ -120,15 +168,13 @@ export function formatHours(minutes) {
   return hours < 1 ? '<1 h' : `${hours < 10 ? Math.round(hours * 10) / 10 : Math.round(hours).toLocaleString()} h`;
 }
 
-/** A library entry tile with its status, rating and playtime overlaid. */
+/** A library entry card: status tag top-left, rating and hours bottom-right. */
 export function libraryTile(entry) {
   return gameTile(
-    { id: entry.gameId, name: entry.name, image: entry.image, genres: entry.genres },
+    { id: entry.gameId, name: entry.name, image: entry.image },
     {
-      badge: html`<div class="tile-badges">
-        ${statusBadge(entry.status)}${ratingBadge(entry.rating)}
-        ${entry.playtime ? html`<span class="rating-pill hours">${formatHours(entry.playtime)}</span>` : ''}
-      </div>`,
+      tag: STATUS_LABELS[entry.status],
+      corner: html`${entry.playtime ? html`<span class="corner-chip">${formatHours(entry.playtime)}</span>` : ''}${ratingBadge(entry.rating)}`,
     },
   );
 }
@@ -191,11 +237,11 @@ export const emptyState = (title, body = '', action = '') =>
 
 // ---- Loading skeletons ------------------------------------------------------------
 
-const skeletonTiles = (n) => html`${Array.from({ length: n }, () => html`<div class="sk-tile"><div class="sk sk-frame"></div><div class="sk sk-line"></div><div class="sk sk-line short"></div></div>`)}`;
+const skeletonTiles = (n) => html`${Array.from({ length: n }, () => html`<div class="sk-tile"><div class="sk sk-frame"></div></div>`)}`;
 
 export function skeleton(kind) {
   if (kind === 'home') {
-    return html`<div class="skeleton"><div class="sk sk-hero"></div>
+    return html`<div class="skeleton sk-page"><div class="sk sk-title"></div><div class="sk-feature"><div class="sk"></div><div class="sk"></div></div>
       ${[1, 2].map(() => html`<div class="sk-row"><div class="sk sk-heading"></div><div class="sk-track">${skeletonTiles(5)}</div></div>`)}</div>`;
   }
   if (kind === 'game') {
@@ -232,7 +278,7 @@ document.addEventListener('error', (e) => {
     img.src = img.dataset.fallback;
     delete img.dataset.fallback;
     img.closest('.tile-frame')?.classList.add('needs-title');
-    img.closest('.tile')?.querySelector('.tile-title')?.classList.add('visually-hidden');
+    img.closest('.tile')?.querySelector('.tile-overlay-title')?.classList.remove('visually-hidden');
     return;
   }
 

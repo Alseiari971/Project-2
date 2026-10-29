@@ -19,8 +19,8 @@ const STATUSES = ['playing', 'completed', 'played', 'want', 'dropped'];
 const USERNAME_RE = /^[a-zA-Z0-9_]{3,20}$/;
 const GAME_ID_RE = /^[a-z0-9][a-z0-9-]{0,149}$/;
 const SORTS = ['popular', 'new', 'top'];
-// New profiles start with the site's own orange rather than a stock blue.
-const DEFAULT_ACCENT = '#f97316';
+// New profiles start in GameShelf's own lime.
+const DEFAULT_ACCENT = '#e7ff0c';
 // Big Steam libraries are capped to the most-played games to keep matching quick.
 const STEAM_IMPORT_MAX = 300;
 const PREVIEW_TTL_MS = 30 * 60 * 1000;

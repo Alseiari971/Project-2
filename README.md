@@ -6,7 +6,7 @@ Look up any game in the world, see where to buy it, and keep a public list of th
 - **We don't sell anything:** each game page has "Where to buy" links to the real stores (Steam, Epic, GOG, PlayStation Store, Xbox, Nintendo eShop, itch.io, App Store, Google Play).
 - **Live prices:** the best current PC price, every store's price and the all-time low, from [CheapShark](https://www.cheapshark.com) (free, no key needed, US dollars).
 - **Steam import:** paste your Steam profile link to bring in your games and hours played.
-- **Streaming-app look:** a featured banner with real game logos, a Top 10 poster row, scrolling rows by genre, and a bottom tab bar on phones.
+- **Game launcher look:** a sidebar with your games, a search pop-up (Ctrl+K or `/`), a featured carousel, a Top 10 poster row, a Library page with grid and list views, and a bottom tab bar on phones.
 - **Steam-style profiles:** add games to your list as *Playing*, *Completed*, *Played*, *Want to play* or *Dropped* with a half-star rating, then customize your profile:
   - an avatar (upload your own) with an animated frame
   - a background, either a preset scene or art from any game on your list
@@ -60,7 +60,8 @@ src/games/genres.js  genres you can browse by
 public/css/          the stylesheet
 public/fonts/        the Manrope font (SIL Open Font License)
 public/js/main.js    navigation and page routing
-public/js/views/     one file per page (home, browse, game, profile, edit profile, import, community, log in)
+public/js/palette.js the search pop-up
+public/js/views/     one file per page (home, browse, game, library, profile, edit profile, import, community, log in)
 scripts/             developer tools (search-debug)
 test/                automated tests: npm test
 ```

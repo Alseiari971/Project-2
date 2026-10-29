@@ -1,16 +1,16 @@
-import { html, api, mount, state, year, formatDate, STATUS_LABELS, toast, hueFor, onLeave } from '../lib.js';
-import { gameTile, row, enableRows, userChip, statusBadge, titleArt, starInput, wireStarInput, starValue, formatHours } from '../components.js';
+import { html, api, mount, state, year, formatDate, STATUS_LABELS, toast, hueFor, onLeave, rememberGame, refreshLibrary } from '../lib.js';
+import { gameTile, row, enableRows, userChip, statusBadge, starInput, wireStarInput, starValue, formatHours } from '../components.js';
 import { icon } from '../icons.js';
 
 function listActions(game) {
   if (!state.user) {
-    return html`<div class="list-actions"><a class="btn btn-light btn-lg" href="#/login">${icon('plus')} Add to list</a></div>`;
+    return html`<div class="list-actions"><a class="pill-btn pill-lg" href="#/login">${icon('plus')} Add to list</a></div>`;
   }
   const entry = game.myEntry;
   return html`
     <div class="list-actions" id="list-actions">
       <div class="dropdown">
-        <button type="button" class="btn ${entry ? 'btn-quiet' : 'btn-light'} btn-lg" id="list-button" aria-haspopup="menu" aria-expanded="false">
+        <button type="button" class="pill-btn pill-lg" id="list-button" aria-haspopup="menu" aria-expanded="false">
           ${entry ? html`${icon('check')} ${STATUS_LABELS[entry.status]}` : html`${icon('plus')} Add to list`}
           ${icon('down', 'chevron')}
         </button>
@@ -41,7 +41,7 @@ function priceSection(prices) {
         <span class="best-amount">${best.price === 0 ? 'Free' : money(best.price)}</span>
         ${best.savings >= 1 ? html`<span class="discount">−${Math.round(best.savings)}%</span>` : ''}
       </div>
-      <a class="btn btn-accent btn-block" href="${best.url}" target="_blank" rel="noopener noreferrer">Buy on ${best.store} ${icon('external')}</a>
+      <a class="pill-btn pill-accent pill-block" href="${best.url}" target="_blank" rel="noopener noreferrer">Buy on ${best.store} ${icon('external')}</a>
       ${prices.lowestEver ? html`<div class="muted small">Lowest ever: ${money(prices.lowestEver.price)}, ${new Date(prices.lowestEver.date).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}</div>` : ''}
     </div>
     ${prices.deals.length > 1 ? html`
@@ -62,8 +62,9 @@ function priceSection(prices) {
 export async function gameView(app, id, params) {
   const game = await api(`/games/${encodeURIComponent(id)}`);
   document.title = `${game.name} · GameShelf`;
+  rememberGame(game);
 
-  const facts = [
+  const details = [
     ['Released', formatDate(game.released)],
     ['Platforms', game.platforms.join(', ')],
     game.developers.length && ['Developer', game.developers.join(', ')],
@@ -71,72 +72,114 @@ export async function gameView(app, id, params) {
     ['Genres', game.genres.join(', ')],
   ].filter((f) => f && f[1]);
 
+  // Small all-caps stats on the right of the header, launcher style.
+  const stats = [
+    ['Released', game.released ? year(game.released) : 'TBA'],
+    ['Developer', game.developers[0]],
+    ['On GameShelf', `${game.community.count} ${game.community.count === 1 ? 'player' : 'players'}`],
+    game.myEntry?.playtime ? ['Your hours', formatHours(game.myEntry.playtime)] : ['Platforms', game.platforms.slice(0, 2).join(', ')],
+  ].filter(([, v]) => v);
+  const cover = game.poster || game.image;
+
   mount(app, html`
-    <section class="game-hero">
-      <div class="hero-media">
-        ${game.backdrop || game.image
-          ? html`<div class="hero-bg" data-bg="${game.backdrop || game.image}"></div>`
-          : html`<div class="hero-bg" data-hue="${hueFor(game.name)}"></div>`}
-        <div class="hero-shade"></div>
-      </div>
-      <div class="hero-content">
-        ${titleArt(game)}
-        <div class="hero-meta">
-          <span>${year(game.released)}</span>
-          ${game.genres.slice(0, 3).map((g) => html`<span class="dot">${g}</span>`)}
-          ${game.community.count ? html`<span class="dot">${game.community.count} ${game.community.count === 1 ? 'player' : 'players'} here</span>` : ''}
-        </div>
-        ${listActions(game)}
-      </div>
-    </section>
+    <div class="game-page">
+      ${game.backdrop || game.image ? html`<div class="gp-backdrop" data-bg="${game.backdrop || game.image}"></div>` : ''}
+      <div class="page gp">
+        <header class="gp-head">
+          <div class="gp-ident">
+            ${cover
+              ? html`<img class="gp-cover ${game.poster ? 'tall' : ''}" src="${cover}" alt="" referrerpolicy="no-referrer">`
+              : html`<span class="gp-cover art-fallback" data-hue="${hueFor(game.name)}"></span>`}
+            <div class="gp-titles">
+              <h1>${game.name}</h1>
+              <div class="tag-row">${game.genres.slice(0, 5).map((g) => html`<a class="tag" href="#/browse?genre=${encodeURIComponent(g)}">${g}</a>`)}</div>
+            </div>
+          </div>
+          <dl class="gp-stats">${stats.map(([k, v]) => html`<div><dt>${k}</dt><dd>${v}</dd></div>`)}</dl>
+        </header>
 
-    <div class="page-body">
-      <div class="game-layout">
-        <div>
-          ${game.description ? html`
-            <section class="section">
+        <div class="gp-actions">
+          ${listActions(game)}
+          <div class="gp-buy">
+            ${game.website ? html`<a class="round-btn" href="${game.website}" target="_blank" rel="noopener noreferrer" aria-label="Official website" title="Official website">${icon('link')}</a>` : ''}
+            <a class="pill-btn pill-light pill-lg" id="buy-btn" href="#buy">Where to buy</a>
+          </div>
+        </div>
+
+        <nav class="gp-tabs pill-group" aria-label="Sections">
+          <a href="#about" data-jump="about" class="active">Overview</a>
+          <a href="#buy" data-jump="buy">Where to buy</a>
+          <a href="#players" data-jump="players">Players</a>
+          ${game.similar.length ? html`<a href="#similar" data-jump="similar">More like this</a>` : ''}
+        </nav>
+
+        <div class="gp-layout">
+          <div class="gp-main">
+            <section class="panel" id="about">
               <h2>About</h2>
-              <p class="prose">${game.description}</p>
-            </section>` : ''}
-          <section class="section">
-            <h2>Details</h2>
-            <dl class="facts">${facts.map(([k, v]) => html`<div><dt>${k}</dt><dd>${v}</dd></div>`)}</dl>
-            ${game.website ? html`<a class="text-link" href="${game.website}" target="_blank" rel="noopener noreferrer">Official website ${icon('external')}</a>` : ''}
-          </section>
-          <section class="section">
-            <h2>Players on GameShelf</h2>
-            ${game.community.players.length
-              ? html`<div class="chip-list">${game.community.players.map((p) => userChip(p, statusBadge(p.status)))}</div>`
-              : html`<p class="muted">No one has added this yet.</p>`}
-          </section>
+              ${game.description ? html`<p class="prose">${game.description}</p>` : html`<p class="muted">No description yet.</p>`}
+            </section>
+            <section class="panel">
+              <h2>Details</h2>
+              <dl class="detail-rows">${details.map(([k, v]) => html`<div><dt>${k}</dt><dd>${v}</dd></div>`)}</dl>
+            </section>
+            <section class="panel" id="players">
+              <h2>Players on GameShelf</h2>
+              ${game.community.players.length
+                ? html`<div class="chip-list">${game.community.players.map((p) => userChip(p, statusBadge(p.status)))}</div>`
+                : html`<p class="muted">No one has added this yet.</p>`}
+            </section>
+          </div>
+
+          <aside class="panel buy-card" id="buy">
+            <h2>Where to buy</h2>
+            <div id="prices"><div class="sk sk-line wide"></div><div class="sk sk-line"></div></div>
+            ${game.buy.links.length ? html`
+              <h3 class="buy-subhead">Stores</h3>
+              <div class="store-list">${game.buy.links.map((l) => html`
+                <a class="store" href="${l.url}" target="_blank" rel="noopener noreferrer">
+                  <span>${l.name}</span>
+                  <span class="store-kind">${l.direct ? 'Store page' : 'Search'} ${icon('external')}</span>
+                </a>`)}</div>` : ''}
+            <a class="text-link small" href="${game.buy.compareUrl}" target="_blank" rel="noopener noreferrer">Compare on IsThereAnyDeal ${icon('external')}</a>
+          </aside>
         </div>
 
-        <aside class="buy-card" id="buy">
-          <h2>Where to buy</h2>
-          <div id="prices"><div class="sk sk-line wide"></div><div class="sk sk-line"></div></div>
-          ${game.buy.links.length ? html`
-            <h3 class="buy-subhead">Stores</h3>
-            <div class="store-list">${game.buy.links.map((l) => html`
-              <a class="store" href="${l.url}" target="_blank" rel="noopener noreferrer">
-                <span>${l.name}</span>
-                <span class="store-kind">${l.direct ? 'Store page' : 'Search'} ${icon('external')}</span>
-              </a>`)}</div>` : ''}
-          <a class="text-link small" href="${game.buy.compareUrl}" target="_blank" rel="noopener noreferrer">Compare on IsThereAnyDeal ${icon('external')}</a>
-        </aside>
+        ${game.similar.length ? row({ title: 'More like this', id: 'similar', items: game.similar.map((g) => gameTile(g)) }) : ''}
       </div>
-
-      ${game.similar.length ? row({ title: 'More like this', items: game.similar.map((g) => gameTile(g)) }) : ''}
     </div>
   `);
   enableRows(app);
-  if (params.get('section') === 'buy') document.getElementById('buy').scrollIntoView({ block: 'center' });
+
+  // Section links scroll within the page instead of changing the route.
+  app.querySelectorAll('[data-jump]').forEach((a) => a.addEventListener('click', (e) => {
+    e.preventDefault();
+    app.querySelectorAll('.gp-tabs a').forEach((t) => t.classList.toggle('active', t === a));
+    document.getElementById(a.dataset.jump)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }));
+  document.getElementById('buy-btn').addEventListener('click', (e) => {
+    if (e.currentTarget.getAttribute('href') === '#buy') {
+      e.preventDefault();
+      document.getElementById('buy').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  });
+  if (params.get('section') === 'buy') document.getElementById('buy').scrollIntoView({ block: 'start' });
 
   // Prices come from a separate, slower service, so they load after the page.
   api(`/games/${encodeURIComponent(game.id)}/prices`)
     .catch(() => null)
     .then((prices) => {
       const el = document.getElementById('prices');
-      if (el) mount(el, priceSection(prices));
+      if (!el) return;
+      mount(el, priceSection(prices));
+      const best = prices?.deals[0];
+      const button = document.getElementById('buy-btn');
+      if (best && button) {
+        button.href = best.url;
+        button.target = '_blank';
+        button.rel = 'noopener noreferrer';
+        mount(button, html`Buy ${best.price === 0 ? 'free' : `$${best.price.toFixed(2)}`}<small>on ${best.store}</small>`);
+      }
     });
 
   if (!document.getElementById('list-actions')) return;
@@ -155,6 +198,7 @@ export async function gameView(app, id, params) {
       game.myEntry = entry;
       rerender();
       toast(message);
+      refreshLibrary();
     } catch (err) {
       toast(err.message, { error: true });
     }
@@ -187,6 +231,7 @@ export async function gameView(app, id, params) {
       game.myEntry = null;
       rerender();
       toast('Removed from your list');
+      refreshLibrary();
     });
 
     wireStarInput(el.querySelector('.star-input'), (n) => {

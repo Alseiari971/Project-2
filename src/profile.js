@@ -3,7 +3,7 @@
 
 const BACKGROUNDS = ['midnight', 'aurora', 'sunset', 'ocean', 'ember', 'forest', 'nebula', 'synthwave'];
 const FRAMES = ['none', 'glow', 'gold', 'neon', 'fire', 'ice'];
-const ACCENTS = ['#3b82f6', '#a855f7', '#ec4899', '#ef4444', '#f97316', '#eab308', '#22c55e', '#14b8a6'];
+const ACCENTS = ['#e7ff0c', '#3b82f6', '#a855f7', '#ec4899', '#ef4444', '#f97316', '#eab308', '#22c55e', '#14b8a6'];
 const SHOWCASE_TYPES = ['favorite', 'collection', 'toprated', 'completed', 'stats', 'info'];
 const MAX_SHOWCASES = 4;
 const MAX_COLLECTION = 6;

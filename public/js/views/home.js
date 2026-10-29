@@ -1,67 +1,84 @@
-import { html, api, mount, state, year, gameHref, onLeave } from '../lib.js';
+import { html, api, mount, state, year, gameHref } from '../lib.js';
 import { gameTile, libraryTile, rankTile, row, enableRows, titleArt } from '../components.js';
+import { icon } from '../icons.js';
 
-const SLIDE_MS = 8000;
+const NEW_DAYS = 60;
+const isNew = (released) => released && Date.now() - new Date(released).getTime() < NEW_DAYS * 24 * 60 * 60 * 1000;
 
-function hero(featured) {
+function featured(games) {
   return html`
-    <section class="hero" aria-roledescription="carousel" aria-label="Featured games">
-      ${featured.map((g, i) => html`
-        <div class="hero-slide ${i === 0 ? 'active' : ''}" aria-hidden="${i === 0 ? 'false' : 'true'}">
-          <div class="hero-bg" data-bg="${g.backdrop}"></div>
-          <div class="hero-shade"></div>
-          <div class="hero-content">
-            ${titleArt(g, i === 0 ? 'h1' : 'h2')}
-            <div class="hero-meta">
-              <span>${year(g.released)}</span>
-              ${g.genres.slice(0, 3).map((x) => html`<span class="dot">${x}</span>`)}
-            </div>
-            ${g.description ? html`<p class="hero-desc">${g.description}</p>` : ''}
-            <div class="hero-actions">
-              <a class="btn btn-light btn-lg" href="${gameHref(g.id)}">More info</a>
-              <a class="btn btn-quiet btn-lg" href="${gameHref(g.id)}?section=buy">Where to buy</a>
-            </div>
-          </div>
-        </div>`)}
-      <div class="hero-dots">
-        ${featured.map((g, i) => html`<button class="${i === 0 ? 'active' : ''}" type="button" aria-label="Show ${g.name}" data-slide="${i}"></button>`)}
+    <section class="feature" aria-label="Featured games">
+      <div class="feature-head">
+        <h1 id="feature-title">${games[0].name}</h1>
+        <div class="feature-arrows">
+          <button type="button" class="round-btn small" id="feature-prev" aria-label="Previous">${icon('left')}</button>
+          <button type="button" class="round-btn small" id="feature-next" aria-label="Next">${icon('right')}</button>
+        </div>
+      </div>
+      <div class="feature-track" id="feature-track">
+        ${games.map((g) => html`
+          <a class="feature-card" href="${gameHref(g.id)}" data-name="${g.name}">
+            <span class="feature-bg" data-bg="${g.backdrop}"></span>
+            <span class="feature-shade"></span>
+            ${isNew(g.released) ? html`<span class="tag tag-new feature-tag">NEW</span>` : ''}
+            <span class="feature-info">
+              ${titleArt(g, 'span')}
+              <span class="feature-meta">${year(g.released)} · ${g.genres.slice(0, 2).join(', ')}</span>
+            </span>
+          </a>`)}
       </div>
     </section>`;
 }
 
-function startCarousel(root) {
-  const slides = [...root.querySelectorAll('.hero-slide')];
-  const dots = [...root.querySelectorAll('.hero-dots button')];
-  if (slides.length < 2) return;
-  let current = 0;
-  const show = (i) => {
-    slides[current].classList.remove('active');
-    slides[current].setAttribute('aria-hidden', 'true');
-    dots[current].classList.remove('active');
-    current = (i + slides.length) % slides.length;
-    slides[current].classList.add('active');
-    slides[current].setAttribute('aria-hidden', 'false');
-    dots[current].classList.add('active');
-  };
-  let timer = setInterval(() => show(current + 1), SLIDE_MS);
-  dots.forEach((dot) => dot.addEventListener('click', () => {
-    clearInterval(timer);
-    show(Number(dot.dataset.slide));
-    timer = setInterval(() => show(current + 1), SLIDE_MS);
-  }));
-  onLeave(() => clearInterval(timer));
+// The heading shows whichever featured game is in view, like a launcher's carousel.
+function wireFeatured(root) {
+  const track = root.querySelector('#feature-track');
+  if (!track) return;
+  const cards = [...track.children];
+  const title = root.querySelector('#feature-title');
+  const step = () => cards[0].getBoundingClientRect().width + parseFloat(getComputedStyle(track).columnGap || 0);
+  const current = () => Math.round(track.scrollLeft / step());
+  track.addEventListener('scroll', () => {
+    title.textContent = cards[Math.min(cards.length - 1, current())].dataset.name;
+  }, { passive: true });
+  root.querySelector('#feature-prev').addEventListener('click', () => track.scrollTo({ left: (current() - 1) * step(), behavior: 'smooth' }));
+  root.querySelector('#feature-next').addEventListener('click', () => {
+    const next = current() + 1 >= cards.length ? 0 : current() + 1;
+    track.scrollTo({ left: next * step(), behavior: 'smooth' });
+  });
+}
+
+// Tips about GameShelf, in the spirit of a launcher's "what's new" cards.
+function tips(backdrops) {
+  const signedIn = Boolean(state.user);
+  const cards = [
+    signedIn
+      ? { title: 'Bring your Steam library', body: 'Every game you own, with your hours played, in one go.', link: '#/import', cta: 'Import now' }
+      : { title: 'Track every game', body: 'Mark what you are playing, finished or saving for later, and rate it.', link: '#/register', cta: 'Join free' },
+    { title: 'Never overpay', body: 'Every game page shows live PC prices across stores and the all-time low.', link: '#/browse', cta: 'Find a game' },
+    signedIn
+      ? { title: 'Make your profile yours', body: 'Pick a background, an avatar frame and showcases for your favorites.', link: '#/customize', cta: 'Customize' }
+      : { title: 'Show off your taste', body: 'Profiles with showcases, badges and levels earned from your list.', link: '#/register', cta: 'Get started' },
+    { title: 'Find your people', body: 'See what others are playing and leave a comment on their profile.', link: '#/community', cta: 'Browse players' },
+  ];
+  return html`
+    <section class="row">
+      <div class="row-head"><h2>Get more from GameShelf</h2></div>
+      <div class="tip-grid">
+        ${cards.map((c, i) => html`
+          <a class="tip-card" href="${c.link}">
+            ${backdrops[i] ? html`<span class="tip-art" data-bg="${backdrops[i]}"></span>` : ''}
+            <span class="tip-text">
+              <strong>${c.title}</strong>
+              <span>${c.body} <em>${c.cta} →</em></span>
+            </span>
+          </a>`)}
+      </div>
+    </section>`;
 }
 
 export async function homeView(app) {
-  const [home, mine] = await Promise.all([
-    api('/home'),
-    state.user ? api(`/users/${encodeURIComponent(state.user.username)}`).catch(() => null) : null,
-  ]);
-
-  // One personal row: what you're playing, then what you want to play next.
-  const shelf = mine
-    ? [...mine.library.filter((e) => e.status === 'playing'), ...mine.library.filter((e) => e.status === 'want')]
-    : [];
+  const home = await api('/home');
 
   const gameRows = home.rows.map((r) => {
     if (r.id === 'top10') {
@@ -71,16 +88,20 @@ export async function homeView(app) {
       title: r.title,
       href: r.genre ? `#/browse?genre=${encodeURIComponent(r.genre)}` : r.id === 'community' ? null : `#/browse?sort=${r.id === 'new' ? 'new' : 'popular'}`,
       items: r.games.map((g) => gameTile(g, {
-        badge: g.players ? html`<div class="tile-badges"><span class="status">${g.players} ${g.players === 1 ? 'player' : 'players'}</span></div>` : '',
+        tag: g.players ? `${g.players} ${g.players === 1 ? 'player' : 'players'}` : isNew(g.released) ? 'New' : '',
       })),
     });
   });
 
+  const backdrops = home.featured.slice(1).map((g) => g.backdrop).filter(Boolean);
   mount(app, html`
-    ${home.featured.length ? hero(home.featured) : html`<div class="page-spacer"></div>`}
-    <div class="rows ${home.featured.length ? 'over-hero' : ''}">
+    <div class="page home">
+      ${home.featured.length ? featured(home.featured) : ''}
+      ${state.library.length
+        ? row({ title: 'My games', href: '#/library', cls: 'row-small', items: state.library.slice(0, 20).map(libraryTile) })
+        : ''}
       ${gameRows.slice(0, 2)}
-      ${shelf.length ? row({ title: 'Your shelf', href: `#/u/${encodeURIComponent(state.user.username)}`, items: shelf.map(libraryTile) }) : ''}
+      ${tips(backdrops)}
       ${gameRows.slice(2)}
       <section class="row">
         <div class="row-head"><h2>Browse by genre</h2></div>
@@ -93,11 +114,9 @@ export async function homeView(app) {
         </div>
       </section>
       ${home.source === 'local' ? html`
-        <p class="catalog-note">
-          This is a 35-game sample catalog. Add a free RAWG API key (see the README) to search all 500,000+ games.
-        </p>` : ''}
+        <p class="catalog-note">This is a 35-game sample catalog. Add a free RAWG API key (see the README) to search all 500,000+ games.</p>` : ''}
     </div>
   `);
   enableRows(app);
-  startCarousel(app);
+  wireFeatured(app);
 }
