@@ -7,22 +7,26 @@
 //   {
 //     "format": 1, "id": "some-game-ar", "version": "1.0.0", "language": "ar",
 //     "title": "Some Game in Arabic",           (optional, shown in App settings)
-//     "engine": "unreal" | "unity" | "overlay",
+//     "engine": "unreal" | "unity" | "renpy" | "godot" | "overlay",
 //     "game": { "steamAppId": 1245620, "gameId": "elden-ring" },   (which game it's for)
 //     "overlay": { "region": [0, 0.78, 1, 0.22], "textLuma": 170, "darkText": false, "threshold": 0.72 },
-//     "requires": { "arch": "x64", "unityBackend": "mono", "unityVersion": "2019.4" },
+//     "requires": { "arch": "x64", "unityBackend": "mono", "unityVersion": "2019.4", "godot": 4 },
 //     "fontBundle": "gameshelf_arabic_sdf",      (Unity: TextMeshPro font, in the game folder)
 //     "uguiFont": "Arial",                       (Unity: optional font for older UI text)
 //     "files": [{ "source": "payload/x.pak", "target": "pakchunk99-ArabicLocalization_P.pak",
 //                 "sha256": "...", "size": 123 }]
 //   }
 //
-// Targets are relative to the game's Content/Paks folder (Unreal) or the game's
-// folder (Unity), and only these may be added:
+// Targets are relative to the game's Content/Paks folder (Unreal), the game's
+// folder (Unity, Ren'Py) or the folder of the game's program (Godot), and
+// only these may be added:
 // - Unreal: .pak/.utoc/.ucas files whose name ends in _P (patch files, loaded
 //   after the game's own, so they win without replacing anything).
 // - Unity: BepInEx/ and dotnet/ (the mod loader), doorstop's files and the font
 //   bundle. The XUnity.AutoTranslator settings are written by GameShelf itself.
+// - Ren'Py: strings.json, fonts (.ttf, .otf) and license texts (.txt) in
+//   game/tl/arabic/gameshelf; Godot: the same in gameshelf_arabic. Data only:
+//   the scripts that read them are GameShelf's own (renpy.js, godot.js).
 // - Overlay: only fingerprints.json, which never goes into the game's folder.
 const fs = require('node:fs/promises');
 const crypto = require('node:crypto');
@@ -36,6 +40,9 @@ const MAX_FILES = 2000;
 const UNITY_ROOT_FILES = new Set(['winhttp.dll', 'doorstop_config.ini', '.doorstop_version']);
 const UNITY_DIRS = new Set(['bepinex', 'dotnet']);
 const UNITY_RESERVED = 'bepinex/config/autotranslatorconfig.ini';
+// Where Ren'Py and Godot packs put their data (lower case, as compared).
+const DATA_DIRS = { renpy: ['game', 'tl', 'arabic', 'gameshelf'], godot: ['gameshelf_arabic'] };
+const DATA_FILE = /^(strings\.json|[\w.\-]+\.(ttf|otf|txt))$/i;
 const RESERVED_NAMES = /^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$/i;
 
 class PackError extends Error {
@@ -67,6 +74,14 @@ function checkTarget(manifest, parts, target) {
     if (parts.length !== 1 || lower[0] !== 'fingerprints.json') throw new PackError(`"${target}" isn't allowed: overlay packs hold only fingerprints.json.`);
     return;
   }
+  const dataDir = DATA_DIRS[manifest.engine];
+  if (dataDir) {
+    const inside = parts.length === dataDir.length + 1 && dataDir.every((name, i) => lower[i] === name);
+    if (!inside || !DATA_FILE.test(parts[parts.length - 1])) {
+      throw new PackError(`"${target}" isn't allowed: ${manifest.engine === 'renpy' ? 'Ren\'Py' : 'Godot'} packs may only add strings.json, fonts and license texts in ${dataDir.join('/')}.`);
+    }
+    return;
+  }
   if (manifest.engine === 'unreal') {
     if (parts.length !== 1 || !/_p\.(pak|utoc|ucas)$/i.test(parts[0])) {
       throw new PackError(`"${target}" isn't allowed: Unreal packs may only add .pak, .utoc or .ucas files ending in _P.`);
@@ -85,7 +100,7 @@ function checkManifest(manifest) {
   for (const key of ['id', 'version']) {
     if (typeof manifest[key] !== 'string' || !/^[\w.\-]{1,80}$/.test(manifest[key])) throw new PackError(`The pack's ${key} is missing or invalid.`);
   }
-  if (!['unreal', 'unity', 'overlay'].includes(manifest.engine)) throw new PackError('The pack is for an engine GameShelf doesn\'t support.');
+  if (!['unreal', 'unity', 'renpy', 'godot', 'overlay'].includes(manifest.engine)) throw new PackError('The pack is for an engine GameShelf doesn\'t support.');
   if (manifest.title !== undefined && (typeof manifest.title !== 'string' || manifest.title.length > 120)) throw new PackError('The pack\'s title is invalid.');
   const { game, overlay } = manifest;
   if (game !== undefined) {
@@ -106,6 +121,9 @@ function checkManifest(manifest) {
     if (!overlay || typeof overlay !== 'object' || !regionOk || !lumaOk || !thresholdOk || !darkOk) throw new PackError('The pack\'s overlay settings are invalid.');
   }
   if (manifest.fontBundle !== undefined && !/^[\w.\-]{1,80}$/.test(manifest.fontBundle)) throw new PackError('The pack\'s font bundle name is invalid.');
+  if (manifest.uguiFont !== undefined && !/^[\w .\-]{1,80}$/.test(manifest.uguiFont)) throw new PackError('The pack\'s UI font name is invalid.');
+  const godot = manifest.requires?.godot;
+  if (godot !== undefined && godot !== 3 && godot !== 4) throw new PackError('The pack\'s Godot version must be 3 or 4.');
   if (!Array.isArray(manifest.files) || !manifest.files.length || manifest.files.length > MAX_FILES) {
     throw new PackError('The pack lists no files, or too many.');
   }
@@ -119,6 +137,9 @@ function checkManifest(manifest) {
     seen.add(key);
     if (!/^[0-9a-f]{64}$/.test(file.sha256 || '')) throw new PackError(`"${file.target}" has no valid SHA-256.`);
     if (!Number.isInteger(file.size) || file.size < 0) throw new PackError(`"${file.target}" has no valid size.`);
+  }
+  if (DATA_DIRS[manifest.engine] && !manifest.files.some((f) => /(^|[\\/])strings\.json$/i.test(f.target))) {
+    throw new PackError('The pack has no strings.json.');
   }
 }
 

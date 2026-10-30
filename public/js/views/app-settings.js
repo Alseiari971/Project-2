@@ -104,7 +104,13 @@ export async function appSettingsView(app, params) {
   showAdded();
 
   // Signed packs that give games Arabic: a patch the game loads, or the overlay.
-  const KINDS = { unreal: 'Native patch (Unreal)', unity: 'Native patch (Unity)', overlay: 'Accessibility overlay' };
+  const KINDS = {
+    unreal: 'Native patch (Unreal)',
+    unity: 'Native patch (Unity)',
+    renpy: 'Native patch (Ren\'Py)',
+    godot: 'Native patch (Godot)',
+    overlay: 'Accessibility overlay',
+  };
   const showPacks = async () => {
     const { ready, packs } = await desktop.arabicPacks();
     const el = document.getElementById('arabic-packs');

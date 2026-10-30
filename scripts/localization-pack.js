@@ -6,14 +6,15 @@
 //     commit it) and pack-signing.pub (goes in desktop/config.json as
 //     "localizationPackKey").
 //
-//   node scripts/localization-pack.js make <pack folder> --engine unreal|unity|overlay --id <id> --version <x.y.z>
+//   node scripts/localization-pack.js make <pack folder> --engine unreal|unity|renpy|godot|overlay --id <id> --version <x.y.z>
 //        --key pack-signing.key (--steam-app-id <n> | --game-id <GameShelf id>) [--title "..."]
-//        [--font-bundle <name>] [--backend mono|il2cpp] [--unity <version>] [--arch x64]
-//        [--region x,y,w,h] [--text-luma 170] [--dark-text] [--threshold 0.72]
+//        [--font-bundle <name>] [--ugui-font Arial] [--backend mono|il2cpp] [--unity <version>] [--arch x64]
+//        [--godot 3|4] [--region x,y,w,h] [--text-luma 170] [--dark-text] [--threshold 0.72]
 //     Lists every file under <pack folder>/payload (each lands at the same
 //     path in the game: in Content/Paks for Unreal, in the game folder for
-//     Unity; an overlay pack holds just fingerprints.json from the Arabic
-//     compiler), writes pack.json and signs it.
+//     Unity and Ren'Py, beside the program for Godot; an overlay pack holds
+//     just fingerprints.json from the Arabic compiler), writes pack.json and
+//     signs it.
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -65,6 +66,7 @@ async function main([command, folder, ...rest]) {
     if (opt.backend) requires.unityBackend = opt.backend;
     if (opt.unity) requires.unityVersion = opt.unity;
     if (opt.arch) requires.arch = opt.arch;
+    if (opt.godot) requires.godot = Number(opt.godot);
     const manifest = await writePack(folder, {
       id: opt.id,
       version: opt.version,

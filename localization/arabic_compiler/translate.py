@@ -39,7 +39,7 @@ _LETTERS = re.compile(r'[A-Za-z]')
 
 SYSTEM_PROMPT = """You translate video game text from English into natural Modern Standard Arabic for players in the Middle East and North Africa.
 Rules:
-- Keep every tag, placeholder and key prompt exactly as written, character for character: {0}, {name}, %s, %d, %1$s, %PLAYER%, ${name}, <color=#ff0000>...</color>, <b>, </>, [E], [Press E], <br>, and \\n line breaks. Move them only where Arabic word order needs it.
+- Keep every tag, placeholder and key prompt exactly as written, character for character: {0}, {name}, %s, %d, %1$s, %PLAYER%, ${name}, <color=#ff0000>...</color>, <b>, </>, {i}...{/i}, {w=0.5}, [E], [Press E], [player], <br>, and \\n line breaks. Move them only where Arabic word order needs it.
 - Keep proper names of people and places in their usual Arabic spelling; keep brand and product names in Latin letters.
 - Match the tone: menus short and plain, dialogue natural.
 - Use Western digits (0-9) as written.
@@ -50,9 +50,16 @@ class TranslationError(RuntimeError):
     pass
 
 
+# Ren'Py's text tags with a value or a closing slash ({w=0.5}, {color=#f00},
+# {/i}); a lost closing tag stops a Ren'Py game with an error.
+_RENPY_TAGS = re.compile(r'\{/[A-Za-z_]{1,20}\}|\{[A-Za-z_]{1,20}=[^{}\n]{1,80}\}')
+
+
 def tokens(text: str) -> Counter:
     """The tags, placeholders and line breaks in a line, which must survive translation."""
-    return Counter(m.group(0) for m in _TOKENS.finditer(text))
+    found = Counter(m.group(0) for m in _TOKENS.finditer(text))
+    found.update(m.group(0) for m in _RENPY_TAGS.finditer(text))
+    return found
 
 
 def problem_with(source: str, arabic) -> str | None:

@@ -107,13 +107,13 @@ Every page, menu, message and error has an Arabic translation, with Arabic plura
 
 Many single-player games have no Arabic, and most game engines can't draw it: they show Arabic as separate letters in reverse order. In the Windows app, a game page with a **Play** button also has an **Arabic subtitles** switch beside it. Under its name the switch says how Arabic would come:
 
-- **Native patch:** the game's engine takes an added Arabic patch (Unreal and Unity games without anti-cheat). It goes in when you press Play, and comes out when you switch it off.
+- **Native patch:** the Arabic goes into the game itself and shows in the game's own subtitles, dialogue boxes and menus, in an Arabic font (Unreal, Unity, Ren'Py and Godot games without anti-cheat). It goes in when you press Play, and comes out when you switch it off.
 - **Accessibility overlay:** GameShelf reads the game's English subtitles off the screen and shows the Arabic over them, without touching the game. This is what games with anti-cheat, signed files or their own engines get.
 - **Unavailable:** there's no Arabic pack for the game (hover for the reason).
 
 The pieces, in `localization/` and `desktop/localization/`:
 
-**1. The Arabic compiler** (Python, run when a pack is made, not on players' PCs). It turns Arabic translations into text an engine without Arabic support shows correctly (Unity's text, and most custom engines; Unreal Engine shapes Arabic itself, so its packs get plain Arabic):
+**1. The Arabic compiler** (Python, run when a pack is made, not on players' PCs). It turns Arabic translations into text an engine without Arabic support shows correctly (Unity's text, Godot 3 and most custom engines; Unreal Engine, Ren'Py and Godot 4 shape Arabic themselves, so their packs get plain Arabic):
 - letters already joined, using only Arabic Presentation Forms-B (U+FE70–U+FEFF), the glyphs game fonts are built from;
 - lines over 55 characters wrapped first, in reading order, then each line put in screen order on its own, so two-line subtitles read top to bottom;
 - the game's markup kept working: `<color=#fff>…</color>`, Unreal's `</>`, `{0}`, `%s`, `%1$s`, `%PLAYER%`, `[E]`, `[Press E]`, `<sprite=…>`, `<br>` and `\n`.
@@ -129,11 +129,17 @@ The input is a CSV with `source` and `arabic` columns (or JSON). It writes the X
 
 **2. Checks before launch** (`desktop/localization/`). Before anything is changed, GameShelf:
 - looks for anti-cheat software in the game's folder (Easy Anti-Cheat, BattlEye, Riot Vanguard, Ricochet, EA Javelin, PunkBuster, GameGuard, XIGNCODE3, Anti-Cheat Expert and others). If any is found, or the check can't finish, the game's files are never changed; only the overlay is offered;
-- works out the engine: Unreal Engine 4/5 (`Engine/` plus `Content/Paks/*.pak` or `.utoc`), Unity (`UnityPlayer.dll`, `<Game>_Data/`, Mono or IL2CPP, and its version), or a custom engine (overlay only). Unreal games with signed paks, and Unity games that already have BepInEx mods, also get the overlay only.
+- works out the engine: Unreal Engine 4/5 (`Engine/` plus `Content/Paks/*.pak` or `.utoc`), Unity (`UnityPlayer.dll`, `<Game>_Data/`, Mono or IL2CPP, and its version), Ren'Py (`renpy/` next to `game/` with `.rpa`, `.rpyc` or `.rpy` scripts, and its version), Godot 3 or 4 (the engine's program with a `.pck` of the same name, or with the `.pck` inside the program; the version comes from the `.pck` header), or a custom engine (overlay only). Unreal games with signed paks, Unity games that already have BepInEx mods, and Godot games that already have an `override.cfg` also get the overlay only.
 
 **3. Adding and removing the Arabic files.**
 - **Unreal:** a patch pak named like `pakchunk99-ArabicLocalization_P.pak` goes into `Content/Paks`, where the game loads it after its own files.
-- **Unity:** BepInEx and XUnity.AutoTranslator, with the compiled dictionary and an Arabic TextMeshPro fallback font. GameShelf writes the AutoTranslator settings itself: no translation service at all, only the dictionary, so nothing is sent anywhere and lookups are instant.
+- **Unity:** BepInEx and XUnity.AutoTranslator, with the compiled dictionary and an Arabic TextMeshPro fallback font. GameShelf writes the AutoTranslator settings itself: no translation service at all, only the dictionary, so nothing is sent anywhere and lookups are instant. The settings also name the fonts: `OverrideFont=` (a Windows font with Arabic for Unity's older UI text, Arial unless the pack says otherwise) and `FallbackFontTextMeshPro=` (the pack's TextMeshPro font bundle).
+- **Ren'Py:** the pack's `strings.json` (English line → Arabic) and Arabic font go into `game/tl/arabic/gameshelf/`, with a short script GameShelf writes itself (`desktop/localization/renpy.js`). Ren'Py compiles it when the game starts. It swaps each dialogue line and menu choice for its Arabic as Ren'Py shows it, before `[names]` are filled in, in the pack's font, and turns on Ren'Py's own right-to-left text, which shapes the Arabic. Arabic dialogue lines up on the right of the dialogue box. Lines without Arabic stay in English. Nothing goes into the player's saves or settings.
+- **Godot 3 and 4:** Godot only reads its own `.pck`, so another `.pck` beside the game would be ignored. What it does read at startup is `override.cfg` beside its program. GameShelf writes one that loads a single script of its own (`desktop/localization/godot.js`) from `gameshelf_arabic/`, next to the pack's `strings.json` and fonts. The script adds the lines as an Arabic translation (by the game's own translation keys, or by the English for games without keys), switches the game to it, and gives the game's fonts the Arabic font as a fallback, so labels, buttons and subtitles show Arabic in the game's own UI. Godot 4 shapes the Arabic itself; Godot 3 packs carry the compiler's shaped text. The game's layout isn't mirrored.
+
+Packs carry data only: Ren'Py and Godot packs may add nothing but `strings.json`, `.ttf`/`.otf` fonts and license `.txt` files in their folder, and the scripts that read them are GameShelf's own.
+
+**Fonts.** Every pack that needs a font gets [IBM Plex Sans Arabic](https://github.com/IBM/plex) (`localization/assets/fonts/`, SIL Open Font License, with its license text packed alongside), unless the pack's author picks another with `--font`. It has the Arabic letters, every Arabic Presentation Forms-B glyph the compiler uses, and full Latin, so English text in the same font still reads well.
 
 Files are only ever added, never replaced: if any name is taken, nothing is added. A record is saved before the first file is written, so a crash halfway is undone on the next start. Turning Arabic off removes only files that are still exactly what was added, and folders GameShelf created; anything the player changed or added is left and listed. Nothing is changed while the game is running.
 
@@ -179,14 +185,20 @@ export OPENAI_API_KEY=...
 python scripts/build-arabic-pack.py "C:/Games/My Game" --id my-game-ar --version 1.0.0 --steam-app-id 123456 --key ../gameshelf-keys/pack-signing.key --provider openai --model <model> --context "A fantasy RPG set in a desert kingdom"
 ```
 
-- **What it reads:** a game folder (loose `.locres` files, or a Unity game's `_Data` folder), or a single `.locres`, Unity `.assets`, CSV (`source`, optional `arabic` and `key` columns), JSON, or XUnity `.txt` file. Unity asset files need `pip install UnityPy`, and the lines it picks out are a best guess, so check them. Text inside a game's `.pak` files has to be extracted first, from your own copy, with UnrealPak or FModel; the script never looks for decryption keys.
+- **What it reads:** a game folder (loose `.locres` files, a Unity game's `_Data` folder, a Ren'Py game, or a Godot project), or a single `.locres`, Unity `.assets`, Ren'Py `.rpy` or `.rpa`, Godot translation CSV (`keys,en,...`), gettext `.po`, CSV (`source`, optional `arabic` and `key` columns), JSON, or XUnity `.txt` file.
+  - Unity asset files need `pip install UnityPy`, and the lines it picks out are a best guess, so check them.
+  - Ren'Py dialogue and menu choices are read as Ren'Py reads them, from `.rpy` files and from the `.rpy` files inside `.rpa` archives. A game that ships only compiled `.rpyc` scripts has to be decompiled first, from your own copy (unrpyc).
+  - Godot games keep their text in their `.pck`: recover the project from your own copy (GDRE Tools) and give that folder. Its translation tables are used if it has them; otherwise the text in scenes and `tr()` calls.
+  - Text inside a game's `.pak` files has to be extracted first, from your own copy, with UnrealPak or FModel. The script never looks for decryption keys.
 - **Translating:** `--provider openai` (any OpenAI-compatible API; `--api-base` for others) or `--provider gemini`, with the key in `OPENAI_API_KEY` or `GEMINI_API_KEY`. Lines go out in parallel batches (`--batch`, `--workers`). Every tag and placeholder must come back unchanged or the line is asked for again; lines that still fail are listed, not packed. `--glossary terms.csv` keeps names and terms consistent.
 - **Resuming:** every answer is saved to `translation-cache.sqlite` as it arrives, so a run that's stopped or fails continues where it left off, and rebuilding costs nothing.
 - **Checking:** it always writes `translations.csv`. Machine translation is a draft: have someone who knows the game read it (`--review` stops there), fix lines, then run the script on the edited CSV. Only its blank lines get translated.
 - **What it makes** (`--kind`, which defaults to what the source is):
   - `overlay`: `fingerprints.json`, for any game.
-  - `unity`: give `--bepinex` and `--autotranslator` (their release zips: BepInEx 5 for Mono games, BepInEx 6 for IL2CPP) and `--font-bundle` (a TextMeshPro font with the glyphs in `compiled/charset.txt`).
-  - `unreal`: the game's `.locres` with plain Arabic in it (`--shape` if the game turned shaping off), packed into `pakchunk99-ArabicLocalization_P.pak` with [repak](https://github.com/trumank/repak) (`--pak-version` to match the game) or UnrealPak (`--packer-path`). The game's font must have Arabic letters too; fonts are game assets this doesn't change.
+  - `unity`: give `--bepinex` and `--autotranslator` (their release zips: BepInEx 5 for Mono games, BepInEx 6 for IL2CPP). For TextMeshPro text, give `--font-bundle` (a TextMeshPro font asset bundle built with the game's Unity version), or `--unity-editor` (that Unity Editor) to have one built from the Arabic font. Unity's older UI text uses Arial, which has Arabic (`--ugui-font` for another Windows font, `--no-ugui-font` to keep the game's).
+  - `unreal`: the game's `.locres` with plain Arabic in it (`--shape` if the game turned shaping off), packed into `pakchunk99-ArabicLocalization_P.pak` with [repak](https://github.com/trumank/repak) (`--pak-version` to match the game) or UnrealPak (`--packer-path`). The Arabic font goes into the same pak, under the names of the game's own font files (`.ufont`, `.ttf`, `.otf` under `Content/`), so the game draws its text with it. The names come from the game's pak listing (`--pak-list`, the output of `repak list` or `UnrealPak -List`), a folder you extracted from your own copy (`--extracted`), or `--font-targets`. Bold, Black and Heavy faces get the bold Arabic font. Fonts kept inside `.uasset` files, rather than as separate font files, can't be replaced this way.
+  - `renpy`: `strings.json` and the Arabic font for `game/tl/arabic/gameshelf/`.
+  - `godot`: `strings.json` and the Arabic fonts for `gameshelf_arabic/`. `--godot 3` for Godot 3 games (shaped text); Godot 4 is the default.
 - **Output:** `build/arabic-packs/<id>/pack` is the signed pack to add in App settings.
 
 ## Project layout
@@ -207,9 +219,9 @@ src/games/local.js   built-in sample catalog (data/games.json)
 src/games/stores.js  "where to buy" store links
 src/games/genres.js  genres you can browse by
 desktop/             the Windows app (Electron): window, settings file, installed and running games, games added by hand, app icon
-desktop/localization/ Arabic in games: anti-cheat check, engine detection, signed packs and their files, the subtitle overlay (capture, change detection, OCR helper, fingerprint matching)
+desktop/localization/ Arabic in games: anti-cheat check, engine detection, signed packs and their files, the scripts GameShelf adds to Ren'Py and Godot games, the subtitle overlay (capture, change detection, OCR helper, fingerprint matching)
 desktop/overlay/     the overlay's two windows: the Arabic subtitles, and the hidden capture
-localization/        the Arabic compiler (Python) for engines that can't shape Arabic, the overlay's fingerprints, and the pack generator (.locres files, game text, translation)
+localization/        the Arabic compiler (Python) for engines that can't shape Arabic, the overlay's fingerprints, the pack generator (.locres files, Ren'Py and Godot text, translation) and the bundled Arabic font (assets/fonts)
 public/css/          the stylesheet
 public/fonts/        the Manrope and Alexandria fonts (SIL Open Font License)
 public/js/i18n.js    English and Arabic: t() for phrases, tn() for counts; lang/ar.js has the Arabic

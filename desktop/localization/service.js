@@ -3,7 +3,8 @@
 //
 // Modes:
 // - 'native'      the game's engine takes an added patch (Unreal pak, Unity
-//                 mod) and there's a signed pack for it;
+//                 mod, Ren'Py translation, Godot override) and there's a
+//                 signed pack for it;
 // - 'overlay'     otherwise, when there's a signed overlay pack (anti-cheat,
 //                 signed paks and custom engines all end up here);
 // - 'unavailable' no pack for this game, or no way to use it here.
@@ -12,11 +13,10 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { createMatcher } = require('./fingerprint');
-const { createLocalization, fill } = require('./index');
+const { createLocalization, fill, TIER_ENGINES } = require('./index');
 const { createPackLibrary } = require('./library');
 
 const PREFLIGHT_TTL_MS = 60 * 1000;
-const NATIVE_ENGINES = { 'unreal-pak': 'unreal', 'unity-bepinex': 'unity' };
 
 const why = (text, vars = {}) => ({ text, vars });
 
@@ -69,7 +69,7 @@ function createArabicService({ dataDir, publicKey, overlayAvailable = process.pl
       return { ...base, why: why('GameShelf couldn\'t look inside this game\'s folder.') };
     }
     const summary = (p) => ({ id: p.id, version: p.version, engine: p.engine, title: p.title });
-    const native = result.fileChanges && found.find((p) => p.engine === NATIVE_ENGINES[result.tier]);
+    const native = result.fileChanges && found.find((p) => p.engine === TIER_ENGINES[result.tier]);
     const overlayPack = found.find((p) => p.engine === 'overlay');
     let out;
     if (native) {
