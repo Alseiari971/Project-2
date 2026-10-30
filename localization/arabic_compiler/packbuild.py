@@ -46,7 +46,8 @@ from . import reefont
 from .repak import GamePak, path_hashes, write_pak
 from .rtl import DEFAULT_MAX_LINE, ArabicCompiler, glyphs_needed
 from .sources import SourceError, msg_dump_source, read_source
-from .translate import Cache, Provider, TranslationError, Translator
+from .shared import SharedError, SharedMemory, game_key, line_hash
+from .translate import _LETTERS, _TOKENS, Cache, Provider, TranslationError, Translator, problem_with
 from .xunity import write_translations
 
 REPO = Path(__file__).resolve().parents[2]
@@ -90,6 +91,8 @@ def parse_args(argv=None):
 
     t = p.add_argument_group('translation')
     t.add_argument('--provider', choices=['openai', 'gemini'], help='translation API')
+    t.add_argument('--shared', metavar='URL', help='a GameShelf server\'s shared translation memory (e.g. https://your-gameshelf-site): lines '
+                                                   'it has cost nothing, and it translates the rest once for everyone. Needs an access token in GAMESHELF_TOKEN')
     t.add_argument('--model', help='model name, e.g. what your provider calls its current model')
     t.add_argument('--api-base', help='API base URL (for OpenAI-compatible servers other than OpenAI)')
     t.add_argument('--api-key-env', help='environment variable holding the API key (default OPENAI_API_KEY / GEMINI_API_KEY)')
@@ -156,11 +159,48 @@ def read_glossary(path):
         return {row[0].strip(): row[1].strip() for row in csv.reader(f) if len(row) >= 2 and row[0].strip() and row[0].strip().lower() != 'english'}
 
 
+def shared_translate(rows, args, log) -> dict:
+    """Fills in Arabic from the shared memory, and (unless --no-translate) has the server translate the rest. Returns {source: why not}."""
+    token = os.environ.get('GAMESHELF_TOKEN')
+    if not token:
+        raise BuildError('Set GAMESHELF_TOKEN to an access token from your GameShelf account (Edit profile, Access tokens).')
+    memory = SharedMemory(args.shared, token)
+    game = game_key(args.steam_app_id, args.game_id)
+    # Lines with nothing to translate (numbers, placeholders) stay as they are, as with the other translators.
+    wanted = list(dict.fromkeys(r.source for r in rows if not r.arabic and _LETTERS.search(_TOKENS.sub('', r.source))))
+    try:
+        found = memory.lookup(game, [line_hash(s) for s in wanted])
+        by_hash = {line_hash(s): s for s in wanted}
+        answers = {by_hash[h]: arabic for h, arabic in found.items() if h in by_hash}
+        log(f'Shared memory had {len(answers)} of {len(wanted)} lines.')
+        failed = {}
+        rest = [s for s in wanted if s not in answers]
+        if rest and not args.no_translate:
+            done, failed, _ = memory.translate(game, rest, context=args.context, log=log)
+            answers.update(done)
+    except SharedError as err:
+        raise BuildError(str(err)) from None
+    for row in rows:
+        arabic = answers.get(row.source)
+        # Checked here too: a broken line never goes into a pack.
+        if not row.arabic and arabic and problem_with(row.source, arabic) is None:
+            row.arabic = arabic
+        elif not row.arabic and _LETTERS.search(_TOKENS.sub('', row.source)) is None:
+            row.arabic = row.source
+    return failed
+
+
 def translate_rows(rows, args, out: Path, log):
     """Fills in each row's Arabic; returns {source: why it failed}."""
     missing = [r.source for r in rows if not r.arabic]
     if not missing:
         return {}
+    if args.shared:
+        failed = shared_translate(rows, args, log)
+        # What the server couldn't do can still go to your own --provider.
+        if not args.provider or args.no_translate or all(r.arabic for r in rows):
+            return failed
+        missing = [r.source for r in rows if not r.arabic]
     cache_path = Path(args.cache or out / 'translation-cache.sqlite')
     if args.no_translate:
         # Only what earlier runs already paid for (found by the same provider and model).

@@ -1434,6 +1434,11 @@ label { display: grid; gap: 8px; font-size: 13px; font-weight: 700; color: var(-
 .footer a { text-decoration: underline; }
 .pill-danger { background: transparent; color: var(--danger); box-shadow: inset 0 0 0 1.5px var(--danger); }
 .pill-danger:hover { background: rgba(248, 113, 113, 0.12); }
+.token-list { list-style: none; margin: 0 0 16px; padding: 0; display: grid; gap: 8px; }
+.token-list li { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.token-made { margin: 0 0 16px; }
+.token-made code { display: block; margin-top: 6px; padding: 8px 10px; border-radius: 8px; background: var(--pill); word-break: break-all; user-select: all; }
+#tokens > p.muted { margin-bottom: 16px; }
 .danger-zone { border-color: rgba(248, 113, 113, 0.3); }
 .danger-zone p { margin-bottom: 16px; }
 .delete-form { display: flex; gap: 8px; flex-wrap: wrap; }

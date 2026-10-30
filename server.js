@@ -13,6 +13,7 @@ const { createApi } = require('./src/api');
 const { createPriceService } = require('./src/prices');
 const { createSteamService } = require('./src/steam');
 const { createSteamStore } = require('./src/steam-store');
+const { createTranslationMemory } = require('./src/translation-memory');
 
 function createApp({
   db = openDatabase(),
@@ -20,6 +21,7 @@ function createApp({
   prices = createPriceService(),
   steam = createSteamService(),
   steamStore = createSteamStore(),
+  translations = createTranslationMemory({ db }),
 } = {}) {
   const app = express();
   app.disable('x-powered-by');
@@ -40,7 +42,7 @@ function createApp({
   // Large enough for a resized avatar image.
   app.use(express.json({ limit: '500kb' }));
   app.use(loadUser(db));
-  app.use('/api', createApi({ db, games, prices, steam, steamStore }));
+  app.use('/api', createApi({ db, games, prices, steam, steamStore, translations }));
   app.use(express.static(path.join(__dirname, 'public')));
 
   app.use((err, _req, res, _next) => {
@@ -68,6 +70,9 @@ if (require.main === module) {
     }
     if (!process.env.STEAM_API_KEY) {
       console.log('Steam import is off. Set STEAM_API_KEY to turn it on (see README).');
+    }
+    if (!process.env.OPENAI_API_KEY) {
+      console.log('Shared Arabic translation is off. Set OPENAI_API_KEY to turn it on (see README).');
     }
   });
 }

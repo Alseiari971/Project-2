@@ -9,7 +9,9 @@ const {
   destroySession,
   requireUser,
   rateLimit,
+  createApiToken,
 } = require('./auth');
+const { TranslationLimit } = require('./translation-memory');
 const { GENRES, findGenre } = require('./games/genres');
 const profile = require('./profile');
 const { SteamError } = require('./steam');
@@ -77,7 +79,7 @@ function pitchFrom(text) {
   return pitch.trim();
 }
 
-function createApi({ db, games, prices, steam, steamStore }) {
+function createApi({ db, games, prices, steam, steamStore, translations }) {
   const api = express.Router();
   const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30 });
   const commentLimiter = rateLimit({ windowMs: 60 * 1000, max: 10 });
@@ -641,6 +643,59 @@ function createApi({ db, games, prices, steam, steamStore }) {
     q.deleteComment.run(comment.id);
     res.json({ ok: true });
   });
+
+  // ---- Personal access tokens (for tools such as the pack builder) ----------
+
+  api.get('/me/tokens', requireUser, (req, res) => {
+    const rows = db.prepare('SELECT id, name, created_at, last_used_at FROM api_tokens WHERE user_id = ? ORDER BY id').all(req.user.id);
+    res.json({ tokens: rows.map((r) => ({ id: r.id, name: r.name, createdAt: r.created_at, lastUsedAt: r.last_used_at })) });
+  });
+
+  // Made only from a signed-in session, so one token can't make more.
+  api.post('/me/tokens', requireUser, authLimiter, (req, res) => {
+    if (req.viaToken) return res.status(403).json({ error: 'Sign in on the website to make an access token.' });
+    const name = String(req.body?.name || '').trim().slice(0, 60);
+    if (!name) return res.status(400).json({ error: 'Give the token a name.' });
+    if (db.prepare('SELECT COUNT(*) AS n FROM api_tokens WHERE user_id = ?').get(req.user.id).n >= 10) {
+      return res.status(400).json({ error: 'You already have 10 access tokens. Delete one first.' });
+    }
+    res.status(201).json(createApiToken(db, req.user.id, name));
+  });
+
+  api.delete('/me/tokens/:id', requireUser, (req, res) => {
+    db.prepare('DELETE FROM api_tokens WHERE id = ? AND user_id = ?').run(Number(req.params.id), req.user.id);
+    res.status(204).end();
+  });
+
+  // ---- Shared Arabic translations (see src/translation-memory.js) ----------
+
+  const translateLimiter = rateLimit({ windowMs: 60 * 1000, max: 60 });
+
+  api.post('/translations/lookup', requireUser, translateLimiter, (req, res) => {
+    const { game, hashes } = req.body || {};
+    if (!translations) return res.status(503).json({ error: 'Shared translation isn\'t set up on this server.' });
+    if (!Array.isArray(hashes) || hashes.length > 5000) return res.status(400).json({ error: 'Send up to 5000 line hashes at a time.' });
+    try {
+      res.json({ arabic: translations.lookup(String(game), hashes.map(String)) });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  api.post('/translations/translate', requireUser, translateLimiter, asyncRoute(async (req, res) => {
+    const { game, lines, context } = req.body || {};
+    if (!translations) return res.status(503).json({ error: 'Shared translation isn\'t set up on this server.' });
+    if (!Array.isArray(lines) || !lines.length || lines.length > 200) return res.status(400).json({ error: 'Send 1 to 200 lines at a time.' });
+    try {
+      const wanted = lines.map((l) => ({ hash: String(l?.hash || ''), english: l?.english }));
+      res.json(await translations.translate(req.user, String(game), wanted, { context: String(context || '') }));
+    } catch (err) {
+      if (err instanceof TranslationLimit) return res.status(503).json({ error: err.message });
+      if (err instanceof TypeError) return res.status(400).json({ error: err.message });
+      console.error('Shared translation:', err.message);
+      res.status(502).json({ error: 'The translation service didn\'t answer. Please try again later.' });
+    }
+  }));
 
   api.use((req, res) => res.status(404).json({ error: 'Not found.' }));
 

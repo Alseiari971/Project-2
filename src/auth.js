@@ -49,14 +49,40 @@ function destroySession(db, req, res) {
   res.clearCookie(SESSION_COOKIE, { path: '/' });
 }
 
-// Express middleware: sets req.user when a valid session cookie is present.
+// Personal access tokens (for tools like the pack builder) start with this.
+const API_TOKEN_PREFIX = 'gst_';
+
+/** A new personal access token for a user; the token itself is shown once and only its hash kept. */
+function createApiToken(db, userId, name) {
+  const token = API_TOKEN_PREFIX + crypto.randomBytes(32).toString('base64url');
+  const { lastInsertRowid } = db.prepare('INSERT INTO api_tokens (user_id, name, token_hash) VALUES (?, ?, ?)')
+    .run(userId, name, hashToken(token));
+  return { id: Number(lastInsertRowid), name, token };
+}
+
+// Express middleware: sets req.user from a valid session cookie, or from a
+// personal access token in "Authorization: Bearer gst_...".
 function loadUser(db) {
   const find = db.prepare(`
     SELECT u.id, u.username, u.display_name, u.bio, u.created_at
     FROM sessions s JOIN users u ON u.id = s.user_id
     WHERE s.token_hash = ? AND s.expires_at > ?
   `);
+  const findToken = db.prepare(`
+    SELECT u.id, u.username, u.display_name, u.bio, u.created_at, t.id AS token_id
+    FROM api_tokens t JOIN users u ON u.id = t.user_id
+    WHERE t.token_hash = ?
+  `);
+  const touchToken = db.prepare("UPDATE api_tokens SET last_used_at = datetime('now') WHERE id = ?");
   return (req, _res, next) => {
+    const bearer = /^Bearer (gst_[\w-]{20,})$/.exec(req.headers.authorization || '')?.[1];
+    if (bearer) {
+      const row = findToken.get(hashToken(bearer));
+      if (row) touchToken.run(row.token_id);
+      req.user = row || null;
+      req.viaToken = Boolean(row);
+      return next();
+    }
     const token = parseCookies(req.headers.cookie)[SESSION_COOKIE];
     req.user = token ? find.get(hashToken(token), Date.now()) || null : null;
     next();
@@ -86,6 +112,7 @@ function rateLimit({ windowMs, max }) {
 }
 
 module.exports = {
+  createApiToken,
   hashPassword,
   verifyPassword,
   createSession,

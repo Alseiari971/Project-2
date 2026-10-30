@@ -214,6 +214,19 @@ python scripts/build-arabic-pack.py "C:/Games/My Game" --id my-game-ar --version
     - `--msg-prebuilt` packs message files that already hold Arabic as they are; `--natives <folder>` adds other files you made (an Arabic font for games whose fonts lack it, say) at their `natives/...` paths. The game's fonts are its own: older games may need one of those to show Arabic letters.
 - **Output:** `build/arabic-packs/<id>/pack` is the signed pack to add in App settings.
 
+### Shared translation memory
+
+A GameShelf website can keep every Arabic line it has machine-translated, so each line of a game is paid for once and every later build (by anyone) gets it for free.
+
+- **What's stored:** per game (`steam:<app id>` or `game:<GameShelf id>`), a SHA-256 of each English line and its Arabic. The English itself is never stored, and no game files are.
+- **Who translates:** only the server, with its own API key. It checks that each line's hash really is that line (so nobody can plant Arabic under another line), and that every tag and placeholder came back unchanged, before keeping anything.
+- **Limits:** each account may have `TRANSLATE_DAILY_LINES` new lines translated a day (default 2000), and the whole server `TRANSLATE_MONTHLY_CHARS` characters a month (default 3,000,000). Lines already in the memory never count. Two people asking for the same game at once don't pay twice.
+- **Turning it on:** set `OPENAI_API_KEY` on the server (and optionally `TRANSLATE_MODEL`, default `gpt-4.1-mini`, or `TRANSLATE_API_BASE` for another OpenAI-compatible API). Without a key, the endpoints say it isn't set up.
+- **Using it from the pack builder:** make an access token on the website (Edit profile, Access tokens), set it as `GAMESHELF_TOKEN`, and add `--shared https://your-gameshelf-site`. The builder takes what the memory has, has the server translate the rest, and checks every answer again. With `--no-translate` it only takes what's already there; with `--provider` too, lines the server couldn't do (say, over a limit) go to your own API key.
+- **API:** `POST /api/translations/lookup` `{ game, hashes }` and `POST /api/translations/translate` `{ game, lines: [{ hash, english }], context }`, both for signed-in users (session or `Authorization: Bearer gst_...`); tokens at `GET/POST/DELETE /api/me/tokens`.
+
+Translations of a game's script are derived from it, so sharing them is best kept to games whose publishers allow fan translations.
+
 ## Project layout
 
 ```

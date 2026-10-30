@@ -202,6 +202,7 @@ export async function customizeView(app) {
           <a href="#background">${t('Background')}</a>
           <a href="#theme">${t('Theme color')}</a>
           <a href="#showcases">${t('Showcases')}</a>
+          <a href="#tokens">${t('Access tokens')}</a>
         </nav>
         <div class="customize-sections">
           <section class="panel" id="general">
@@ -217,6 +218,15 @@ export async function customizeView(app) {
           <section class="panel" id="background"><h2>${t('Profile background')}</h2><div id="background-section">${backgroundSection()}</div></section>
           <section class="panel" id="theme"><h2>${t('Theme color')}</h2><div id="theme-section">${themeSection()}</div></section>
           <section class="panel" id="showcases"><h2>${t('Showcases')}</h2><div id="showcases-section">${showcasesSection()}</div></section>
+          <section class="panel" id="tokens">
+            <h2>${t('Access tokens')}</h2>
+            <p class="muted">${t('For tools that work with your account, such as the Arabic pack builder (its --shared option). Anyone with a token can use your account\'s translation allowance, so keep it private and delete it when you\'re done.')}</p>
+            <div id="token-list"></div>
+            <form class="delete-form" id="token-form">
+              <input class="input" name="name" maxlength="60" placeholder="${t('What it\'s for, e.g. Pack builder')}" required aria-label="${t('Token name')}">
+              <button class="pill-btn pill-light" type="submit">${t('Make a token')}</button>
+            </form>
+          </section>
           <section class="panel danger-zone">
             <h2>${t('Delete account')}</h2>
             <p class="muted">${t("This permanently removes your account, game list, profile and every comment you've written. It can't be undone.")}</p>
@@ -333,6 +343,31 @@ export async function customizeView(app) {
     runCleanups();
     customizeView(app);
   });
+  // Personal access tokens: listed by name; a new one is shown once.
+  const showTokens = async (made) => {
+    const { tokens } = await api('/me/tokens');
+    mount($('token-list'), html`
+      ${made ? html`<p class="token-made">${t('Your new token (copy it now; it won\'t be shown again):')} <code>${made.token}</code></p>` : ''}
+      ${tokens.length ? html`<ul class="token-list">${tokens.map((tok) => html`
+        <li><span><strong>${bdi(tok.name)}</strong> <small class="muted">${tok.lastUsedAt ? t('last used {date}', { date: tok.lastUsedAt.slice(0, 10) }) : t('never used')}</small></span>
+          <button type="button" class="btn btn-sm btn-quiet" data-token="${tok.id}">${t('Delete')}</button></li>`)}</ul>` : ''}`);
+    $('token-list').querySelectorAll('[data-token]').forEach((b) => b.addEventListener('click', async () => {
+      await api(`/me/tokens/${b.dataset.token}`, { method: 'DELETE' });
+      showTokens();
+    }));
+  };
+  showTokens().catch(() => {});
+  $('token-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      const made = await api('/me/tokens', { method: 'POST', body: { name: e.target.name.value } });
+      e.target.reset();
+      showTokens(made);
+    } catch (err) {
+      toast(err.message, { error: true });
+    }
+  });
+
   $('delete-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     if (!window.confirm(t('Delete your GameShelf account and everything in it? This can’t be undone.'))) return;

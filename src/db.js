@@ -99,6 +99,38 @@ function openDatabase(file = process.env.DB_FILE || path.join(__dirname, '..', '
     );
     CREATE INDEX IF NOT EXISTS comments_profile ON comments(profile_id, id);
 
+    -- Shared Arabic translations of game text: one row per game and English
+    -- line, found by a SHA-256 of the English (which is never stored), so a line
+    -- is translated once for everyone. See src/translation-memory.js.
+    CREATE TABLE IF NOT EXISTS translation_memory (
+      game       TEXT NOT NULL,
+      line_hash  TEXT NOT NULL,
+      arabic     TEXT NOT NULL,
+      origin     TEXT NOT NULL CHECK (origin IN ('machine', 'reviewed')),
+      model      TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (game, line_hash)
+    );
+
+    -- Lines and characters each user had machine-translated, per day, for the limits.
+    CREATE TABLE IF NOT EXISTS translation_usage (
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      day     TEXT NOT NULL,
+      lines   INTEGER NOT NULL DEFAULT 0,
+      chars   INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (user_id, day)
+    );
+
+    -- Personal access tokens, for tools such as the pack builder. Only a hash is kept.
+    CREATE TABLE IF NOT EXISTS api_tokens (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name         TEXT NOT NULL,
+      token_hash   TEXT NOT NULL UNIQUE,
+      created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+      last_used_at TEXT
+    );
+
     -- Which Steam app each RAWG game is (NULL = checked, not on Steam). This never
     -- changes, so each game is looked up once, ever, to save the RAWG request quota.
     CREATE TABLE IF NOT EXISTS steam_ids (
