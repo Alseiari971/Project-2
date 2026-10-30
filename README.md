@@ -42,6 +42,18 @@ Then open http://localhost:3000.
 
 Out of the box the site uses a small built-in catalog of about 35 popular games, so you can try it right away.
 
+## Hosting the website on a VPS
+
+`deploy/setup-vps.sh` sets up the website on a fresh Ubuntu or Debian server, as root:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Alseiari971/Project-2/claude/clever-brahmagupta-stqn0m/deploy/setup-vps.sh -o setup-vps.sh && bash setup-vps.sh
+```
+
+It installs Node.js 22 and [Caddy](https://caddyserver.com) (which gets the HTTPS certificate), runs GameShelf as a `gameshelf` service under its own user, keeps the database in `/var/lib/gameshelf` with a daily backup in `/var/backups/gameshelf` (two weeks kept; copy them off the server now and then too), and lets only SSH, HTTP and HTTPS through the firewall. Without a domain the site gets `<ip-with-dashes>.sslip.io`, a free name that points at the server; once your own domain's A record points at the server, run `bash setup-vps.sh your-domain.com`. Running the script again also updates GameShelf.
+
+Keys go in `/etc/gameshelf.env` (readable only by root; see Settings below), then `systemctl restart gameshelf`. The log: `journalctl -u gameshelf -n 50`.
+
 ## Windows app
 
 GameShelf also comes as a desktop app. It runs everything on your computer, so it works without hosting the website anywhere.
