@@ -15,7 +15,7 @@ from pathlib import Path
 
 from arabic_compiler.fingerprint import FingerprintTable
 from arabic_compiler.packbuild import BuildError, build, parse_args
-from arabic_compiler.remsg import MsgError, extract_messages
+from arabic_compiler.remsg import PATCH_MARKER, MsgError, extract_messages
 from arabic_compiler.remsg import read_dump, write_dump
 from arabic_compiler.repak import ENTRY, HEADER, GamePak, PakError, murmur3_32, path_hashes, read_pak, write_pak
 from arabic_compiler.sources import SourceError, read_source
@@ -299,7 +299,7 @@ class BuildingReEngine(unittest.TestCase):
         pack = build(args, log=self.logged.append)
         # The Arabic message file goes back under the same two hashes as the game's own.
         files = read_pak((pack / 'payload/re_chunk_000.pak.patch_XXX.pak').read_bytes())
-        self.assertEqual(list(files), [path_hashes(MSG_PATH)])
+        self.assertEqual(sorted(files), sorted([path_hashes(MSG_PATH), path_hashes(PATCH_MARKER)]))
         content = {e['guid']: e['content'] for e in json.loads(files[path_hashes(MSG_PATH)][len(b'FAKEMSG'):])['entries']}
         self.assertEqual(content[ENTRIES[0][0]][1], 'عربي ' + ENTRIES[0][1])
         self.assertTrue(any('Took 1 message files out of re_chunk_000.pak' in line for line in self.logged))
@@ -327,8 +327,27 @@ class BuildingReEngine(unittest.TestCase):
             writer.writerows(rows)
         pack = build(parse_args(common + ['--translations', str(reviewed)]), log=self.logged.append)
         files = read_pak((pack / 'payload/re_chunk_000.pak.patch_XXX.pak').read_bytes())
-        self.assertEqual(list(files), [path_hashes(MSG_PATH)])  # the UI file has no Arabic, so the game keeps its own
+        # The UI file has no Arabic, so the game keeps its own.
+        self.assertEqual(sorted(files), sorted([path_hashes(MSG_PATH), path_hashes(PATCH_MARKER)]))
         self.assertTrue(any('1 message files have no Arabic yet' in line for line in self.logged))
+
+    def test_an_arabic_patch_already_in_the_game_isnt_read_as_its_english(self):
+        game = self.tmp / 'RE3 Demo'
+        game.mkdir()
+        (game / 're_chunk_000.pak').write_bytes(game_pak([(MSG_PATH, game_msg(ENTRIES), 1)]))
+        common = [str(game), '--engine', 'reengine', '--msg-tool', str(self.tool), '--no-shape',
+                  '--id', 'test-re', '--version', '1.0.0', '--steam-app-id', '1173690',
+                  '--key', str(self.keys / 'k/pack-signing.key'), '--out', str(self.tmp / 'out'),
+                  '--provider', 'openai', '--model', 'test-model', '--api-base', self.api.base]
+        pack = build(parse_args(common), log=self.logged.append)
+        # GameShelf puts the patch in the game, and the pack is built again.
+        shutil.copyfile(pack / 'payload/re_chunk_000.pak.patch_XXX.pak', game / 're_chunk_000.pak.patch_001.pak')
+        self.logged.clear()
+        out = build(parse_args(common + ['--review']), log=self.logged.append)
+        self.assertTrue(any('Skipped re_chunk_000.pak.patch_001.pak' in line for line in self.logged))
+        with (out / 'translations.csv').open(encoding='utf-8-sig') as f:
+            sources = [r['source'] for r in csv.DictReader(f)]
+        self.assertEqual(sources, [ENTRIES[0][1], ENTRIES[1][1]])  # the game's English, not the Arabic
 
     def test_an_overlay_pack_from_the_same_message_files(self):
         args = parse_args([str(self.extracted(with_dump=False)), '--engine', 'overlay', '--msg-tool', str(self.tool),

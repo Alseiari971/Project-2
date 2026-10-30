@@ -468,6 +468,8 @@ def build_reengine(source, rows, args, out: Path, payload: Path, log):
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(path, target)
     files = sorted((remsg.pak_entry(p.relative_to(stage).as_posix()), p.read_bytes()) for p in stage.rglob('*') if p.is_file())
+    if files:
+        files.append((remsg.PATCH_MARKER, remsg.PATCH_MARKER_TEXT))
     if not files:
         raise BuildError('There\'s nothing to put in the pak.')
     (payload / RE_PAK_NAME).write_bytes(write_pak(files))

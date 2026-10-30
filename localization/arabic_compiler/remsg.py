@@ -35,13 +35,17 @@ import zlib
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
-from .repak import GamePak, PakError
+from .repak import GamePak, PakError, path_hashes
 
 LANGUAGE_IDS = {'English': 1, 'Arabic': 21}
 MSG_FILE = re.compile(r'\.msg\.\d+$', re.I)
 UNNAMED = re.compile(r'^unnamed/([0-9a-f]{8})-([0-9a-f]{8})\.msg\.\d+$')
 MSG_MAGIC = b'GMSG'
 MAX_MSG_SIZE = 32 * 1024 * 1024
+# A file every Arabic patch made by the pack builder holds (the game never
+# asks for it), so a patch already in the game is never read as its English.
+PATCH_MARKER = 'natives/stm/gameshelf/arabic_patch.txt'
+PATCH_MARKER_TEXT = b'Arabic patch made by GameShelf. Turn Arabic off in GameShelf to take it out.\n'
 DUMP_FILE = re.compile(r'\.msg\.\d+\.(json|csv)$', re.I)
 _ARABIC = re.compile('[؀-ۿ]')
 
@@ -90,9 +94,13 @@ def extract_messages(paks: list, out: Path, log) -> list:
     newest = {}
     opened = []
     try:
+        ours = path_hashes(PATCH_MARKER)
         for path in paks:
             pak = GamePak(path)
             opened.append(pak)
+            if ours in pak.entries:
+                log(f'Skipped {Path(path).name}: it\'s GameShelf\'s Arabic patch, not the game\'s own text.')
+                continue
             for hashes, (_, _, size, _) in pak.entries.items():
                 if 24 <= size <= MAX_MSG_SIZE:
                     newest[hashes] = pak
