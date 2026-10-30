@@ -15,6 +15,11 @@ writes:
 English is language 1 and Arabic 21. The Arabic goes into the slots asked for:
 English by default (the language the game is set to), and Arabic too for games
 that have an Arabic option.
+
+Message files can also be taken straight out of the game's own paks (see
+extract_messages). Their names aren't kept in the pak, only two hashes of each,
+so they're named by those ("unnamed/<hash>-<hash>.msg.<version>") and the
+Arabic patch puts its files back under the same hashes.
 """
 
 from __future__ import annotations
@@ -23,13 +28,20 @@ import csv
 import json
 import re
 import shutil
+import struct
 import subprocess
 import sys
+import zlib
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
+from .repak import GamePak, PakError
+
 LANGUAGE_IDS = {'English': 1, 'Arabic': 21}
 MSG_FILE = re.compile(r'\.msg\.\d+$', re.I)
+UNNAMED = re.compile(r'^unnamed/([0-9a-f]{8})-([0-9a-f]{8})\.msg\.\d+$')
+MSG_MAGIC = b'GMSG'
+MAX_MSG_SIZE = 32 * 1024 * 1024
 DUMP_FILE = re.compile(r'\.msg\.\d+\.(json|csv)$', re.I)
 _ARABIC = re.compile('[؀-ۿ]')
 
@@ -59,10 +71,59 @@ def pak_path(path: Path | str) -> str | None:
 
 
 def checked_pak_path(value: str) -> str:
+    if UNNAMED.match(value):
+        return value
     path = PurePosixPath(value.replace('\\', '/').lstrip('/'))
     if not path.parts or path.parts[0].lower() != 'natives' or '..' in path.parts or not MSG_FILE.search(path.name):
         raise MsgError(f'"{value}" should be the message file\'s path in the game, like natives/stm/message/.../name.msg.22.')
     return path.as_posix()
+
+
+def pak_entry(in_pak: str):
+    """What a file is called in a pak: its path, or the two hashes of one taken out of the game's paks."""
+    found = UNNAMED.match(in_pak)
+    return (int(found.group(1), 16), int(found.group(2), 16)) if found else in_pak
+
+
+def extract_messages(paks: list, out: Path, log) -> list:
+    """Takes every message file out of the game's paks (later paks win, as in the game). Returns [(file, name)]."""
+    newest = {}
+    opened = []
+    try:
+        for path in paks:
+            pak = GamePak(path)
+            opened.append(pak)
+            for hashes, (_, _, size, _) in pak.entries.items():
+                if 24 <= size <= MAX_MSG_SIZE:
+                    newest[hashes] = pak
+        found, skipped = [], 0
+        for hashes, pak in newest.items():
+            try:
+                if pak.read(hashes, limit=8)[4:8] != MSG_MAGIC:
+                    continue
+                data = pak.read(hashes)
+            except PakError as err:
+                if 'zstandard' in str(err):
+                    raise
+                skipped += 1
+                continue
+            except zlib.error:
+                skipped += 1
+                continue
+            (version,) = struct.unpack_from('<I', data)
+            name = f'unnamed/{hashes[0]:08x}-{hashes[1]:08x}.msg.{version}'
+            target = out / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+            found.append((target, name))
+    except PakError as err:
+        raise MsgError(str(err)) from None
+    finally:
+        for pak in opened:
+            pak.close()
+    log(f'Took {len(found)} message files out of {", ".join(Path(p).name for p in paks)}'
+        + (f' ({skipped} encrypted or unreadable files skipped)' if skipped else '') + '.')
+    return found
 
 
 def is_dump(path: Path) -> bool:

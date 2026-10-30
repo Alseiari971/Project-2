@@ -13,11 +13,18 @@ Paths ("natives/stm/...") are hashed as UTF-16LE with MurmurHash3 (x86,
 32-bit, seed 0xFFFFFFFF), ASCII letters lowercased for one hash and
 uppercased for the other, as the game looks them up. Files are stored without
 compression, and the entry table without encryption (feature flags 0).
+
+The game's own paks are read too, to take the message files out of them:
+entries stored as they are, or compressed with deflate or (with the zstandard
+package, or Python 3.14) zstd. Paks whose entry table is encrypted, and
+encrypted entries, are refused: that needs the game's key, which this won't
+look for.
 """
 
 from __future__ import annotations
 
 import struct
+import zlib
 
 MAGIC = b'KPKA'
 HEADER = struct.Struct('<4sBBHII')
@@ -76,12 +83,12 @@ class PakError(ValueError):
     pass
 
 
-def write_pak(files: list[tuple[str, bytes]]) -> bytes:
-    """A version 4.0 pak holding `files` ([(path inside the pak, bytes)])."""
+def write_pak(files: list[tuple[str | tuple[int, int], bytes]]) -> bytes:
+    """A version 4.0 pak holding `files` ([(path inside the pak, or its two hashes, bytes)])."""
     seen = set()
     entries, offset = [], HEADER.size + ENTRY.size * len(files)
     for path, data in files:
-        hashes = path_hashes(path)
+        hashes = path if isinstance(path, tuple) else path_hashes(path)
         if hashes in seen:
             raise PakError(f'{path} is in the pak twice.')
         seen.add(hashes)
@@ -106,3 +113,89 @@ def read_pak(blob: bytes) -> dict[tuple[int, int], bytes]:
             raise PakError(f'Entry {i} is compressed, encrypted or out of bounds.')
         out[(lower, upper)] = blob[offset:offset + size]
     return out
+
+
+# Feature flags that change how a pak is laid out or read.
+ENTRY_ENCRYPTION = 0x08
+CHUNK_TABLE = 0x20
+COMPRESSION_MASK = 0x0F
+ENTRY_ENCRYPTION_MASK = 0xFF0000
+
+
+def _zstd_streams():
+    """Makes zstd decompressors that take a frame in pieces (each call returns what it can), or None."""
+    try:
+        from compression import zstd  # Python 3.14
+        return lambda: zstd.ZstdDecompressor().decompress
+    except ImportError:
+        pass
+    try:
+        import zstandard
+    except ImportError:
+        return None
+    return lambda: zstandard.ZstdDecompressor().decompressobj().decompress
+
+
+class GamePak:
+    """A game's own .pak, opened for reading entries by their hashes."""
+
+    def __init__(self, path, zstd=None):
+        self.path = path
+        self.file = open(path, 'rb')
+        try:
+            self._read_table()
+        except BaseException:
+            self.file.close()
+            raise
+        self.zstd = zstd if zstd is not None else _zstd_streams()
+
+    def _read_table(self):
+        path = self.path
+        head = self.file.read(HEADER.size)
+        if len(head) < HEADER.size:
+            raise PakError(f'{path} is too short to be a pak.')
+        magic, major, minor, feature, count, _ = HEADER.unpack(head)
+        if magic != MAGIC:
+            raise PakError(f'{path} isn\'t an RE Engine pak.')
+        if major != 4:
+            raise PakError(f'{path} is a version {major}.{minor} pak, which this can\'t read.')
+        if feature & ENTRY_ENCRYPTION:
+            raise PakError(f'{path} has an encrypted file table. Reading it needs the game\'s key, which this won\'t look for.')
+        table = self.file.read(ENTRY.size * count)
+        if len(table) < ENTRY.size * count:
+            raise PakError(f'{path} is cut short.')
+        self.chunked = bool(feature & CHUNK_TABLE)
+        self.entries = {}
+        for i in range(count):
+            lower, upper, offset, stored, size, attributes, _ = ENTRY.unpack_from(table, i * ENTRY.size)
+            self.entries[(lower, upper)] = (offset, stored, size, attributes)
+
+    def close(self):
+        self.file.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.close()
+
+    def read(self, hashes, limit=None) -> bytes:
+        """An entry's bytes, or just its first `limit` bytes (reading only the start of the file)."""
+        offset, stored, size, attributes = self.entries[hashes]
+        if attributes & ENTRY_ENCRYPTION_MASK or (self.chunked and attributes & (1 << 24)):
+            raise PakError('That file is encrypted or split into chunks.')
+        compression = attributes & COMPRESSION_MASK
+        self.file.seek(offset)
+        # The first 4 KB of a compressed file is plenty to decompress its first few bytes.
+        data = self.file.read(min(stored, limit if compression == 0 else 4096) if limit else stored)
+        if compression == 0:
+            return data
+        if compression == 1:
+            out = zlib.decompressobj(-15)
+            return out.decompress(data, limit) if limit else out.decompress(data) + out.flush()
+        if compression == 2:
+            if not self.zstd:
+                raise PakError('This game compresses files with zstd: run  pip install zstandard  and try again.')
+            out = self.zstd()(data)
+            return out[:limit] if limit else out
+        raise PakError(f'Unknown compression {compression}.')

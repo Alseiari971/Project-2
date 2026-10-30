@@ -5,6 +5,8 @@ author installs)."""
 import csv
 import json
 import shutil
+import struct
+import zlib
 import subprocess
 import sys
 import tempfile
@@ -13,8 +15,9 @@ from pathlib import Path
 
 from arabic_compiler.fingerprint import FingerprintTable
 from arabic_compiler.packbuild import BuildError, build, parse_args
+from arabic_compiler.remsg import MsgError, extract_messages
 from arabic_compiler.remsg import read_dump, write_dump
-from arabic_compiler.repak import ENTRY, PakError, murmur3_32, path_hashes, read_pak, write_pak
+from arabic_compiler.repak import ENTRY, HEADER, GamePak, PakError, murmur3_32, path_hashes, read_pak, write_pak
 from arabic_compiler.sources import SourceError, read_source
 from test_build_pack import HAS_NODE, REPO, FakeApi, node_read_pack
 
@@ -48,7 +51,10 @@ src = pathlib.Path(a.i)
 if a.e:
     pathlib.Path(a.i + ".new").write_bytes(b"FAKEMSG" + pathlib.Path(a.e).read_bytes())
 else:
-    pathlib.Path(a.i + "." + a.m).write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    raw = src.read_bytes()
+    # A message file out of a game pak: version, "GMSG", then (here) the dump itself.
+    text = raw[8:] if raw[4:8] == b"GMSG" else raw
+    pathlib.Path(a.i + "." + a.m).write_bytes(text)
 print("All Done.")
 '''
 
@@ -74,6 +80,73 @@ class PakFormat(unittest.TestCase):
         self.assertEqual(len(blob), 16 + 48 * 2 + len(b'first') + len(b'second file'))
         with self.assertRaisesRegex(PakError, 'twice'):
             write_pak([('natives/a.msg.22', b'1'), ('NATIVES/A.MSG.22', b'2')])
+
+
+def deflate(data):
+    out = zlib.compressobj(9, zlib.DEFLATED, -15)
+    return out.compress(data) + out.flush()
+
+
+def game_pak(entries, feature=0):
+    """A pak as a game ships it: entries are (path, bytes, attributes); attributes 1 = deflate, 2 = zstd (stood in by deflate here)."""
+    stored = [(path, deflate(data) if attributes & 0xF in (1, 2) else data, len(data), attributes) for path, data, attributes in entries]
+    offset = HEADER.size + ENTRY.size * len(stored)
+    table, blobs = [], []
+    for path, blob, size, attributes in stored:
+        table.append(ENTRY.pack(*path_hashes(path), offset, len(blob), size, attributes, 0))
+        blobs.append(blob)
+        offset += len(blob)
+    return HEADER.pack(b'KPKA', 4, 0, feature, len(stored), 0) + b''.join(table) + b''.join(blobs)
+
+
+def game_msg(entries, version=22):
+    """A message file as it comes out of a game pak: version, "GMSG", then (for the stand-in tool) its dump."""
+    return struct.pack('<I', version) + b'GMSG' + json.dumps(dump_json(entries)).encode('utf-8')
+
+
+MSG_PATH = 'natives/stm/message/mes_main/ch_mes_main.msg.22'
+
+
+class GamePaks(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp)
+
+    def test_message_files_come_out_of_the_games_paks(self):
+        base = self.tmp / 're_chunk_000.pak'
+        base.write_bytes(game_pak([
+            (MSG_PATH, game_msg(ENTRIES[:1]), 0),
+            ('natives/stm/message/ui.msg.22', game_msg(ENTRIES[1:2]), 1),
+            ('natives/stm/texture/a.tex.10', b'\0' * 64, 1),
+            ('natives/stm/message/secret.msg.22', game_msg(ENTRIES), 1 << 16),  # an encrypted file
+        ]))
+        patch = self.tmp / 're_chunk_000.pak.patch_001.pak'
+        patch.write_bytes(game_pak([(MSG_PATH, game_msg(ENTRIES[:2]), 1)]))  # the patch's version wins
+        logged = []
+        found = extract_messages([base, patch], self.tmp / 'out', logged.append)
+        names = sorted(name for _, name in found)
+        lower, upper = path_hashes(MSG_PATH)
+        self.assertIn(f'unnamed/{lower:08x}-{upper:08x}.msg.22', names)
+        self.assertEqual(len(names), 2)
+        by_name = {name: path for path, name in found}
+        self.assertEqual(by_name[f'unnamed/{lower:08x}-{upper:08x}.msg.22'].read_bytes(), game_msg(ENTRIES[:2]))
+        self.assertIn('1 encrypted or unreadable files skipped', logged[0])
+
+    def test_zstd_files_need_a_zstd_decompressor(self):
+        path = self.tmp / 're_chunk_000.pak'
+        path.write_bytes(game_pak([(MSG_PATH, game_msg(ENTRIES[:1]), 2)]))
+        with GamePak(path, zstd=lambda: (lambda data: zlib.decompressobj(-15).decompress(data))) as pak:
+            self.assertEqual(pak.read(path_hashes(MSG_PATH), limit=8)[4:8], b'GMSG')
+        with GamePak(path) as pak:
+            pak.zstd = None
+            with self.assertRaisesRegex(PakError, 'pip install zstandard'):
+                pak.read(path_hashes(MSG_PATH))
+
+    def test_an_encrypted_file_table_is_refused(self):
+        path = self.tmp / 're_chunk_000.pak'
+        path.write_bytes(game_pak([(MSG_PATH, game_msg(ENTRIES[:1]), 0)], feature=0x08))
+        with self.assertRaisesRegex(MsgError, 'won\'t look for'):
+            extract_messages([path], self.tmp / 'out', lambda *_: None)
 
 
 class MessageDumps(unittest.TestCase):
@@ -133,11 +206,13 @@ class MessageDumps(unittest.TestCase):
         bare.mkdir(parents=True)
         (bare / 'ch.msg.22').write_bytes(b'msg')
         self.assertEqual(read_source(self.tmp / 'bare').msg_files[0][1], 'natives/stm/message/ch.msg.22')
+        # A game folder: its own paks are read, base first, then its patches in order.
         game = self.tmp / 'RE2'
         game.mkdir()
-        (game / 're_chunk_000.pak').write_bytes(b'KPKA')
-        with self.assertRaisesRegex(SourceError, 'Extract the message files'):
-            read_source(game)
+        for name in ('re_chunk_000.pak', 're_chunk_000.pak.patch_002.pak', 're_chunk_000.pak.patch_001.pak', 'other.pak'):
+            (game / name).write_bytes(b'KPKA')
+        self.assertEqual([p.name for p in read_source(game).game_paks],
+                         ['re_chunk_000.pak', 're_chunk_000.pak.patch_001.pak', 're_chunk_000.pak.patch_002.pak'])
 
 
 @unittest.skipUnless(HAS_NODE, 'signing needs Node.js')
@@ -212,6 +287,23 @@ class BuildingReEngine(unittest.TestCase):
         self.assertEqual(entries[ENTRIES[0][0]][1], 'عربي ' + ENTRIES[0][1])
         # The game's own folder isn't written to.
         self.assertEqual(sorted(p.name for p in (self.tmp / 'extracted/natives/stm/message/mes_main').iterdir()), ['ch_mes_main.msg.22'])
+
+    def test_straight_from_the_game_folder(self):
+        game = self.tmp / 'RE3 Demo'
+        game.mkdir()
+        (game / 're_chunk_000.pak').write_bytes(game_pak([(MSG_PATH, game_msg(ENTRIES), 1), ('natives/stm/x.tex.10', b'\0' * 99, 1)]))
+        args = parse_args([str(game), '--engine', 'reengine', '--msg-tool', str(self.tool), '--no-shape',
+                           '--id', 'test-re', '--version', '1.0.0', '--steam-app-id', '1173690',
+                           '--key', str(self.keys / 'k/pack-signing.key'), '--out', str(self.tmp / 'out'),
+                           '--provider', 'openai', '--model', 'test-model', '--api-base', self.api.base])
+        pack = build(args, log=self.logged.append)
+        # The Arabic message file goes back under the same two hashes as the game's own.
+        files = read_pak((pack / 'payload/re_chunk_000.pak.patch_XXX.pak').read_bytes())
+        self.assertEqual(list(files), [path_hashes(MSG_PATH)])
+        content = {e['guid']: e['content'] for e in json.loads(files[path_hashes(MSG_PATH)][len(b'FAKEMSG'):])['entries']}
+        self.assertEqual(content[ENTRIES[0][0]][1], 'عربي ' + ENTRIES[0][1])
+        self.assertTrue(any('Took 1 message files out of re_chunk_000.pak' in line for line in self.logged))
+        self.assertEqual(sorted(p.name for p in game.iterdir()), ['re_chunk_000.pak'])  # the game folder isn't written to
 
     def test_an_overlay_pack_from_the_same_message_files(self):
         args = parse_args([str(self.extracted(with_dump=False)), '--engine', 'overlay', '--msg-tool', str(self.tool),

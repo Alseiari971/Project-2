@@ -59,6 +59,8 @@ class Source:
     # without dumps ([(path, natives/... path)]).
     msg_dumps: list = field(default_factory=list)
     msg_files: list = field(default_factory=list)
+    # RE Engine: the game's own paks, base first, to take the message files out of.
+    game_paks: list = field(default_factory=list)
 
 
 def _csv(path: Path) -> Source:
@@ -446,9 +448,12 @@ def _reengine_folder(folder: Path) -> Source:
 
 def _game_folder(folder: Path) -> Source:
     if (folder / 're_chunk_000.pak').is_file():
-        raise SourceError('This RE Engine game keeps its text inside its .pak files. Extract the message files (natives/stm/...) '
-                          'from your own copy with REtool or ree-pak, and run this on the extracted folder. Encrypted files '
-                          'need the game\'s own key, which this tool won\'t look for.')
+        # An RE Engine game: its message files are taken out of its paks (base first, then each patch in order).
+        patches = sorted((int(m.group(1)), p) for p in folder.iterdir()
+                         if (m := re.match(r'^re_chunk_000\.pak\.patch_(\d{3,})\.pak$', p.name, re.I)))
+        return Source([], engine='reengine', game_paks=[folder / 're_chunk_000.pak', *(p for _, p in patches)],
+                      notes=['Reading the game\'s own paks. Turn Arabic off for this game in GameShelf first, '
+                             'so its Arabic patch isn\'t read as the game\'s English.'])
     if folder.name.lower() == 'natives' or (folder / 'natives').is_dir():
         return _reengine_folder(folder)
     locres_files = sorted(folder.rglob('*.locres'))

@@ -3,3 +3,6 @@ arabic-reshaper>=3.0,<4
 python-bidi>=0.6,<0.7
 # Optional, only for reading Unity .assets files in scripts/build-arabic-pack.py:
 # UnityPy
+# Optional, for RE Engine games that compress their files with zstd
+# (scripts/build-arabic-pack.py reading a game's own paks). Python 3.14 has it built in.
+# zstandard

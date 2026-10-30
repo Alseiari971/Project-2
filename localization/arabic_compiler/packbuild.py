@@ -452,7 +452,7 @@ def build_reengine(source, rows, args, out: Path, payload: Path, log):
         target = stage / in_pak
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(path, target)
-    files = sorted((p.relative_to(stage).as_posix(), p.read_bytes()) for p in stage.rglob('*') if p.is_file())
+    files = sorted((remsg.pak_entry(p.relative_to(stage).as_posix()), p.read_bytes()) for p in stage.rglob('*') if p.is_file())
     if not files:
         raise BuildError('There\'s nothing to put in the pak.')
     (payload / RE_PAK_NAME).write_bytes(write_pak(files))
@@ -561,6 +561,13 @@ def build(args, log=print) -> Path:
     for note in source.notes:
         log(note)
     kind = args.kind or source.engine or 'overlay'
+    if source.game_paks:
+        try:
+            source.msg_files = remsg.extract_messages(source.game_paks, out / 'msg-from-game', log)
+        except remsg.MsgError as err:
+            raise BuildError(str(err)) from None
+        if not source.msg_files:
+            raise BuildError('Found no message files in the game\'s paks.')
     # RE Engine message files without dumps (for an RE Engine pack, or an
     # overlay pack made from the same text) are read with REMSG_Converter.
     if source.msg_files and not source.msg_dumps and not (kind == 'reengine' and args.msg_prebuilt):
