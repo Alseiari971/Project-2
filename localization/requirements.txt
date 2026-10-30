@@ -1,6 +1,8 @@
 arabic-reshaper>=3.0,<4
 # 0.6 reports the embedding levels the compiler reorders by (see rtl.py, _levels).
 python-bidi>=0.6,<0.7
+# Font metrics, for lining Arabic up on the right in RE Engine packs.
+fonttools>=4.40
 # Optional, only for reading Unity .assets files in scripts/build-arabic-pack.py:
 # UnityPy
 # Optional, for RE Engine games that compress their files with zstd

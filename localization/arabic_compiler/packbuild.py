@@ -138,6 +138,8 @@ def parse_args(argv=None):
     c.add_argument('--extracted', help='unreal: a folder of the game\'s files you extracted from your own copy, to find its fonts')
     c.add_argument('--font-targets', help='unreal: the font files to replace, comma-separated, e.g. MyGame/Content/UI/Fonts/Roboto.ufont; '
                                           'reengine: .oft fonts, e.g. natives/stm/escape/ui/ui0000/font/helveticaneueltw1g-cn.oft.1')
+    c.add_argument('--align-right', action=argparse.BooleanOptionalAction, default=True,
+                   help='reengine: line up Arabic text on the right (on unless --no-align-right; needs fonttools)')
     c.add_argument('--font-converter-cmd', help='reengine: an installed tool that makes .oft fonts, with {input} and {output}, '
                                                 'e.g. "REE.Fonts.Cryptor.exe {input} {output}" (GameShelf makes them itself otherwise)')
     c.add_argument('--no-fonts', action='store_true', help='unreal, reengine: leave the game\'s fonts as they are')
@@ -474,10 +476,50 @@ def dump_messages(source, args, out: Path, log):
 RE_CUES = re.compile(r'^(?:<TIME [^<>]*>)*')
 
 
-def shape_re_text(text: str, compiler) -> str:
-    """Joins and orders each page on its own, keeping the cues first and the pages in order."""
+RE_TAG = re.compile(r'</?[A-Z][A-Z_]*(?: [^<>\n]*)?>')
+
+
+class LineWidths:
+    """How wide a line is drawn in a font, from its letters' advance widths (the Arabic is already in its final letter forms)."""
+
+    def __init__(self, font_path):
+        from fontTools.ttLib import TTFont
+        font = TTFont(str(font_path), lazy=True)
+        self.cmap = font.getBestCmap()
+        metrics = font['hmtx'].metrics
+        self.advance = {cp: metrics[name][0] for cp, name in self.cmap.items()}
+        self.space = self.advance.get(0x20) or font['head'].unitsPerEm // 4
+
+    def width(self, line: str) -> int:
+        return sum(self.advance.get(ord(c), 0) for c in RE_TAG.sub('', line))
+
+
+def line_widths(font_path, log):
+    try:
+        return LineWidths(font_path)
+    except ImportError:
+        log('Arabic stays lined up on the left: run  pip install fonttools  to line it up on the right.')
+        return None
+
+
+def align_right(page: str, widths) -> str:
+    """Pads the shorter lines of a page so every line ends where the longest does."""
+    lines = page.split('\n')
+    if len(lines) < 2:
+        return page
+    sizes = [widths.width(line.rstrip('\r')) for line in lines]
+    longest = max(sizes)
+    return '\n'.join(' ' * round((longest - size) / widths.space) + line for line, size in zip(lines, sizes))
+
+
+def shape_re_text(text: str, compiler, widths=None) -> str:
+    """Joins and orders each page on its own, keeping the cues first and the pages in order;
+    with `widths`, lines up each page's lines on the right."""
     cues = RE_CUES.match(text).group(0)
-    return cues + '<PAGE>'.join(compiler(page) for page in text[len(cues):].split('<PAGE>'))
+    pages = [compiler(page) for page in text[len(cues):].split('<PAGE>')]
+    if widths:
+        pages = [align_right(page, widths) for page in pages]
+    return cues + '<PAGE>'.join(pages)
 
 
 RE_FONT = re.compile(r'^(natives/\S+\.oft(?:\.\d+)?(?:\.(?:stm|x64))?)\s*$', re.I | re.M)
@@ -523,12 +565,24 @@ def build_reengine(source, rows, args, out: Path, payload: Path, log):
     # Older RE Engine games can't join Arabic letters or lay them right to left;
     # newer ones with an Arabic option can (--no-shape).
     compiler = ArabicCompiler(max_line=args.max_line) if args.shape is not False else None
+    # Which of the game's fonts get the Arabic font: .oft fonts by name (--font-targets,
+    # a file list), or else plain font files found in the game's paks.
+    oft_targets = re_font_targets(args, source, log) if not args.no_fonts and compiler else []
+    plain_fonts = []
+    if not oft_targets and source.game_paks and not args.no_fonts and compiler:
+        try:
+            plain_fonts = remsg.find_fonts(source.game_paks, log)
+        except remsg.MsgError as err:
+            raise BuildError(str(err)) from None
+    # The game lines text up on the left. With our font in the game, each line can
+    # be padded so the lines of a text end together on the right, as Arabic should.
+    widths = line_widths(font_files(args)[0], log) if (oft_targets or plain_fonts) and args.align_right else None
     languages = args.msg_language or ['English']
     arabic = {r.key: r.arabic for r in rows if r.arabic and r.key}
     waiting = []
     untouched = 0
     for dump in source.msg_dumps:
-        texts = {guid: (shape_re_text(arabic[f'{dump.in_pak}#{guid}'], compiler) if compiler else arabic[f'{dump.in_pak}#{guid}'])
+        texts = {guid: (shape_re_text(arabic[f'{dump.in_pak}#{guid}'], compiler, widths) if compiler else arabic[f'{dump.in_pak}#{guid}'])
                  for guid in dump.english if f'{dump.in_pak}#{guid}' in arabic}
         if not texts:
             # No Arabic in this file: the game keeps its own, and the patch doesn't carry a copy.
@@ -553,7 +607,6 @@ def build_reengine(source, rows, args, out: Path, payload: Path, log):
     # The Arabic font, made into the game's .oft font container, under the names
     # of the game's own fonts (from --font-targets or a file list). Only our
     # font is packed; the game's fonts are never read.
-    oft_targets = re_font_targets(args, source, log) if not args.no_fonts and compiler else []
     if oft_targets:
         regular, bold, _ = font_files(args)
         made = {}
@@ -570,17 +623,13 @@ def build_reengine(source, rows, args, out: Path, payload: Path, log):
         log(f'Put the {regular.stem} font, as .oft, in place of the game\'s {len(oft_targets)} fonts: '
             + ', '.join(sorted({Path(n).name.split('.')[0] for n in oft_targets})))
     elif source.game_paks and not args.no_fonts and compiler:
-        try:
-            fonts = remsg.find_fonts(source.game_paks, log)
-        except remsg.MsgError as err:
-            raise BuildError(str(err)) from None
-        if fonts:
+        if plain_fonts:
             regular, _, _ = font_files(args)
-            for lower, upper in fonts:
+            for lower, upper in plain_fonts:
                 target = stage / f'fonts/{lower:08x}-{upper:08x}.font'
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(regular, target)
-            log(f'Put the {regular.stem} font in place of the game\'s {len(fonts)} font files.')
+            log(f'Put the {regular.stem} font in place of the game\'s {len(plain_fonts)} font files.')
         else:
             log('The game\'s fonts aren\'t plain font files. Give --pak-list (a list of the game\'s file names) or --font-targets '
                 'so the Arabic font goes in as the game\'s .oft fonts; otherwise Arabic shows as boxes.')

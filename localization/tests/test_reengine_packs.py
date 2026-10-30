@@ -180,6 +180,24 @@ class CutsceneText(unittest.TestCase):
         self.assertIn('<COLOR FF0000>', out_pages[2])
         self.assertNotIn('TIME', shaped[len(cues):])
 
+    def test_lines_of_a_page_end_together_on_the_right(self):
+        try:
+            import fontTools  # noqa: F401
+        except ImportError:
+            self.skipTest('fonttools is not installed')
+        from arabic_compiler.packbuild import DEFAULT_FONT, LineWidths, shape_re_text
+        from arabic_compiler.rtl import ArabicCompiler
+        compiler, widths = ArabicCompiler(), LineWidths(DEFAULT_FONT)
+        cues = '<TIME 4.4, 8.44>'
+        pages = ['أيها القائد.\nهذه الشابة <COLOR FF0000>الجميلة</COLOR> بحاجة إلى مساعدتنا.', 'اسمي جيل.']
+        shaped = shape_re_text(cues + '<PAGE>'.join(pages), compiler, widths)
+        self.assertTrue(shaped.startswith(cues))
+        first, second = shaped[len(cues):].split('<PAGE>')
+        short, long = first.split('\n')
+        self.assertTrue(short.startswith('    ') and not long.startswith(' '))  # the shorter line is pushed right
+        self.assertLessEqual(abs(widths.width(short) - widths.width(long)), widths.space)  # tags take no room
+        self.assertEqual(second, compiler(pages[1]))  # one line: nothing to line up
+
 
 class MessageDumps(unittest.TestCase):
     def setUp(self):
