@@ -93,7 +93,7 @@ function createPackBuilder({ paths, outDir, keyFile, spawn = defaultSpawn, nodeP
     const args = [paths.script, game.dir, '--id', id, '--version', `1.0.${Math.floor(Date.now() / 1000)}`,
       '--key', keyFile, '--out', path.join(outDir, id), '--shared', server, '--title', String(game.title || '').slice(0, 120) || id,
       ...(game.steamAppId ? ['--steam-app-id', String(game.steamAppId)] : ['--game-id', String(game.gameId)])];
-    if (game.tier === 're-patch') args.push('--engine', 'reengine', '--msg-tool', paths.msgTool);
+    if (game.tier === 're-patch') args.push('--engine', 'reengine', '--msg-tool', paths.msgTool, '--require-fonts');
     const state = { phase: 'starting', total: 0, have: 0, asking: 0, asked: 0, missing: 0, translated: 0, lines: 0, limited: false, packDir: null };
     const child = spawn(paths.python, args, {
       windowsHide: true,

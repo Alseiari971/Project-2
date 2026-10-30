@@ -142,6 +142,8 @@ def parse_args(argv=None):
                                           'reengine: .oft fonts, e.g. natives/stm/escape/ui/ui0000/font/helveticaneueltw1g-cn.oft.1')
     c.add_argument('--align-right', action=argparse.BooleanOptionalAction, default=True,
                    help='reengine: line up Arabic text on the right (on unless --no-align-right; needs fonttools)')
+    c.add_argument('--require-fonts', action='store_true',
+                   help='reengine: stop when no game font can get the Arabic font, rather than make a pack that shows boxes')
     c.add_argument('--font-converter-cmd', help='reengine: an installed tool that makes .oft fonts, with {input} and {output}, '
                                                 'e.g. "REE.Fonts.Cryptor.exe {input} {output}" (GameShelf makes them itself otherwise)')
     c.add_argument('--no-fonts', action='store_true', help='unreal, reengine: leave the game\'s fonts as they are')
@@ -577,7 +579,17 @@ def re_font_targets(args, source, log) -> list:
             present |= set(pak.entries)
     found = [n for n in names if path_hashes(n) in present]
     log(f'{len(found)} of the {len(names)} font names given are in the game\'s paks.')
-    return found
+    # Games keep a font more than once (name.oft.1, name.oft.1.stm, name.oft.1.x64) and may
+    # draw with any of them, so every copy the game has gets the Arabic font.
+    copies = [c for n in names for c in _font_copies(n) if c not in names and path_hashes(c) in present]
+    if copies:
+        log(f'Also {len(copies)} other copies of those fonts in the game\'s paks.')
+    return found + list(dict.fromkeys(copies))
+
+
+def _font_copies(name: str) -> list:
+    base = re.sub(r'\.(?:stm|x64)$', '', name, flags=re.I)
+    return [base, base + '.stm', base + '.x64']
 
 
 def make_oft(font: Path, args, out: Path) -> bytes:
@@ -611,6 +623,9 @@ def build_reengine(source, rows, args, out: Path, payload: Path, log):
             plain_fonts = remsg.find_fonts(source.game_paks, log)
         except remsg.MsgError as err:
             raise BuildError(str(err)) from None
+    if args.require_fonts and compiler and not (oft_targets or plain_fonts):
+        raise BuildError('GameShelf doesn\'t know this game\'s font files yet, so its Arabic would show as boxes. '
+                         'Its fonts can be added with --pak-list or --font-targets.')
     # The game lines text up on the left. With our font in the game, each line can
     # be padded so the lines of a text end together on the right, as Arabic should.
     widths = line_widths(font_files(args)[0], log) if (oft_targets or plain_fonts) and args.align_right else None

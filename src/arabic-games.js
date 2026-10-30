@@ -14,7 +14,8 @@ const { GAME_RE } = require('./translation-memory');
 
 const READY = 0.95;
 const MAX_FONT_TARGETS = 300;
-const FONT_TARGET_RE = /^natives\/[\w\-./]{1,200}\.oft\.\d{1,3}$/i;
+// name.oft.1, and the copies games keep beside it (name.oft.1.stm, name.oft.1.x64).
+const FONT_TARGET_RE = /^natives\/[\w\-./]{1,200}\.oft(?:\.\d{1,3})?(?:\.(?:stm|x64))?$/i;
 
 function createArabicGames({ db, translations, env = process.env }) {
   const admins = new Set(String(env.ARABIC_ADMINS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean));

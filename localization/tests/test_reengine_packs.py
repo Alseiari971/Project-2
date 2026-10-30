@@ -436,6 +436,7 @@ class BuildingReEngine(unittest.TestCase):
             (MSG_PATH, game_msg(ENTRIES), 1),
             (font_dir + 'helveticaneueltw1g-cn.oft.1', b'FBFO' + b'\x11' * 3000, 1 << 16),
             (font_dir + 'courbd.oft.1', b'FBFO' + b'\x22' * 3000, 1 << 16),
+            (font_dir + 'courbd.oft.1.stm', b'FBFO' + b'\x33' * 3000, 1 << 16),
         ]))
         listing = self.tmp / 'RE3_RC_STM_Demo.list'
         listing.write_text('natives/stm/streaming/x.tex.10\n' + ''.join(
@@ -451,6 +452,16 @@ class BuildingReEngine(unittest.TestCase):
         self.assertEqual(files[path_hashes(font_dir + 'courbd.oft.1')], encode_oft(DEFAULT_BOLD_FONT.read_bytes()))  # bold
         self.assertNotIn(path_hashes(font_dir + 'fotk-ydgothic130.oft.1'), files)  # not in this game's paks
         self.assertTrue(any('2 of the 4 font names given are in the game\'s paks' in line for line in self.logged))
+        # The game keeps courbd twice (.oft.1 and .oft.1.stm, the one RE3 draws with): both get the Arabic font.
+        self.assertEqual(files[path_hashes(font_dir + 'courbd.oft.1.stm')], encode_oft(DEFAULT_BOLD_FONT.read_bytes()))
+
+        # Names without their copies (as the server may have them) still reach every copy.
+        pack = build(parse_args(common + ['--font-targets', font_dir + 'courbd.oft.1', '--require-fonts']), log=self.logged.append)
+        files = read_pak((pack / 'payload/re_chunk_000.pak.patch_XXX.pak').read_bytes())
+        self.assertIn(path_hashes(font_dir + 'courbd.oft.1.stm'), files)
+        # With no font for the Arabic, the app's builds stop rather than make a pack that shows boxes.
+        with self.assertRaisesRegex(BuildError, 'show as boxes'):
+            build(parse_args(common + ['--font-targets', font_dir + 'fotk-ydgothic130.oft.1', '--require-fonts']), log=self.logged.append)
 
         # Or with an installed converter.
         converter = self.tmp / 'converter.py'

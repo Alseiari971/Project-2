@@ -215,14 +215,14 @@ test('the desktop app gets a device token, asks for a game, and sees it become r
   assert.equal(db.prepare('SELECT SUM(lines) AS n FROM device_usage').get().n, 2);
 
   // The build tells how many lines the game has; font names are only taken from admins.
-  const fonts = ['natives/stm/escape/ui/ui0000/font/fot-newcinemaastd-d.oft.1', 'C:/Windows/evil.oft.1'];
+  const fonts = ['natives/stm/escape/ui/ui0000/font/fot-newcinemaastd-d.oft.1', 'natives/stm/escape/ui/ui0000/font/fot-newcinemaastd-d.oft.1.stm', 'C:/Windows/evil.oft.1'];
   status = (await app('/api/arabic/report', { method: 'POST', body: { game, name: 'RE3 Demo', engine: 'reengine', total: 3, fontTargets: fonts } })).body;
   assert.deepEqual([status.status, status.total, status.translated, status.fontTargets], ['partial', 3, 2, []]);
 
   const hamad = await signedIn(base, 'hamad');
   await hamad('/api/translations/translate', { method: 'POST', body: { game, lines } });
   status = (await hamad('/api/arabic/report', { method: 'POST', body: { game, engine: 'reengine', total: 3, fontTargets: fonts } })).body;
-  assert.deepEqual([status.status, status.translated, status.fontTargets], ['ready', 3, [fonts[0]]]);
+  assert.deepEqual([status.status, status.translated, status.fontTargets], ['ready', 3, [fonts[0], fonts[1]]]);
   assert.equal((await app('/api/arabic/status', { method: 'POST', body: { games: [game] } })).body.games[game].status, 'ready');
 
   // Admins see what players ask for; others don't.
