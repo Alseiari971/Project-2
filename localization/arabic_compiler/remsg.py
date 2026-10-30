@@ -130,12 +130,14 @@ def extract_messages(paks: list, out: Path, log) -> list:
     opened = []
     try:
         ours = path_hashes(PATCH_MARKER)
+        read = []
         for path in paks:
             pak = GamePak(path)
             opened.append(pak)
             if ours in pak.entries:
                 log(f'Skipped {Path(path).name}: it\'s GameShelf\'s Arabic patch, not the game\'s own text.')
                 continue
+            read.append(path)
             for hashes, (_, _, size, _) in pak.entries.items():
                 if 24 <= size <= MAX_MSG_SIZE:
                     newest[hashes] = pak
@@ -164,7 +166,7 @@ def extract_messages(paks: list, out: Path, log) -> list:
     finally:
         for pak in opened:
             pak.close()
-    log(f'Took {len(found)} message files out of {", ".join(Path(p).name for p in paks)}'
+    log(f'Took {len(found)} message files out of {", ".join(Path(p).name for p in read)}'
         + (f' ({skipped} encrypted or unreadable files skipped)' if skipped else '') + '.')
     return found
 
