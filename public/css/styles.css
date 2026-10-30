@@ -1185,11 +1185,23 @@ label { display: grid; gap: 8px; font-size: 13px; font-weight: 700; color: var(-
 /* Play glows in the accent color; while the game starts or runs it turns into a white Stop button. */
 :root { --play-glow: 0 10px 32px -8px color-mix(in srgb, var(--accent) 80%, transparent), 0 0 28px -6px color-mix(in srgb, var(--accent) 45%, transparent); }
 .play-slot { display: contents; }
-.play-btn { background: var(--accent); color: var(--on-accent); box-shadow: var(--play-glow); transition: background 0.2s, color 0.2s, box-shadow 0.3s, transform 0.15s; }
-.play-btn:hover { background: color-mix(in srgb, var(--accent) 85%, #fff); box-shadow: 0 12px 40px -6px color-mix(in srgb, var(--accent) 95%, transparent), 0 0 36px -4px color-mix(in srgb, var(--accent) 55%, transparent); }
-.play-btn .icon { width: 18px; height: 18px; }
+/* A capsule split in two: Play (or Stop), then a faded arrow for the game's options. */
+.play-btn { position: relative; display: inline-flex; align-items: stretch; border-radius: 999px; background: var(--accent); color: var(--on-accent); box-shadow: var(--play-glow); transition: background 0.2s, color 0.2s, box-shadow 0.3s; }
+.play-btn:hover { box-shadow: 0 12px 40px -6px color-mix(in srgb, var(--accent) 95%, transparent), 0 0 36px -4px color-mix(in srgb, var(--accent) 55%, transparent); }
+.play-main, .play-more { display: inline-flex; align-items: center; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; transition: background 0.15s; }
+.play-main { gap: 8px; padding: 12px 18px 12px 24px; border-radius: 999px 0 0 999px; font-size: 16px; font-weight: 700; white-space: nowrap; }
+.play-main small { font-size: 12px; font-weight: 700; opacity: 0.55; }
+.play-main .icon { width: 18px; height: 18px; }
+.play-more { padding: 0 16px 0 12px; border-radius: 0 999px 999px 0; border-left: 1px solid rgba(0, 0, 0, 0.16); opacity: 0.5; }
+.play-more .icon { width: 18px; height: 18px; }
+.play-main:hover, .play-more:hover, .play-more[aria-expanded="true"] { background: rgba(0, 0, 0, 0.07); }
+.play-more:hover, .play-more[aria-expanded="true"] { opacity: 1; }
+.play-main:active { transform: translateY(1px); }
 .play-btn.is-active, .tile-play.is-active { background: #fff; color: #000; box-shadow: 0 10px 32px -8px rgba(255, 255, 255, 0.6), 0 0 28px -6px rgba(255, 255, 255, 0.3); }
-.play-btn.is-active:hover { background: #e6e6e6; }
+.play-menu { left: auto; right: 0; min-width: 280px; color: var(--text); }
+.menu-label { padding: 8px 12px 4px; color: var(--dim); font-size: 12px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; }
+.menu-note { max-width: 264px; padding: 4px 12px 8px; color: var(--dim); font-size: 13px; line-height: 1.45; }
+.menu-ext { width: 14px; height: 14px; margin-left: auto; opacity: 0.5; }
 .play-btn.is-starting, .tile-play.is-starting { animation: play-pulse 1.6s ease-in-out infinite; }
 @keyframes play-pulse { 50% { box-shadow: 0 12px 44px -6px rgba(255, 255, 255, 0.85), 0 0 40px -2px rgba(255, 255, 255, 0.45); } }
 .tile-wrap { position: relative; min-width: 0; }
@@ -1294,7 +1306,8 @@ label { display: grid; gap: 8px; font-size: 13px; font-weight: 700; color: var(-
   .gp-cover.tall { width: 84px; }
   .gp-actions { flex-direction: column; align-items: stretch; }
   .gp-buy { justify-content: stretch; }
-  .gp-buy .pill-btn { flex: 1; }
+  .gp-buy .pill-btn, .gp-buy .play-btn { flex: 1; }
+  .play-main { flex: 1; justify-content: center; }
   .pal-hint { display: none; }
   .req-columns { grid-template-columns: 1fr; }
   .score-row { grid-template-columns: 1fr 1fr; }

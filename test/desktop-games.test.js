@@ -62,3 +62,30 @@ test('added games are saved, linked to a GameShelf game, and removable', () => {
   reopened.remove(entry.key);
   assert.deepStrictEqual(createCustomGames(file).all(), []);
 });
+
+const { parseGpuPreference, withGpuPreference, pickMainProgram, createProgramStore } = require('../desktop/game-options');
+
+test('graphics card choice keeps the other Windows settings for the game', () => {
+  assert.strictEqual(parseGpuPreference('SwapEffectUpgradeEnable=1;GpuPreference=2;'), 2);
+  assert.strictEqual(parseGpuPreference(''), 0);
+  assert.strictEqual(withGpuPreference('SwapEffectUpgradeEnable=1;GpuPreference=1;', 2), 'SwapEffectUpgradeEnable=1;GpuPreference=2;');
+  assert.strictEqual(withGpuPreference('', 1), 'GpuPreference=1;');
+  // "Let Windows decide" removes the choice, and the whole value when nothing else is left.
+  assert.strictEqual(withGpuPreference('SwapEffectUpgradeEnable=1;GpuPreference=2;', 0), 'SwapEffectUpgradeEnable=1;');
+  assert.strictEqual(withGpuPreference('GpuPreference=2;', 0), '');
+});
+
+test('the game program is picked over crash reporters and anti-cheat helpers', () => {
+  const dir = path.join(games, 'ELDEN RING', 'Game');
+  assert.strictEqual(pickMainProgram([path.join(dir, 'start_protected_game.exe'), path.join(dir, 'eldenring.exe')]), path.join(dir, 'eldenring.exe'));
+  assert.strictEqual(pickMainProgram([path.join(dir, 'CrashReportClient.exe'), path.join(dir, 'eldenring.exe')]), path.join(dir, 'eldenring.exe'));
+  assert.strictEqual(pickMainProgram([path.join(dir, 'EasyAntiCheat_launcher.exe')]), path.join(dir, 'EasyAntiCheat_launcher.exe'));
+  assert.strictEqual(pickMainProgram([]), null);
+});
+
+test('learned programs are remembered between launches', () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'programs-')), 'game-programs.json');
+  createProgramStore(file).remember('steam:1245620', '/games/eldenring.exe');
+  assert.strictEqual(createProgramStore(file).get('steam:1245620'), '/games/eldenring.exe');
+  assert.strictEqual(createProgramStore(file).get('steam:1'), null);
+});

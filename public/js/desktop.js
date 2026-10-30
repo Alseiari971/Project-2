@@ -17,9 +17,14 @@ desktop?.onGameStates((next) => {
 // Errors thrown in the app arrive wrapped; keep just the message.
 const errorText = (err) => err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
 
-/** The big Play button on a game page. */
+/** The big Play button on a game page, with an arrow for the game's options. */
 export function playButton({ key, launcher }, name) {
-  return html`<button type="button" class="pill-btn pill-lg play-btn" data-launch="${key}" data-name="${name}" data-launcher="${launcher}"></button>`;
+  return html`
+    <div class="play-btn">
+      <button type="button" class="play-main" data-launch="${key}" data-name="${name}" data-launcher="${launcher}"></button>
+      <button type="button" class="play-more" data-options="${key}" data-name="${name}" aria-label="Game options" title="Game options" aria-haspopup="menu" aria-expanded="false">${icon('down')}</button>
+      <div class="dropdown-menu play-menu" role="menu" hidden></div>
+    </div>`;
 }
 
 /** A game on the Home row, with a round Play button on its art. */
@@ -47,8 +52,10 @@ export function addGameTile() {
 // Play turns into a white Stop button while the game starts and runs.
 function paint(button) {
   const state = states[button.dataset.launch];
-  button.classList.toggle('is-active', Boolean(state));
-  button.classList.toggle('is-starting', state === 'starting');
+  // The capsule around a split button carries the colors and glow.
+  const shell = button.closest('.play-btn') || button;
+  shell.classList.toggle('is-active', Boolean(state));
+  shell.classList.toggle('is-starting', state === 'starting');
   button.setAttribute('aria-label', `${state ? 'Stop' : 'Play'} ${button.dataset.name}`);
   if (button.classList.contains('tile-play')) {
     mount(button, icon(state ? 'stop' : 'play'));
@@ -86,12 +93,107 @@ export function wireLaunchButtons(root, { onAdded } = {}) {
       }
     });
   });
+  root.querySelectorAll('[data-options]').forEach(wireOptions);
   root.querySelectorAll('[data-add-game]').forEach((button) => button.addEventListener('click', () => addGame({ onAdded })));
   // Catches games started outside GameShelf, from Steam or a shortcut.
   desktop.gameStates().then((next) => {
     states = next;
     paintAll();
   }).catch(() => {});
+}
+
+// ---- Game options (the arrow on the Play button) -------------------------------------
+
+const GPU_CHOICES = [[0, 'Let Windows decide'], [2, 'High performance'], [1, 'Power saving']];
+const DONE = {
+  verify: 'Steam is checking the game files',
+  uninstall: 'Follow the uninstaller to finish',
+  'graphics-settings': 'Opened Windows graphics settings',
+};
+
+function closeOptionMenus() {
+  document.querySelectorAll('.play-menu').forEach((menu) => { menu.hidden = true; });
+  document.querySelectorAll('[data-options]').forEach((b) => b.setAttribute('aria-expanded', 'false'));
+}
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.play-btn')) closeOptionMenus();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeOptionMenus();
+});
+
+function optionItem(action, label, { value = '', checked, danger = false, external = false } = {}) {
+  const radio = checked !== undefined;
+  return html`
+    <button type="button" role="${radio ? 'menuitemradio' : 'menuitem'}" ${radio ? html`aria-checked="${checked}"` : ''}
+      class="${danger ? 'danger' : ''}" data-action="${action}" data-value="${value}">
+      ${radio ? html`<span class="check">${checked ? icon('check') : ''}</span>` : ''}${label}${external ? icon('external', 'menu-ext') : ''}
+    </button>`;
+}
+
+function optionsMenu(o) {
+  return html`
+    ${o.gpu ? html`
+      <div class="menu-label">Graphics card</div>
+      ${o.gpu.known
+        ? GPU_CHOICES.map(([value, label]) => optionItem('gpu', label, { value, checked: o.gpu.value === value }))
+        : html`<p class="menu-note">Play the game once so GameShelf can find its program, then pick a graphics card here.</p>`}
+      ${optionItem('graphics-settings', 'Windows graphics settings', { external: true })}
+      <div class="menu-sep"></div>` : ''}
+    ${o.folder ? optionItem('open-folder', 'Open game folder') : ''}
+    ${o.steam ? html`
+      ${optionItem('steam-properties', 'Launch options & properties', { external: true })}
+      ${optionItem('verify', 'Verify game files')}` : ''}
+    ${o.uninstall || o.removable ? html`<div class="menu-sep"></div>` : ''}
+    ${o.uninstall ? optionItem('uninstall', `Uninstall with ${o.launcher}`, { danger: true }) : ''}
+    ${o.removable ? optionItem('remove', 'Remove from GameShelf', { danger: true }) : ''}`;
+}
+
+function wireOptions(button) {
+  const menu = button.parentElement.querySelector('.play-menu');
+  const key = button.dataset.options;
+  const name = button.dataset.name;
+
+  button.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    if (!menu.hidden) {
+      closeOptionMenus();
+      return;
+    }
+    closeOptionMenus();
+    try {
+      // Read fresh each time, so the graphics card choice shows what Windows has now.
+      mount(menu, optionsMenu(await desktop.gameOptions(key)));
+    } catch (err) {
+      toast(errorText(err), { error: true });
+      return;
+    }
+    menu.hidden = false;
+    button.setAttribute('aria-expanded', 'true');
+    menu.querySelector('button')?.focus();
+  });
+
+  menu.addEventListener('click', async (e) => {
+    const item = e.target.closest('[data-action]');
+    if (!item) return;
+    const { action, value } = item.dataset;
+    closeOptionMenus();
+    try {
+      await desktop.gameAction(key, action, value === '' ? undefined : Number(value));
+      if (action === 'gpu') {
+        const label = GPU_CHOICES.find(([v]) => v === Number(value))[1];
+        toast(`${name}: ${label.toLowerCase()}. Takes effect next time it starts.`);
+      } else if (action === 'remove') {
+        toast(`Removed ${name} from GameShelf`);
+        // Show the page again without the Play button.
+        window.dispatchEvent(new HashChangeEvent('hashchange'));
+      } else if (DONE[action]) {
+        toast(DONE[action]);
+      }
+    } catch (err) {
+      toast(errorText(err), { error: true });
+    }
+  });
 }
 
 // ---- Adding a game ----------------------------------------------------------------

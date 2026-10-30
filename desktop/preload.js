@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld('gameshelfDesktop', {
   launch: (key) => ipcRenderer.invoke('installed:launch', key),
   stop: (key) => ipcRenderer.invoke('installed:stop', key),
   gameStates: () => ipcRenderer.invoke('installed:states'),
+  gameOptions: (key) => ipcRenderer.invoke('installed:options', key),
+  gameAction: (key, action, value) => ipcRenderer.invoke('installed:action', key, action, value),
   // Calls back with { key: 'starting' | 'running' } whenever a game starts or stops.
   onGameStates: (callback) => {
     const listener = (_event, states) => callback(states);

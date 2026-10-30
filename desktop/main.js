@@ -11,6 +11,7 @@ const { SETTINGS_KEYS, readSettings, writeSettings } = require('./settings');
 const { LAUNCHER_NAMES, scanInstalledGames } = require('./installed');
 const { processesOf, listProcesses, stopProcesses } = require('./processes');
 const { createCustomGames, suggestName } = require('./custom-games');
+const { getGpuPreference, setGpuPreference, pickMainProgram, createProgramStore, gogUninstaller } = require('./game-options');
 const { normalizeTitle } = require('../src/text');
 
 app.setName('GameShelf');
@@ -214,6 +215,10 @@ let scan = { at: 0, games: Promise.resolve([]) };
 // Each installed game's GameShelf page (or null), looked up once per game database.
 const matches = new Map();
 const customGames = createCustomGames(path.join(dataDir, 'custom-games.json'));
+const programs = createProgramStore(path.join(dataDir, 'game-programs.json'));
+// The game's program file: known for GOG games and games added by hand, learned
+// for Steam and Epic games the first time they're seen running.
+const programOf = (game) => game.exe || programs.get(game.key);
 
 // Rescans at most every few seconds, so games installed while the app is open show up.
 function scannedGames() {
@@ -226,6 +231,12 @@ function scannedGames() {
 /** Games found in launchers, then games added by hand. */
 async function installedGames() {
   return [...(await scannedGames()), ...customGames.all()];
+}
+
+async function installedGame(key) {
+  const game = (await installedGames()).find((g) => g.key === key);
+  if (!game) throw new Error('That game is no longer installed.');
+  return game;
 }
 
 async function findGamePages(installed) {
@@ -294,8 +305,10 @@ function checkRunning() {
       const before = JSON.stringify(gameStates());
       const now = new Map();
       for (const game of installed) {
-        const pids = processesOf(game, processes).map((p) => p.pid);
-        if (pids.length) now.set(game.key, pids);
+        const own = processesOf(game, processes);
+        if (!own.length) continue;
+        now.set(game.key, own.map((p) => p.pid));
+        if (!game.exe) programs.remember(game.key, pickMainProgram(own.map((p) => p.path)));
       }
       running = now;
       for (const [key, since] of starting) {
@@ -376,8 +389,7 @@ function registerIpc() {
   });
   // Only games found by the scan or added by hand can be started; the page passes just the key.
   handle('installed:launch', async (key) => {
-    const game = (await installedGames()).find((g) => g.key === key);
-    if (!game) throw new Error('That game is no longer installed.');
+    const game = await installedGame(key);
     if (running.has(key)) return;
     await launch(game);
     starting.set(key, Date.now());
@@ -396,6 +408,60 @@ function registerIpc() {
   handle('installed:states', async () => {
     if (Date.now() - lastCheck > POLL_MS) await checkRunning();
     return gameStates();
+  });
+
+  // What the arrow on the Play button offers for this game.
+  handle('installed:options', async (key) => {
+    const game = await installedGame(key);
+    const program = programOf(game);
+    return {
+      launcher: LAUNCHER_NAMES[game.launcher],
+      gpu: process.platform === 'win32' ? { known: Boolean(program), value: program ? await getGpuPreference(program) : 0 } : null,
+      folder: Boolean(game.dir && fs.existsSync(game.dir)),
+      steam: game.launcher === 'steam',
+      uninstall: game.launcher === 'steam' || Boolean(game.launcher === 'gog' && gogUninstaller(game.dir)),
+      removable: game.launcher === 'custom',
+    };
+  });
+  // Only these actions exist; the page passes the game's key and the action's name.
+  handle('installed:action', async (key, action, value) => {
+    const game = await installedGame(key);
+    const steamOnly = () => {
+      if (game.launcher !== 'steam') throw new Error('This option is for Steam games.');
+    };
+    switch (action) {
+      case 'gpu': {
+        const program = programOf(game);
+        if (!program) throw new Error('Play the game once first, so GameShelf can find its program.');
+        return setGpuPreference(program, Number(value));
+      }
+      case 'graphics-settings':
+        return shell.openExternal('ms-settings:display-advancedgraphics');
+      case 'open-folder': {
+        const problem = game.dir ? await shell.openPath(game.dir) : 'This game has no folder.';
+        if (problem) throw new Error(problem);
+        return;
+      }
+      case 'steam-properties':
+        steamOnly();
+        return shell.openExternal(`steam://gameproperties/${game.steamAppId}`);
+      case 'verify':
+        steamOnly();
+        return shell.openExternal(`steam://validate/${game.steamAppId}`);
+      case 'uninstall': {
+        // The launcher's own uninstaller asks for confirmation.
+        if (game.launcher === 'steam') return shell.openExternal(`steam://uninstall/${game.steamAppId}`);
+        const uninstaller = game.launcher === 'gog' && gogUninstaller(game.dir);
+        if (!uninstaller) throw new Error('GameShelf can’t uninstall this game.');
+        spawn(uninstaller, [], { cwd: game.dir, detached: true, stdio: 'ignore' }).unref();
+        return;
+      }
+      case 'remove':
+        if (game.launcher !== 'custom') throw new Error('Only games you added can be removed here.');
+        return customGames.remove(key);
+      default:
+        throw new Error('Unknown option.');
+    }
   });
 
   handle('custom:pick', async () => {
