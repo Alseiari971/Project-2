@@ -39,7 +39,7 @@ _LETTERS = re.compile(r'[A-Za-z]')
 
 SYSTEM_PROMPT = """You translate video game text from English into natural Modern Standard Arabic for players in the Middle East and North Africa.
 Rules:
-- Keep every tag, placeholder and key prompt exactly as written, character for character: {0}, {name}, %s, %d, %1$s, %PLAYER%, ${name}, <color=#ff0000>...</color>, <b>, </>, {i}...{/i}, {w=0.5}, [E], [Press E], [player], <br>, and \\n line breaks. Move them only where Arabic word order needs it.
+- Keep every tag, placeholder and key prompt exactly as written, character for character: {0}, {name}, %s, %d, %1$s, %PLAYER%, ${name}, <color=#ff0000>...</color>, <b>, </>, {i}...{/i}, {w=0.5}, <TIME 4.4, 8.44>, <PAGE>, <COLOR FF0000>, [E], [Press E], [player], <br>, and \\n line breaks. Move them only where Arabic word order needs it.
 - Keep proper names of people and places in their usual Arabic spelling; keep brand and product names in Latin letters.
 - Match the tone: menus short and plain, dialogue natural.
 - Use Western digits (0-9) as written.
@@ -51,14 +51,18 @@ class TranslationError(RuntimeError):
 
 
 # Ren'Py's text tags with a value or a closing slash ({w=0.5}, {color=#f00},
-# {/i}); a lost closing tag stops a Ren'Py game with an error.
+# {/i}); a lost closing tag stops a Ren'Py game with an error. And RE Engine's
+# upper-case tags, some with numbers in them (<TIME 4.4, 8.44>, <PAGE>,
+# <COLOR FF0000>): a changed cue moves a cutscene's subtitles.
 _RENPY_TAGS = re.compile(r'\{/[A-Za-z_]{1,20}\}|\{[A-Za-z_]{1,20}=[^{}\n]{1,80}\}')
+_ENGINE_TAGS = re.compile(r'</?[A-Z][A-Z_]*(?: [^<>\n]{1,80})?>')
 
 
 def tokens(text: str) -> Counter:
     """The tags, placeholders and line breaks in a line, which must survive translation."""
     found = Counter(m.group(0) for m in _TOKENS.finditer(text))
     found.update(m.group(0) for m in _RENPY_TAGS.finditer(text))
+    found.update(m.group(0) for m in _ENGINE_TAGS.finditer(text))
     return found
 
 
@@ -244,7 +248,8 @@ class Translator:
                 done[source] = source  # numbers, symbols, placeholders only: nothing to translate
                 continue
             cached = self.cache.get(self.cache_key(source))
-            if cached is not None:
+            # Answers saved before a check was added are checked again, and asked for again if they fail.
+            if cached is not None and problem_with(source, cached) is None:
                 done[source] = cached
             else:
                 todo.append(source)

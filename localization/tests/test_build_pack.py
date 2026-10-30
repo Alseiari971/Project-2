@@ -247,6 +247,17 @@ class Translating(unittest.TestCase):
         self.assertEqual(again.requests_made, 0)
         self.assertEqual(done['Close the gate'], 'عربي Close the gate')
 
+    def test_a_saved_answer_that_breaks_a_tag_is_asked_for_again(self):
+        line = '<TIME 4.4, 8.44><TIME 12.3, 17.7>Hey Captain.<PAGE>It\'s Jill.'
+        translator = self.translator()
+        # Saved by an earlier run, before RE Engine cue tags were checked: a cue changed.
+        translator.cache.put_many([(translator.cache_key(line), line, line.replace('17.7', '17.8').replace('Hey', 'عربي'))], 'test-model')
+        done, failed = translator.translate([line])
+        self.assertEqual(failed, {})
+        self.assertEqual(done[line], 'عربي ' + line)
+        self.assertEqual(len(self.api.requests), 1)
+        self.assertIn('lost <TIME 12.3, 17.7>', problem_with(line, line.replace('17.7', '17.8').replace('Hey', 'عربي')))
+
     def test_a_lost_placeholder_is_asked_for_again(self):
         self.api.drop_once = {'Hello, {0}!'}
         done, failed = self.translator().translate(['Hello, {0}!', 'Bye'])
