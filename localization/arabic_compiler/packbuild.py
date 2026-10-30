@@ -36,6 +36,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import zipfile
 from pathlib import Path, PurePosixPath
 
@@ -197,11 +198,12 @@ def translate_rows(rows, args, out: Path, log):
     missing = [r.source for r in rows if not r.arabic]
     if not missing:
         return {}
+    shared_failed = {}
     if args.shared:
-        failed = shared_translate(rows, args, log)
-        # What the server couldn't do can still go to your own --provider.
-        if not args.provider or args.no_translate or all(r.arabic for r in rows):
-            return failed
+        shared_failed = shared_translate(rows, args, log)
+        # What the server couldn't do can still go to your own --provider (with --no-translate, to what it already paid for).
+        if not args.provider or not args.model or all(r.arabic for r in rows):
+            return shared_failed
         missing = [r.source for r in rows if not r.arabic]
     cache_path = Path(args.cache or out / 'translation-cache.sqlite')
     if args.no_translate:
@@ -215,7 +217,8 @@ def translate_rows(rows, args, out: Path, log):
                     row.arabic = row.arabic or cache.get(translator.cache_key(row.source))
             finally:
                 cache.close()
-        return {}
+        still = {r.source for r in rows if not r.arabic}
+        return {source: why for source, why in shared_failed.items() if source in still}
     if not args.provider or not args.model:
         raise BuildError(f'{len(set(missing))} lines have no Arabic yet: give --provider and --model to translate them, or --no-translate.')
     key_env = args.api_key_env or API_KEY_ENV[args.provider]
@@ -233,6 +236,16 @@ def translate_rows(rows, args, out: Path, log):
         if not row.arabic:
             row.arabic = done.get(row.source)
     return failed
+
+
+def keep_previous(review: Path, log):
+    """Copies translations.csv aside before a run replaces it, so fixes made in it are never lost."""
+    if not review.is_file():
+        return
+    kept = review.with_name(f'translations-{time.strftime("%Y%m%d-%H%M%S", time.localtime(review.stat().st_mtime))}.csv')
+    if not kept.exists():
+        shutil.copy2(review, kept)
+        log(f'Kept the previous translations.csv as {kept.name}.')
 
 
 def write_review(rows, failed, path: Path, keyed=False):
@@ -782,6 +795,8 @@ def build(args, log=print) -> Path:
             raise BuildError(str(err)) from None
         review = out / 'translations.csv'
         try:
+            if not args.translations or Path(args.translations).resolve() != review.resolve():
+                keep_previous(review, log)
             write_review(rows, failed, review, keyed=source.keyed)
             log(f'Wrote {review}: read it, fix what needs fixing, and run again with --translations to rebuild.')
         except PermissionError:

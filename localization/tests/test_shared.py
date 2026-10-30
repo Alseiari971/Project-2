@@ -64,6 +64,26 @@ class SharedMemoryBuilds(unittest.TestCase):
             text = f.read()
         self.assertIn('عربي <TIME 4.4, 8.44>Hey Captain.<PAGE>It\'s Jill.', text)
 
+    def test_what_the_memory_lacks_comes_from_your_own_cache_and_your_fixes_are_kept(self):
+        # An earlier run with your own key paid for one line; the shared memory has nothing yet.
+        from arabic_compiler.translate import Cache, Provider, Translator
+        out = self.tmp / 'mine'
+        out.mkdir()
+        cache = Cache(out / 'translation-cache.sqlite')
+        line = 'We must reach the castle before nightfall.'
+        key = Translator(Provider('openai', 'gpt-4.1-mini', None, None), cache, context='').cache_key(line)
+        cache.put_many([(key, line, 'يجب أن نصل إلى القلعة قبل حلول الليل.')], 'gpt-4.1-mini')
+        cache.close()
+        (out / 'translations.csv').write_text('key,source,arabic,problem\n,START GAME,ابدأ اللعبة,\n', encoding='utf-8-sig')
+        self.run_build('mine', '--no-translate', '--provider', 'openai', '--model', 'gpt-4.1-mini')
+        self.assertEqual(self.asked(), 0)
+        with (out / 'translations.csv').open(encoding='utf-8-sig') as f:
+            self.assertIn('يجب أن نصل إلى القلعة', f.read())
+        # The translations.csv that was there (with its fixes) is kept beside the new one.
+        kept = list(out.glob('translations-*.csv'))
+        self.assertEqual(len(kept), 1)
+        self.assertIn('ابدأ اللعبة', kept[0].read_text(encoding='utf-8-sig'))
+
     def test_a_missing_or_wrong_token_says_what_to_do(self):
         os.environ.pop('GAMESHELF_TOKEN')
         with self.assertRaisesRegex(BuildError, 'Set GAMESHELF_TOKEN'):
