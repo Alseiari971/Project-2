@@ -36,6 +36,14 @@ export async function appSettingsView(app, params) {
         <div class="form-grid">${field('STEAM_API_KEY', 'Steam Web API key', 'password')}</div>
         <p class="muted small">Optional. Free from ${link('https://steamcommunity.com/dev/apikey', 'steamcommunity.com/dev/apikey')} (any domain name works).</p>
 
+        <h2>Discord</h2>
+        <label class="check-row">
+          <input type="checkbox" name="discordOn" ${values.DISCORD_ACTIVITY === 'off' ? '' : 'checked'}>
+          Show the game I'm playing on my Discord profile
+        </label>
+        <div class="form-grid">${field('DISCORD_CLIENT_ID', 'Discord Application ID')}</div>
+        <p class="muted small">Make a free application named GameShelf in the ${link('https://discord.com/developers/applications', 'Discord Developer Portal')} and paste its Application ID here. The Discord app needs to be open on this PC, with "Share your detected activities" turned on under Activity Privacy.</p>
+
         <p class="form-error" id="settings-error" role="alert"></p>
         <div class="settings-actions">
           <button class="btn btn-light" type="submit">Save</button>
@@ -85,7 +93,8 @@ export async function appSettingsView(app, params) {
     error.textContent = '';
     button.disabled = true;
     try {
-      const result = await desktop.saveSettings(Object.fromEntries(new FormData(e.target)));
+      const { discordOn, ...values } = Object.fromEntries(new FormData(e.target));
+      const result = await desktop.saveSettings({ ...values, DISCORD_ACTIVITY: discordOn ? '' : 'off' });
       const status = document.getElementById('settings-status');
       status.className = `settings-status ${result.source}`;
       status.textContent = SOURCES[result.source];

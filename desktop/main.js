@@ -12,6 +12,7 @@ const { LAUNCHER_NAMES, scanInstalledGames } = require('./installed');
 const { processesOf, listProcesses, stopProcesses } = require('./processes');
 const { createCustomGames, suggestName } = require('./custom-games');
 const { getGpuPreference, setGpuPreference, pickMainProgram, createProgramStore, gogUninstaller } = require('./game-options');
+const { createDiscordPresence } = require('./discord');
 const { normalizeTitle } = require('../src/text');
 
 app.setName('GameShelf');
@@ -51,6 +52,8 @@ if (!app.requestSingleInstanceLock()) {
     app.exit(1);
   });
   app.on('window-all-closed', () => app.quit());
+  // Closing the connection clears the activity on Discord.
+  app.on('will-quit', () => presence?.close());
 }
 
 function applySettings(values) {
@@ -72,6 +75,7 @@ function buildApp() {
   games = createGameProvider(process.env, { db });
   handler = createApp({ db, games });
   matches.clear();
+  startPresence();
 }
 
 function listen(server, port) {
@@ -280,9 +284,12 @@ function launch(game) {
 // While a game is starting or running, the process list is checked every few
 // seconds; otherwise only when a page asks.
 const POLL_MS = 3000;
+// A page asking for states within this long of the last check gets that check's answer.
+const RECHECK_MS = 1000;
 const START_TIMEOUT_MS = 2 * 60 * 1000;
 const starting = new Map(); // key -> when Play was pressed
 let running = new Map(); // key -> process IDs
+const runningSince = new Map(); // key -> when it was first seen running
 let checking = null;
 let lastCheck = 0;
 let pollTimer = null;
@@ -311,6 +318,9 @@ function checkRunning() {
         if (!game.exe) programs.remember(game.key, pickMainProgram(own.map((p) => p.path)));
       }
       running = now;
+      for (const key of now.keys()) if (!runningSince.has(key)) runningSince.set(key, Date.now());
+      for (const key of runningSince.keys()) if (!now.has(key)) runningSince.delete(key);
+      updatePresence(installed);
       for (const [key, since] of starting) {
         if (running.has(key) || Date.now() - since > START_TIMEOUT_MS) starting.delete(key);
       }
@@ -327,6 +337,49 @@ function checkRunning() {
 function schedulePoll() {
   clearTimeout(pollTimer);
   if (starting.size || running.size) pollTimer = setTimeout(checkRunning, POLL_MS);
+}
+
+// ---- Discord activity ---------------------------------------------------------------
+
+let presence = null;
+
+// Restarted whenever the settings change, since the Discord application ID may have.
+function startPresence() {
+  presence?.close();
+  const on = process.env.DISCORD_CLIENT_ID && process.env.DISCORD_ACTIVITY !== 'off';
+  presence = on ? createDiscordPresence({ clientId: process.env.DISCORD_CLIENT_ID }) : null;
+  if (presence) installedGames().then(updatePresence).catch(() => {});
+}
+
+const lookingUp = new Set();
+
+/** Shows the game started most recently, or nothing when no game is running. */
+function updatePresence(installed) {
+  if (!presence) return;
+  const [key] = [...runningSince].sort((a, b) => b[1] - a[1])[0] || [];
+  const game = key && installed.find((g) => g.key === key);
+  if (!game) {
+    presence.set(null);
+    return;
+  }
+  const page = pageOf(game);
+  // A game started before its GameShelf page was looked up: look it up, then show its cover.
+  if (!page && game.launcher !== 'custom' && !matches.has(game.key) && !lookingUp.has(game.key)) {
+    lookingUp.add(game.key);
+    findGamePages([game]).finally(() => {
+      lookingUp.delete(game.key);
+      updatePresence(installed);
+    });
+  }
+  const url = games.name === 'igdb' && page?.id ? `https://www.igdb.com/games/${encodeURIComponent(page.id)}`
+    : game.steamAppId ? `https://store.steampowered.com/app/${game.steamAppId}/` : null;
+  presence.set({
+    name: page?.name || game.name,
+    launcher: LAUNCHER_NAMES[game.launcher],
+    startedAt: runningSince.get(key),
+    image: page?.poster || page?.image || null,
+    url,
+  });
 }
 
 // ---- Bridge for the page (see preload.js) -----------------------------------------
@@ -406,7 +459,7 @@ function registerIpc() {
   });
   // Current states; checks the process list unless it was checked a moment ago.
   handle('installed:states', async () => {
-    if (Date.now() - lastCheck > POLL_MS) await checkRunning();
+    if (Date.now() - lastCheck > RECHECK_MS) await checkRunning();
     return gameStates();
   });
 

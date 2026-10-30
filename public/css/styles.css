@@ -1179,6 +1179,8 @@ label { display: grid; gap: 8px; font-size: 13px; font-weight: 700; color: var(-
 .settings-status::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
 .settings-status.igdb::before, .settings-status.rawg::before { background: var(--accent); }
 .settings-actions { display: flex; gap: 8px; margin-top: 8px; }
+.check-row { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; font-weight: 700; cursor: pointer; }
+.check-row input { width: 18px; height: 18px; accent-color: var(--accent); }
 .app-settings .form-error:empty { min-height: 0; }
 
 /* ---- Installed games (desktop app) ---- */
