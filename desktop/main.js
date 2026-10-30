@@ -475,14 +475,13 @@ function registerIpc() {
     return { source: games.name, problem: await checkGameData() };
   });
 
-  // Installed games that have a GameShelf page, for the home screen. Games
-  // added by hand show even without one.
+  // Installed games for the home screen, with their GameShelf page when there
+  // is one. Games without one (demos, games the database doesn't know) show
+  // too: they can still be played, and get Arabic packs by their Steam ID.
   handle('installed:list', async () => {
     const installed = await installedGames();
     await findGamePages(installed);
-    return installed
-      .filter((g) => pageOf(g) || g.launcher === 'custom')
-      .map((g) => ({ ...describe(g), game: pageOf(g) || { id: null, name: g.name } }));
+    return installed.map((g) => ({ ...describe(g), steamAppId: g.steamAppId || null, game: pageOf(g) || { id: null, name: g.name } }));
   });
   // Whether the game on a game page is installed: a game added by hand for this
   // page, the same Steam ID, or else the exact name.

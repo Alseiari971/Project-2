@@ -790,6 +790,8 @@ export const AR = {
   'Only games you added can be removed here.': 'يمكن إزالة الألعاب التي أضفتها أنت فقط من هنا.',
   'Play the game once first, so GameShelf can find its program.': 'شغّل اللعبة مرة واحدة أولًا ليتعرّف GameShelf على برنامجها.',
   'That game is no longer installed.': 'هذه اللعبة لم تعد مثبّتة.',
+  'Steam app {id}': 'تطبيق Steam رقم {id}',
+  'GameShelf has no page for this game, but you can start it here and turn on Arabic subtitles.': 'لا توجد صفحة لهذه اللعبة في GameShelf، لكن يمكنك تشغيلها من هنا وتفعيل الترجمة العربية.',
   'This option is for Steam games.': 'هذا الخيار لألعاب Steam فقط.',
   'Unknown graphics setting.': 'إعداد رسومات غير معروف.',
   'Unknown option.': 'خيار غير معروف.',

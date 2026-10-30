@@ -81,9 +81,10 @@ function wireArabic(button) {
 
 /** A game on the Home row, with a round Play button on its art. */
 export function installedTile({ key, launcher, game }) {
+  // Games without a GameShelf page open a page of their own, with Play and the Arabic switch.
   const tile = game.id
     ? gameTile(game, { tag: t(launcher) })
-    : html`<div class="tile" title="${game.name}"><div class="tile-frame">${art(game)}<span class="card-tag">${t(launcher)}</span></div></div>`;
+    : html`<a class="tile" href="#/installed/${encodeURIComponent(key)}" title="${game.name}"><div class="tile-frame">${art(game)}<span class="card-tag">${t(launcher)}</span></div></a>`;
   return html`
     <div class="tile-wrap">
       ${tile}

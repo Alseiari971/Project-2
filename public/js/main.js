@@ -15,6 +15,7 @@ import { importView } from './views/import.js';
 import { legalView } from './views/legal.js';
 import { applySeason } from './seasons.js';
 import { appSettingsView } from './views/app-settings.js';
+import { installedView } from './views/installed.js';
 
 const app = document.getElementById('app');
 const SIDEBAR_GAMES = 12;
@@ -195,6 +196,10 @@ async function route() {
       case undefined: await homeView(app); break;
       case 'browse': await browseView(app, params); break;
       case 'game': await gameView(app, parts[1], params); break;
+      case 'installed':
+        if (!desktop) throw Object.assign(new Error(''), { status: 404 });
+        await installedView(app, parts[1]);
+        break;
       case 'library': await libraryView(app, params); break;
       case 'u': await profileView(app, parts[1], params); break;
       case 'customize': await customizeView(app); break;
