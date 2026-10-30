@@ -1,5 +1,5 @@
 import { html, api, mount, state, year, gameHref } from '../lib.js';
-import { gameTile, libraryTile, rankTile, row, enableRows } from '../components.js';
+import { gameTile, libraryTile, rankTile, row, enableRows, installedTile, wireLaunchButtons } from '../components.js';
 import { icon } from '../icons.js';
 
 const NEW_DAYS = 60;
@@ -96,6 +96,7 @@ export async function homeView(app) {
   mount(app, html`
     <div class="page home">
       ${home.featured.length ? featured(home.featured) : ''}
+      <div id="installed-row"></div>
       ${state.library.length
         ? row({ title: 'My games', href: '#/library', cls: 'row-small', items: state.library.slice(0, 20).map(libraryTile) })
         : ''}
@@ -117,4 +118,17 @@ export async function homeView(app) {
   `);
   enableRows(app);
   wireFeatured(app);
+  showInstalled();
+}
+
+// Desktop app: games installed through Steam, Epic or GOG, ready to start.
+// Finding and matching them can take a moment, so the row appears when ready.
+async function showInstalled() {
+  if (!window.gameshelfDesktop) return;
+  const installed = await window.gameshelfDesktop.installedGames().catch(() => []);
+  const slot = document.getElementById('installed-row');
+  if (!slot || !installed.length) return;
+  mount(slot, row({ title: 'Installed on this PC', items: installed.map(installedTile) }));
+  enableRows(slot);
+  wireLaunchButtons(slot);
 }

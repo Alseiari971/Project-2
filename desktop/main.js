@@ -4,8 +4,11 @@
 const path = require('node:path');
 const fs = require('node:fs');
 const http = require('node:http');
+const { spawn } = require('node:child_process');
 const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require('electron');
 const { SETTINGS_KEYS, readSettings, writeSettings } = require('./settings');
+const { LAUNCHER_NAMES, scanInstalledGames } = require('./installed');
+const { normalizeTitle } = require('../src/text');
 
 app.setName('GameShelf');
 if (process.platform === 'win32') app.setAppUserModelId('app.gameshelf.desktop');
@@ -64,6 +67,7 @@ function buildApp() {
   db ??= openDatabase();
   games = createGameProvider(process.env, { db });
   handler = createApp({ db, games });
+  matches.clear();
 }
 
 function listen(server, port) {
@@ -200,7 +204,54 @@ function createWindow(startPath) {
   win.loadURL(origin + startPath);
 }
 
-// ---- Settings bridge (used by the App settings page, see preload.js) ---------------
+// ---- Installed games ----------------------------------------------------------------
+
+const SCAN_TTL_MS = 15 * 1000;
+let scan = { at: 0, games: Promise.resolve([]) };
+// Each installed game's GameShelf page (or null), looked up once per game database.
+const matches = new Map();
+
+// Rescans at most every few seconds, so games installed while the app is open show up.
+function installedGames() {
+  if (Date.now() - scan.at > SCAN_TTL_MS) {
+    scan = { at: Date.now(), games: scanInstalledGames().catch(() => []) };
+  }
+  return scan.games;
+}
+
+async function findGamePages(installed) {
+  const unknown = installed.filter((g) => !matches.has(g.key));
+  // Steam games match exactly by their Steam ID, in one go.
+  const steam = unknown.filter((g) => g.steamAppId);
+  if (steam.length) {
+    try {
+      const found = await games.matchSteamGames(steam.map((g) => ({ appid: g.steamAppId, name: g.name })));
+      steam.forEach((g, i) => matches.set(g.key, found[i]));
+    } catch (err) {
+      console.error('Could not match Steam games:', err.message);
+    }
+  }
+  // Other launchers: a search for the exact name.
+  for (const g of unknown.filter((x) => !x.steamAppId)) {
+    try {
+      const { results } = await games.search({ query: g.name, pageSize: 5 });
+      matches.set(g.key, results.find((r) => normalizeTitle(r.name) === normalizeTitle(g.name)) || null);
+    } catch (err) {
+      console.error(`Could not match "${g.name}":`, err.message);
+    }
+  }
+}
+
+const describe = (g) => ({ key: g.key, launcher: LAUNCHER_NAMES[g.launcher] });
+
+function launch(game) {
+  // Launcher links (steam://, com.epicgames.launcher://) go through the launcher.
+  // GOG games start from their own program file, as GOG's shortcuts do.
+  if (game.url) return shell.openExternal(game.url);
+  spawn(game.exe, [], { cwd: game.cwd, detached: true, stdio: 'ignore', windowsHide: false }).unref();
+}
+
+// ---- Bridge for the page (see preload.js) -----------------------------------------
 
 function fromApp(event) {
   try {
@@ -233,6 +284,29 @@ function registerIpc() {
     buildApp();
     return { source: games.name, problem: await checkGameData() };
   });
+  // Installed games that have a GameShelf page, for the home screen.
+  ipcMain.handle('installed:list', async (event) => {
+    if (!fromApp(event)) throw new Error('Not allowed.');
+    const installed = await installedGames();
+    await findGamePages(installed);
+    return installed.filter((g) => matches.get(g.key)).map((g) => ({ ...describe(g), game: matches.get(g.key) }));
+  });
+  // Whether the game on a game page is installed: by Steam ID, or else by exact name.
+  ipcMain.handle('installed:find', async (event, { steamAppId, name } = {}) => {
+    if (!fromApp(event)) throw new Error('Not allowed.');
+    const installed = await installedGames();
+    const target = normalizeTitle(name || '');
+    const game = (steamAppId && installed.find((g) => g.steamAppId === Number(steamAppId))) ||
+      (target && installed.find((g) => normalizeTitle(g.name) === target));
+    return game ? describe(game) : null;
+  });
+  // Only games found by the scan can be started; the page passes just the key.
+  ipcMain.handle('installed:launch', async (event, key) => {
+    if (!fromApp(event)) throw new Error('Not allowed.');
+    const game = (await installedGames()).find((g) => g.key === key);
+    if (!game) throw new Error('That game is no longer installed.');
+    await launch(game);
+  });
   ipcMain.handle('data-folder:open', async (event) => {
     if (!fromApp(event)) throw new Error('Not allowed.');
     await shell.openPath(app.isPackaged ? dataDir : path.join(__dirname, '..', 'data'));
@@ -249,6 +323,7 @@ async function start() {
     if (value) process.env[key] = value;
   }
   buildApp();
+  installedGames();
   await startServer();
   registerIpc();
   if (process.platform !== 'darwin') Menu.setApplicationMenu(null);

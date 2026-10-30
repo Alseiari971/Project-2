@@ -561,17 +561,17 @@ a.tag:hover { background: #3a3c43; }
 
 /* ---- Game page ---- */
 .game-page { position: relative; }
-.gp-backdrop { position: absolute; inset: 0 0 auto; height: 380px; background-size: cover; background-position: center 25%; opacity: 0.38; -webkit-mask-image: linear-gradient(180deg, #000 20%, transparent); mask-image: linear-gradient(180deg, #000 20%, transparent); pointer-events: none; }
+.gp-backdrop { position: absolute; inset: 0 0 auto; height: 560px; background-size: cover; background-position: center 25%; opacity: 0.45; -webkit-mask-image: linear-gradient(180deg, #000 20%, transparent); mask-image: linear-gradient(180deg, #000 20%, transparent); pointer-events: none; }
 .gp { position: relative; }
-.gp-head { display: flex; align-items: flex-end; gap: 24px; margin-bottom: 24px; }
-.gp-cover { width: 240px; aspect-ratio: 16 / 9; flex: none; align-self: center; border-radius: var(--radius-sm); object-fit: cover; background: var(--panel); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5); }
-.gp-cover.tall { width: 128px; aspect-ratio: 2 / 3; }
-.gp-main-head { flex: 1; min-width: 0; display: grid; gap: 12px; }
-.gp-main-head h1 { font-size: clamp(26px, 2.6vw, 38px); letter-spacing: -0.03em; }
+.gp-head { display: flex; align-items: flex-end; gap: 32px; padding-top: 32px; margin-bottom: 32px; }
+.gp-cover { width: 360px; aspect-ratio: 16 / 9; flex: none; align-self: center; border-radius: var(--radius-sm); object-fit: cover; background: var(--panel); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5); }
+.gp-cover.tall { width: 200px; aspect-ratio: 2 / 3; }
+.gp-main-head { flex: 1; min-width: 0; display: grid; gap: 16px; }
+.gp-main-head h1 { font-size: clamp(30px, 3.4vw, 56px); line-height: 1.05; letter-spacing: -0.035em; }
 .gp-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; }
 .tag-row { display: flex; flex-wrap: wrap; gap: 4px; }
-.gp-facts { color: #d6d7db; font-size: 14px; font-weight: 700; min-width: 0; }
-.gp-actions { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px 16px; margin-top: 4px; }
+.gp-facts { color: #d6d7db; font-size: 15px; font-weight: 700; min-width: 0; }
+.gp-actions { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px 16px; margin-top: 8px; }
 .gp-buy { display: flex; align-items: center; gap: 8px; }
 .gp-tabs { margin-bottom: 16px; }
 .gp-layout { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 24px; align-items: start; margin-bottom: 32px; }
@@ -1181,6 +1181,14 @@ label { display: grid; gap: 8px; font-size: 13px; font-weight: 700; color: var(-
 .settings-actions { display: flex; gap: 8px; margin-top: 8px; }
 .app-settings .form-error:empty { min-height: 0; }
 
+/* ---- Installed games (desktop app) ---- */
+.tile-wrap { position: relative; min-width: 0; }
+.tile-play { position: absolute; right: 8px; bottom: 8px; z-index: 4; width: 36px; height: 36px; display: grid; place-items: center; border: 0; border-radius: 50%; background: var(--accent); color: var(--on-accent); cursor: pointer; box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5); transition: transform 0.15s var(--ease); }
+.tile-play:hover { transform: scale(1.1); }
+.tile-play:disabled { opacity: 0.6; cursor: default; transform: none; }
+.tile-play .icon { width: 16px; height: 16px; margin-left: 2px; }
+.play-slot { display: contents; }
+
 /* ---- Desktop app window ---- */
 /* The top bar is the window's title bar: drag it to move the window. */
 .desktop-app .topbar { -webkit-app-region: drag; user-select: none; }
@@ -1201,6 +1209,8 @@ label { display: grid; gap: 8px; font-size: 13px; font-weight: 700; color: var(-
 @media (max-width: 1180px) {
   :root { --sidebar-w: 216px; --gutter: 24px; }
   .gp-layout { grid-template-columns: 1fr; }
+  .gp-cover { width: 280px; }
+  .gp-cover.tall { width: 160px; }
   .profile-layout { grid-template-columns: 1fr; }
   .profile-side { position: static; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
   .feature-track { grid-auto-columns: calc(70% - 16px); }
@@ -1246,7 +1256,7 @@ label { display: grid; gap: 8px; font-size: 13px; font-weight: 700; color: var(-
   .list-col { display: none; }
   .list-thumb { width: 56px; height: 32px; }
   .sk-feature { grid-template-columns: 1fr; }
-  .gp-head { align-items: flex-start; gap: 16px; }
+  .gp-head { align-items: flex-start; gap: 16px; padding-top: 0; }
   .gp-cover { width: 120px; align-self: flex-start; }
   .gp-cover.tall { width: 84px; }
   .gp-actions { flex-direction: column; align-items: stretch; }

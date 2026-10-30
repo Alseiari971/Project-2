@@ -1,5 +1,5 @@
 // Reusable pieces of UI shared by several pages.
-import { html, raw, hueFor, year, gameHref, profileHref, STATUS_LABELS, applyStyles, mount } from './lib.js';
+import { html, raw, hueFor, year, gameHref, profileHref, STATUS_LABELS, applyStyles, mount, toast } from './lib.js';
 import { icon } from './icons.js';
 
 /** Game artwork, or a colored title card when there is no image. */
@@ -177,6 +177,33 @@ export function libraryTile(entry) {
       corner: html`${entry.playtime ? html`<span class="corner-chip">${formatHours(entry.playtime)}</span>` : ''}${ratingBadge(entry.rating)}`,
     },
   );
+}
+
+/** Desktop app: a game installed on this PC, with a Play button on its art. */
+export function installedTile({ key, launcher, game }) {
+  return html`
+    <div class="tile-wrap">
+      ${gameTile(game, { tag: launcher })}
+      <button type="button" class="tile-play" data-launch="${key}" data-name="${game.name}" aria-label="Play ${game.name}" title="Play">${icon('play')}</button>
+    </div>`;
+}
+
+/** Desktop app: starts the installed game behind every [data-launch] button inside `root`. */
+export function wireLaunchButtons(root) {
+  root.querySelectorAll('[data-launch]').forEach((button) => button.addEventListener('click', async (e) => {
+    e.preventDefault();
+    button.disabled = true;
+    try {
+      await window.gameshelfDesktop.launch(button.dataset.launch);
+      toast(`Starting ${button.dataset.name}…`);
+    } catch (err) {
+      // Errors from the app arrive wrapped; keep just the message.
+      toast(err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, ''), { error: true });
+    } finally {
+      // Launchers take a few seconds to open the game; this stops double starts.
+      setTimeout(() => { button.disabled = false; }, 4000);
+    }
+  }));
 }
 
 /** Horizontally scrolling row with arrow buttons, like a streaming app. */

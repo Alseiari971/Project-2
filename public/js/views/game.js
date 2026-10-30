@@ -1,5 +1,5 @@
 import { html, api, mount, state, year, formatDate, STATUS_LABELS, toast, hueFor, onLeave, rememberGame, refreshLibrary, gameHref } from '../lib.js';
-import { gameTile, row, enableRows, userChip, statusBadge, starInput, wireStarInput, starValue, formatHours } from '../components.js';
+import { gameTile, row, enableRows, userChip, statusBadge, starInput, wireStarInput, starValue, formatHours, wireLaunchButtons } from '../components.js';
 import { icon } from '../icons.js';
 
 function listActions(game) {
@@ -284,6 +284,7 @@ export async function gameView(app, id, params) {
               ${listActions(game)}
               <div class="gp-buy">
                 ${game.website ? html`<a class="round-btn" href="${game.website}" target="_blank" rel="noopener noreferrer" aria-label="Official website" title="Official website">${icon('link')}</a>` : ''}
+                <span class="play-slot" id="play-slot"></span>
                 <a class="pill-btn pill-light pill-lg" id="buy-btn" href="#buy">Where to buy</a>
               </div>
             </div>
@@ -408,6 +409,20 @@ export async function gameView(app, id, params) {
     }
   });
   if (params.get('section') === 'buy') document.getElementById('buy').scrollIntoView({ block: 'start' });
+
+  // Desktop app: a game installed on this PC gets a Play button in place of Buy.
+  window.gameshelfDesktop?.findInstalled({ steamAppId: game.steamAppId, name: game.name })
+    .then((found) => {
+      const slot = document.getElementById('play-slot');
+      if (!found || !slot) return;
+      mount(slot, html`
+        <button type="button" class="pill-btn pill-accent pill-lg" data-launch="${found.key}" data-name="${game.name}">
+          ${icon('play')} Play<small>${found.launcher}</small>
+        </button>`);
+      wireLaunchButtons(slot);
+      document.getElementById('buy-btn')?.remove();
+    })
+    .catch(() => {});
 
   // Prices come from a separate, slower service, so they load after the page.
   api(`/games/${encodeURIComponent(game.id)}/prices`)
