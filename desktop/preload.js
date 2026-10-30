@@ -30,6 +30,14 @@ contextBridge.exposeInMainWorld('gameshelfDesktop', {
   // The "Arabic subtitles" switch next to Play, and the Arabic packs.
   arabicInfo: (key) => ipcRenderer.invoke('arabic:info', key),
   setArabic: (key, on) => ipcRenderer.invoke('arabic:set', key, on),
+  arabicOnline: (key) => ipcRenderer.invoke('arabic:online', key),
+  getArabic: (key) => ipcRenderer.invoke('arabic:get', key),
+  requestArabic: (key) => ipcRenderer.invoke('arabic:request', key),
+  onArabicProgress: (fn) => {
+    const listener = (_event, progress) => fn(progress);
+    ipcRenderer.on('arabic:progress', listener);
+    return () => ipcRenderer.removeListener('arabic:progress', listener);
+  },
   arabicPacks: () => ipcRenderer.invoke('arabic:packs'),
   addArabicPack: () => ipcRenderer.invoke('arabic:add-pack'),
   removeArabicPack: (id) => ipcRenderer.invoke('arabic:remove-pack', id),

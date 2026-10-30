@@ -44,19 +44,124 @@ export function arabicToggle({ key }) {
 
 const MODE_LABELS = { native: 'Native patch', overlay: 'Accessibility overlay', unavailable: 'Unavailable' };
 const explain = (message) => (message ? t(message.text, message.vars) : '');
+const percent = (part, whole) => (whole ? Math.min(100, Math.floor((part / whole) * 100)) : 0);
+
+function setLabel(button, strong, small) {
+  mount(button.querySelector('strong'), html`${strong}`);
+  mount(button.querySelector('small'), html`${small}`);
+}
 
 function paintArabic(button, info) {
   const mode = info?.mode || 'unavailable';
-  button.classList.remove('is-checking', 'mode-native', 'mode-overlay', 'mode-unavailable');
+  button.classList.remove('is-checking', 'is-request', 'is-busy', 'mode-native', 'mode-overlay', 'mode-unavailable', 'mode-available');
   button.classList.add(`mode-${mode}`);
   button.classList.toggle('is-on', Boolean(info?.enabled));
+  button.setAttribute('role', 'switch');
   button.setAttribute('aria-checked', String(Boolean(info?.enabled)));
+  button.style.removeProperty('--progress');
+  delete button.dataset.action;
   button.disabled = mode === 'unavailable';
-  mount(button.querySelector('small'), html`${t(MODE_LABELS[mode])}`);
+  setLabel(button, t('Arabic subtitles'), t(MODE_LABELS[mode]));
   const notes = mode === 'unavailable'
     ? [explain(info?.why)]
     : [t(mode === 'native' ? 'Adds an Arabic patch the game loads. Turning it off takes it out.' : 'Shows Arabic over the game, read from its English subtitles. The game isn\'t changed.'), explain(info?.detail)];
   button.title = notes.filter(Boolean).join('\n');
+  // No pack on this PC yet: GameShelf's server may have the Arabic, or it can be asked for.
+  if (mode === 'unavailable' && info?.missing) checkOnline(button);
+}
+
+/**
+ * A game with no Arabic on this PC:
+ * - its Arabic is ready on GameShelf's server: the switch, which gets it;
+ * - this PC can make it: "Request Arabic subtitles", which has the server translate it (once, for everyone);
+ * - otherwise: "Request Arabic subtitles", which counts the request.
+ */
+async function checkOnline(button) {
+  let online;
+  try {
+    online = await desktop.arabicOnline(button.dataset.arabic);
+  } catch {
+    return;
+  }
+  if (!online.configured || (!online.server && !online.building)) return;
+  if (online.building) return paintProgress(button, online.building);
+  const server = online.server;
+  button.disabled = false;
+  if (online.canBuild && server.status === 'ready') {
+    button.classList.remove('mode-unavailable');
+    button.classList.add('mode-available');
+    button.dataset.action = 'get';
+    setLabel(button, t('Arabic subtitles'), t('Ready on GameShelf'));
+    button.title = t('GameShelf has this game\'s Arabic. Turning it on makes the Arabic patch from your own copy of the game.');
+    return;
+  }
+  button.classList.remove('mode-unavailable');
+  button.classList.add('is-request');
+  button.setAttribute('role', 'button');
+  button.removeAttribute('aria-checked');
+  if (online.canBuild) {
+    button.dataset.action = 'get';
+    setLabel(button, t('Request Arabic subtitles'), server.status === 'partial' && server.total
+      ? t('{percent}% translated so far', { percent: percent(server.translated, server.total) })
+      : t('Translated once, for every player'));
+    button.title = t('GameShelf translates this game\'s text into Arabic and makes the Arabic patch from your own copy of the game. It can take a few minutes.');
+  } else {
+    button.dataset.action = 'request';
+    paintRequested(button, server);
+  }
+}
+
+function paintRequested(button, server) {
+  setLabel(button, server.asked ? t('Arabic requested') : t('Request Arabic subtitles'),
+    server.requests === 1 ? t('1 player asked') : t('{count} players asked', { count: server.requests || 0 }));
+  button.disabled = Boolean(server.asked);
+  button.title = t('GameShelf can\'t make Arabic for this game by itself yet. Requests show which games players want most.');
+}
+
+const PHASES = {
+  starting: 'Getting ready…',
+  reading: 'Reading the game\'s text…',
+  packing: 'Making the Arabic patch…',
+  done: 'Making the Arabic patch…',
+};
+
+function paintProgress(button, progress) {
+  button.classList.add('is-busy');
+  button.disabled = true;
+  let small;
+  let share = 0;
+  if (progress.phase === 'translating' && progress.asking) {
+    small = t('Translating… {done} of {total} lines', { done: progress.asked.toLocaleString(), total: progress.asking.toLocaleString() });
+    share = progress.asked / progress.asking;
+  } else if (progress.phase === 'translating') {
+    small = t('Getting the Arabic from GameShelf…');
+  } else {
+    small = t(PHASES[progress.phase] || PHASES.starting);
+    share = progress.phase === 'packing' || progress.phase === 'done' ? 1 : 0;
+  }
+  button.style.setProperty('--progress', `${Math.round(share * 100)}%`);
+  setLabel(button, button.classList.contains('is-request') ? t('Request Arabic subtitles') : t('Arabic subtitles'), small);
+}
+
+desktop?.onArabicProgress?.((progress) => {
+  document.querySelectorAll(`[data-arabic="${CSS.escape(progress.key)}"]`).forEach((button) => paintProgress(button, progress));
+});
+
+async function getArabic(button) {
+  const key = button.dataset.arabic;
+  paintProgress(button, { phase: 'starting' });
+  const { done, result, info, error } = await desktop.getArabic(key);
+  paintArabic(button, info);
+  if (done) {
+    if (error) toast(explain(error), { error: !info.enabled });
+    else toast(t('Arabic subtitles on. Press Play to start the game in Arabic.'));
+  } else if (error) {
+    toast(explain(error), { error: true });
+  } else if (result?.limited) {
+    toast(t('{done} of {total} lines are in Arabic so far. GameShelf\'s translation limit for today is reached: press the button again tomorrow to carry on.', { done: (result.translated || result.total - result.missing).toLocaleString(), total: (result.lines || result.total).toLocaleString() }), { error: true });
+  } else {
+    toast(t('Only {percent}% of this game\'s lines could be translated, so Arabic isn\'t on yet. Please try again later.', { percent: percent(result.total - result.missing, result.total) }), { error: true });
+  }
 }
 
 function wireArabic(button) {
@@ -65,12 +170,19 @@ function wireArabic(button) {
   button.addEventListener('click', async () => {
     if (button.dataset.busy || button.disabled) return;
     button.dataset.busy = '1';
-    const on = button.getAttribute('aria-checked') !== 'true';
     try {
-      const { info, error } = await desktop.setArabic(key, on);
-      paintArabic(button, info);
-      if (error) toast(explain(error), { error: info.enabled !== on }); // red only when it didn't switch
-      else toast(t(on ? 'Arabic subtitles on' : 'Arabic subtitles off'));
+      if (button.dataset.action === 'get') {
+        await getArabic(button);
+      } else if (button.dataset.action === 'request') {
+        paintRequested(button, await desktop.requestArabic(key));
+        toast(t('Thanks! Your request for Arabic subtitles is counted.'));
+      } else {
+        const on = button.getAttribute('aria-checked') !== 'true';
+        const { info, error } = await desktop.setArabic(key, on);
+        paintArabic(button, info);
+        if (error) toast(explain(error), { error: info.enabled !== on }); // red only when it didn't switch
+        else toast(t(on ? 'Arabic subtitles on' : 'Arabic subtitles off'));
+      }
     } catch (err) {
       toast(errorText(err), { error: true });
     } finally {

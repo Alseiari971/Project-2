@@ -55,6 +55,8 @@ class SharedMemoryBuilds(unittest.TestCase):
         pack = self.run_build('first')
         self.assertTrue((pack / 'pack.json').exists())
         self.assertTrue(any('Shared memory had 0 of 2 lines.' in line for line in self.logged))
+        # The server now knows the game has two lines, both in Arabic, so the desktop app can say it's ready.
+        self.assertTrue(any('The shared memory has 2 of this game\'s 2 lines in Arabic.' in line for line in self.logged), self.logged)
         # A second build (another player, another PC: no local cache) gets everything from the memory.
         self.logged.clear()
         self.run_build('second', '--no-translate')

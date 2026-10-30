@@ -123,6 +123,14 @@ Many single-player games have no Arabic, and most game engines can't draw it: th
 - **Accessibility overlay:** GameShelf reads the game's English subtitles off the screen and shows the Arabic over them, without touching the game. This is what games with anti-cheat, signed files or their own engines get.
 - **Unavailable:** there's no Arabic pack for the game (hover for the reason).
 
+**Getting Arabic without leaving the app.** When a game has no pack on the PC yet, the app asks GameShelf's server (`arabicServer` in `desktop/config.json`) about it, and the switch becomes one of these:
+
+- **Ready on GameShelf:** the server has the game's Arabic. Turning the switch on makes the Arabic patch on the player's PC, from their own copy of the game, with the server's Arabic, then turns it on. Nothing to download by hand, no command prompt.
+- **Request Arabic subtitles** (RE Engine and Ren'Py games): the same, but the server first translates the lines it doesn't have yet, once, for every player after. The button shows how far it is (reading the game's text, translating 1,900 of 4,406 lines, making the patch). The patch goes in when at least 90% of the lines have Arabic; if the server's daily limit stops it first, pressing the button again later carries on where it stopped.
+- **Request Arabic subtitles** (other games): counts the request on the server, so you can see which games players want most.
+
+Only Arabic text comes from the server, and only the game's line hashes and English lines go to it (to be translated); the game's own files never leave the PC. The app signs the packs it makes with a key made on that PC, which only that copy of the app trusts. It runs the same pack builder as below, with a Python that comes inside the installer (`scripts/bundle-arabic-builder.py` puts it, the builder and REMSG_Converter in `build-tools/arabic-builder/`; `npm run dist` runs it). From source on Windows, run that script once so `npm run app` can use it, or set `GAMESHELF_PYTHON` (and `GAMESHELF_MSG_TOOL` for RE Engine games); `GAMESHELF_ARABIC_SERVER` points the app at another server.
+
 The pieces, in `localization/` and `desktop/localization/`:
 
 **1. The Arabic compiler** (Python, run when a pack is made, not on players' PCs). It turns Arabic translations into text an engine without Arabic support shows correctly (Unity's text, Godot 3 and most custom engines; Unreal Engine, Ren'Py and Godot 4 shape Arabic themselves, so their packs get plain Arabic):
@@ -233,10 +241,13 @@ A GameShelf website can keep every Arabic line it has machine-translated, so eac
 
 - **What's stored:** per game (`steam:<app id>` or `game:<GameShelf id>`), a SHA-256 of each English line and its Arabic. The English itself is never stored, and no game files are.
 - **Who translates:** only the server, with its own API key. It checks that each line's hash really is that line (so nobody can plant Arabic under another line), and that every tag and placeholder came back unchanged, before keeping anything.
-- **Limits:** each account may have `TRANSLATE_DAILY_LINES` new lines translated a day (default 2000), and the whole server `TRANSLATE_MONTHLY_CHARS` characters a month (default 3,000,000). Lines already in the memory never count. Two people asking for the same game at once don't pay twice.
+- **Limits:** each account (or desktop app) may have `TRANSLATE_DAILY_LINES` new lines translated a day (default 2000), and the whole server `TRANSLATE_MONTHLY_CHARS` characters a month (default 3,000,000). Lines already in the memory never count. Two people asking for the same game at once don't pay twice.
 - **Turning it on:** set `OPENAI_API_KEY` on the server (and optionally `TRANSLATE_MODEL`, default `gpt-4.1-mini`, or `TRANSLATE_API_BASE` for another OpenAI-compatible API). Without a key, the endpoints say it isn't set up.
 - **Using it from the pack builder:** make an access token on the website (Edit profile, Access tokens), set it as `GAMESHELF_TOKEN`, and add `--shared https://your-gameshelf-site`. The builder takes what the memory has, has the server translate the rest, and checks every answer again. With `--no-translate` it only takes what's already there; with `--provider` too, lines the server couldn't do (say, over a limit) go to your own API key.
-- **API:** `POST /api/translations/lookup` `{ game, hashes }` and `POST /api/translations/translate` `{ game, lines: [{ hash, english }], context }`, both for signed-in users (session or `Authorization: Bearer gst_...`); tokens at `GET/POST/DELETE /api/me/tokens`.
+- **The desktop app** uses the same memory without an account: each copy gets its own device token (`POST /api/arabic/devices`, a few per address a day) and the same daily limit as an account.
+- **Which games are ready:** pack builds with `--shared` tell the server how many lines the game has; a game is ready once the memory holds 95% of them. `POST /api/arabic/status` `{ games }` says so, with how many players asked; `POST /api/arabic/requests` `{ game, name }` counts a request; `POST /api/arabic/report` is the builders' line count.
+- **Admins** (`ARABIC_ADMINS`, usernames, comma separated): `GET /api/arabic/requests` lists the most asked-for games. An admin's build also saves the font names an RE Engine game's patch replaces (from `--pak-list`), so players' apps can build it with no file list: build each RE Engine game once yourself with `--shared` and `--pak-list`.
+- **API:** `POST /api/translations/lookup` `{ game, hashes }` and `POST /api/translations/translate` `{ game, lines: [{ hash, english }], context }`, for signed-in users (session or `Authorization: Bearer gst_...`) and desktop apps (`Bearer gsd_...`); tokens at `GET/POST/DELETE /api/me/tokens`.
 
 Translations of a game's script are derived from it, so sharing them is best kept to games whose publishers allow fan translations.
 

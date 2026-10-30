@@ -158,6 +158,7 @@ function checkManifest(manifest) {
  * (or allowUnsigned, for development) and every file is there with the right
  * size and hash. Returns { dir, manifest, files: [{ source, target, sha256, size }] }.
  */
+// `publicKey` is a PEM key, or a list of them (any one may have signed the pack).
 async function readPack(dir, { publicKey, allowUnsigned = false } = {}) {
   const realDir = await fs.realpath(dir);
   const bytes = await fs.readFile(path.join(realDir, MANIFEST)).catch(() => {
@@ -165,13 +166,15 @@ async function readPack(dir, { publicKey, allowUnsigned = false } = {}) {
   });
 
   if (!allowUnsigned) {
-    if (!publicKey) throw new PackError('No pack signing key is set up, so packs can\'t be checked.');
+    // GameShelf's own key, and the key this PC's copy of the app signs the packs it builds with.
+    const keys = [].concat(publicKey || []).filter(Boolean);
+    if (!keys.length) throw new PackError('No pack signing key is set up, so packs can\'t be checked.');
     const signature = await fs.readFile(path.join(realDir, SIGNATURE), 'utf8').catch(() => {
       throw new PackError('The pack isn\'t signed.');
     });
     let valid = false;
     try {
-      valid = crypto.verify(null, bytes, publicKey, Buffer.from(signature.trim(), 'base64'));
+      valid = keys.some((key) => crypto.verify(null, bytes, key, Buffer.from(signature.trim(), 'base64')));
     } catch {
       valid = false;
     }

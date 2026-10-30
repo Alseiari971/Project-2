@@ -1546,6 +1546,17 @@ label { display: grid; gap: 8px; font-size: 13px; font-weight: 700; color: var(-
 .arabic-toggle.is-on .switch { background: var(--accent); }
 .arabic-toggle.is-on .switch span { background: #000; transform: translateX(16px); }
 [dir="rtl"] .arabic-toggle.is-on .switch span { transform: translateX(-16px); }
+/* No Arabic on this PC yet: "Ready on GameShelf", or "Request Arabic subtitles" with its progress underneath. */
+.arabic-toggle { position: relative; overflow: hidden; }
+.arabic-toggle.mode-available small { color: var(--accent); }
+.arabic-toggle.is-request { padding-inline-end: 18px; }
+.arabic-toggle.is-request .switch { display: none; }
+.arabic-toggle.is-request .arabic-mark { background: var(--accent); color: var(--on-accent); }
+.arabic-toggle.is-busy:disabled { opacity: 1; cursor: progress; }
+.arabic-toggle.is-busy small { color: var(--text); }
+.arabic-toggle.is-busy::after { content: ""; position: absolute; inset-block-end: 0; inset-inline-start: 0; height: 3px; width: var(--progress, 0%); background: var(--accent); transition: width 0.4s var(--ease); }
+.arabic-toggle.is-busy .arabic-mark { animation: play-pulse 1.6s ease-in-out infinite; }
+.arabic-toggle.is-busy .switch { display: none; }
 
 /* ---- Arabic (right to left) ---- */
 /* Gradient directions that follow the reading direction. */

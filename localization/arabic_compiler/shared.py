@@ -61,6 +61,14 @@ class SharedMemory:
             found.update(self._post('/translations/lookup', {'game': game, 'hashes': hashes[i:i + LOOKUP_BATCH]}).get('arabic') or {})
         return found
 
+    def status(self, game: str) -> dict:
+        """Where Arabic stands for a game: status, total, translated, requests, fontTargets."""
+        return self._post('/arabic/status', {'games': [game]}).get('games', {}).get(game) or {}
+
+    def report(self, game: str, total: int, engine: str = '', name: str = '', font_targets=()) -> dict:
+        """Tells the server how many lines the game has (and, from an admin, its font names)."""
+        return self._post('/arabic/report', {'game': game, 'total': total, 'engine': engine, 'name': name, 'fontTargets': list(font_targets)})
+
     def translate(self, game: str, lines: list, context: str = '', log=print):
         """Has the server translate [english] it doesn't have yet. Returns ({english: arabic}, {english: why not}, limited)."""
         done, failed, limited = {}, {}, False

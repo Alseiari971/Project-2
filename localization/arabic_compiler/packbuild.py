@@ -52,7 +52,8 @@ from .translate import _LETTERS, _TOKENS, Cache, Provider, TranslationError, Tra
 from .xunity import write_translations
 
 REPO = Path(__file__).resolve().parents[2]
-SIGNER = REPO / 'scripts' / 'localization-pack.js'
+# The desktop app runs this builder itself, and sets these to its own Node (Electron) and signer.
+SIGNER = Path(os.environ.get('GAMESHELF_SIGNER') or REPO / 'scripts' / 'localization-pack.js')
 FONTS = REPO / 'localization' / 'assets' / 'fonts'
 DEFAULT_FONT = FONTS / 'IBMPlexSansArabic-Regular.ttf'
 DEFAULT_BOLD_FONT = FONTS / 'IBMPlexSansArabic-Bold.ttf'
@@ -169,6 +170,15 @@ def shared_translate(rows, args, log) -> dict:
         raise BuildError('Set GAMESHELF_TOKEN to an access token from your GameShelf account (Edit profile, Access tokens).')
     memory = SharedMemory(args.shared, token)
     game = game_key(args.steam_app_id, args.game_id)
+    if getattr(args, 'resolved_kind', None) == 'reengine' and not args.font_targets and not args.pak_list:
+        # The game's font names, as a GameShelf admin's build found them (they're checked against the game's paks).
+        try:
+            fonts = memory.status(game).get('fontTargets') or []
+        except SharedError:
+            fonts = []
+        if fonts:
+            args.font_targets = ','.join(fonts)
+            log(f'The server knows {len(fonts)} font names for this game.')
     # Lines with nothing to translate (numbers, placeholders) stay as they are, as with the other translators.
     wanted = list(dict.fromkeys(r.source for r in rows if not r.arabic and _LETTERS.search(_TOKENS.sub('', r.source))))
     try:
@@ -191,6 +201,19 @@ def shared_translate(rows, args, log) -> dict:
         elif not row.arabic and _LETTERS.search(_TOKENS.sub('', row.source)) is None:
             row.arabic = row.source
     return failed
+
+
+def report_lines(rows, args, kind, log):
+    """Tells the shared memory how many lines the game has (and, for RE Engine, its font names), so the
+    desktop app can tell players when its Arabic is ready."""
+    lines = {r.source for r in rows if _LETTERS.search(_TOKENS.sub('', r.source))}
+    try:
+        status = SharedMemory(args.shared, os.environ['GAMESHELF_TOKEN']).report(
+            game_key(args.steam_app_id, args.game_id), total=len(lines), engine=kind, name=args.title or '',
+            font_targets=getattr(args, 'fonts_used', None) or [])
+        log(f'The shared memory has {status.get("translated", 0)} of this game\'s {len(lines)} lines in Arabic.')
+    except SharedError as err:
+        log(f'Couldn\'t tell the shared memory about this game: {err}')
 
 
 def translate_rows(rows, args, out: Path, log):
@@ -581,6 +604,7 @@ def build_reengine(source, rows, args, out: Path, payload: Path, log):
     # Which of the game's fonts get the Arabic font: .oft fonts by name (--font-targets,
     # a file list), or else plain font files found in the game's paks.
     oft_targets = re_font_targets(args, source, log) if not args.no_fonts and compiler else []
+    args.fonts_used = oft_targets
     plain_fonts = []
     if not oft_targets and source.game_paks and not args.no_fonts and compiler:
         try:
@@ -728,7 +752,7 @@ def build_unreal(source, translations: dict, args, payload: Path, stage_root: Pa
 
 
 def sign(pack_dir: Path, args, kind: str):
-    node = shutil.which('node')
+    node = os.environ.get('GAMESHELF_NODE') or shutil.which('node')
     if not node:
         raise BuildError('Signing needs Node.js (node) on the PATH.')
     command = [node, str(SIGNER), 'make', str(pack_dir), '--engine', kind, '--id', args.id, '--version', args.version, '--key', args.key]
@@ -766,6 +790,7 @@ def build(args, log=print) -> Path:
     for note in source.notes:
         log(note)
     kind = args.kind or source.engine or 'overlay'
+    args.resolved_kind = kind
     if source.game_paks:
         try:
             source.msg_files = remsg.extract_messages(source.game_paks, out / 'msg-from-game', log)
@@ -840,6 +865,8 @@ def build(args, log=print) -> Path:
         translations = {r.key: r.arabic for r in rows if r.arabic and r.key}
         build_unreal(source, translations, args, payload, out / 'stage', log)
 
+    if args.shared and rows:
+        report_lines(rows, args, kind, log)
     log(sign(pack_dir, args, kind))
     log(f'Done: {pack_dir}{f" ({len(pairs)} lines)" if pairs else ""}. Add it in GameShelf under App settings, Arabic subtitle packs.')
     return pack_dir

@@ -121,6 +121,46 @@ function openDatabase(file = process.env.DB_FILE || path.join(__dirname, '..', '
       PRIMARY KEY (user_id, day)
     );
 
+    -- Copies of the desktop app that ask for Arabic subtitles, so players need no
+    -- account. Only hashes of the token and of the address it came from are kept.
+    CREATE TABLE IF NOT EXISTS devices (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      token_hash   TEXT NOT NULL UNIQUE,
+      ip_hash      TEXT NOT NULL,
+      created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+      last_used_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS devices_ip ON devices(ip_hash, created_at);
+
+    -- The same limits as translation_usage, for devices.
+    CREATE TABLE IF NOT EXISTS device_usage (
+      device_id INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+      day       TEXT NOT NULL,
+      lines     INTEGER NOT NULL DEFAULT 0,
+      chars     INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (device_id, day)
+    );
+
+    -- How many lines each game has (as its last pack build counted them), and
+    -- the font files its Arabic patch replaces. See src/arabic-games.js.
+    CREATE TABLE IF NOT EXISTS arabic_games (
+      game         TEXT PRIMARY KEY,
+      name         TEXT NOT NULL DEFAULT '',
+      engine       TEXT NOT NULL DEFAULT '',
+      total_lines  INTEGER NOT NULL DEFAULT 0,
+      font_targets TEXT NOT NULL DEFAULT '[]',
+      updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- Players asking for Arabic in a game: one row per game and asker ("user:1", "device:7").
+    CREATE TABLE IF NOT EXISTS arabic_requests (
+      game       TEXT NOT NULL,
+      asker      TEXT NOT NULL,
+      name       TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (game, asker)
+    );
+
     -- Personal access tokens, for tools such as the pack builder. Only a hash is kept.
     CREATE TABLE IF NOT EXISTS api_tokens (
       id           INTEGER PRIMARY KEY AUTOINCREMENT,

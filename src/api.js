@@ -8,10 +8,12 @@ const {
   createSession,
   destroySession,
   requireUser,
+  requireAsker,
   rateLimit,
   createApiToken,
+  createDevice,
 } = require('./auth');
-const { TranslationLimit } = require('./translation-memory');
+const { TranslationLimit, GAME_RE: GAME_KEY_RE } = require('./translation-memory');
 const { GENRES, findGenre } = require('./games/genres');
 const profile = require('./profile');
 const { SteamError } = require('./steam');
@@ -79,7 +81,7 @@ function pitchFrom(text) {
   return pitch.trim();
 }
 
-function createApi({ db, games, prices, steam, steamStore, translations }) {
+function createApi({ db, games, prices, steam, steamStore, translations, arabicGames }) {
   const api = express.Router();
   const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30 });
   const commentLimiter = rateLimit({ windowMs: 60 * 1000, max: 10 });
@@ -671,7 +673,7 @@ function createApi({ db, games, prices, steam, steamStore, translations }) {
 
   const translateLimiter = rateLimit({ windowMs: 60 * 1000, max: 60 });
 
-  api.post('/translations/lookup', requireUser, translateLimiter, (req, res) => {
+  api.post('/translations/lookup', requireAsker, translateLimiter, (req, res) => {
     const { game, hashes } = req.body || {};
     if (!translations) return res.status(503).json({ error: 'Shared translation isn\'t set up on this server.' });
     if (!Array.isArray(hashes) || hashes.length > 5000) return res.status(400).json({ error: 'Send up to 5000 line hashes at a time.' });
@@ -682,13 +684,13 @@ function createApi({ db, games, prices, steam, steamStore, translations }) {
     }
   });
 
-  api.post('/translations/translate', requireUser, translateLimiter, asyncRoute(async (req, res) => {
+  api.post('/translations/translate', requireAsker, translateLimiter, asyncRoute(async (req, res) => {
     const { game, lines, context } = req.body || {};
     if (!translations) return res.status(503).json({ error: 'Shared translation isn\'t set up on this server.' });
     if (!Array.isArray(lines) || !lines.length || lines.length > 200) return res.status(400).json({ error: 'Send 1 to 200 lines at a time.' });
     try {
       const wanted = lines.map((l) => ({ hash: String(l?.hash || ''), english: l?.english }));
-      res.json(await translations.translate(req.user, String(game), wanted, { context: String(context || '') }));
+      res.json(await translations.translate(req.asker, String(game), wanted, { context: String(context || '') }));
     } catch (err) {
       if (err instanceof TranslationLimit) return res.status(503).json({ error: err.message });
       if (err instanceof TypeError) return res.status(400).json({ error: err.message });
@@ -696,6 +698,39 @@ function createApi({ db, games, prices, steam, steamStore, translations }) {
       res.status(502).json({ error: 'The translation service didn\'t answer. Please try again later.' });
     }
   }));
+
+  // ---- Arabic subtitles in the desktop app (see src/arabic-games.js) ---------
+
+  // Each copy of the desktop app gets its own token the first time it asks, so players need no account.
+  const deviceLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 10 });
+  api.post('/arabic/devices', deviceLimiter, (req, res) => {
+    const token = createDevice(db, req.ip);
+    if (!token) return res.status(429).json({ error: 'Too many new copies of GameShelf from this address today. Please try again tomorrow.' });
+    res.status(201).json({ token });
+  });
+
+  const arabicRoute = (fn) => (req, res) => {
+    if (!arabicGames) return res.status(503).json({ error: 'Arabic subtitles aren\'t set up on this server.' });
+    try {
+      res.json(fn(req.body || {}, req));
+    } catch (err) {
+      if (err instanceof TypeError) return res.status(400).json({ error: err.message });
+      throw err;
+    }
+  };
+
+  // Where Arabic stands for some games: { games: { "steam:1173690": { status, total, translated, requests, asked, fontTargets } } }.
+  api.post('/arabic/status', requireAsker, translateLimiter, arabicRoute(({ games: keys }, req) => {
+    if (!Array.isArray(keys) || keys.length > 500) throw new TypeError('Send up to 500 games at a time.');
+    return { games: Object.fromEntries(keys.map(String).filter((k) => GAME_KEY_RE.test(k)).map((k) => [k, arabicGames.status(k, req.asker)])) };
+  }));
+  api.post('/arabic/requests', requireAsker, translateLimiter, arabicRoute(({ game, name }, req) => arabicGames.request(req.asker, String(game), name)));
+  api.post('/arabic/report', requireAsker, translateLimiter, arabicRoute((body, req) => arabicGames.report(req.asker, { ...body, game: String(body.game) }, req.user)));
+  // The most asked-for games, for the server's admins (ARABIC_ADMINS).
+  api.get('/arabic/requests', requireUser, (req, res) => {
+    if (!arabicGames?.isAdmin(req.user)) return res.status(403).json({ error: 'Only admins can see this.' });
+    res.json({ requests: arabicGames.requests() });
+  });
 
   api.use((req, res) => res.status(404).json({ error: 'Not found.' }));
 

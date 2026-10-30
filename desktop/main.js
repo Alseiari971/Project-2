@@ -16,6 +16,8 @@ const { createDiscordPresence } = require('./discord');
 const { createArabicService } = require('./localization/service');
 const { createOcrHelper, defaultSpawn } = require('./localization/ocr');
 const { createOverlayManager } = require('./localization/overlay-manager');
+const { createArabicOnline, gameKey } = require('./localization/online');
+const { createPackBuilder, findBuilder, localPackKey } = require('./localization/builder');
 const config = require('./config.json');
 const { normalizeTitle } = require('../src/text');
 
@@ -63,6 +65,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('will-quit', () => {
     presence?.close();
     overlays?.stopAll();
+    packBuilder.stopAll();
     ocrHelper.close();
   });
 }
@@ -289,7 +292,19 @@ const packKey = config.localizationPackKey
   || (!app.isPackaged && process.env.GAMESHELF_PACK_KEY_FILE ? fs.readFileSync(process.env.GAMESHELF_PACK_KEY_FILE, 'utf8') : null);
 const devOcrHelper = !app.isPackaged ? process.env.GAMESHELF_OCR_HELPER : null;
 const ocrHelper = createOcrHelper({ spawnHelper: defaultSpawn({ dataDir, devHelper: devOcrHelper }) });
-const arabic = createArabicService({ dataDir, publicKey: packKey, overlayAvailable: process.platform === 'win32' || Boolean(devOcrHelper) });
+// Packs this app builds itself (from GameShelf's server, see below) are signed with a key made on this PC.
+const localKey = localPackKey(dataDir);
+const arabic = createArabicService({ dataDir, publicKey: [packKey, localKey.publicKey].filter(Boolean), overlayAvailable: process.platform === 'win32' || Boolean(devOcrHelper) });
+// "Request Arabic subtitles": the Arabic comes from GameShelf's server (shared by
+// every player), and the pack is built here from the player's own copy of the game.
+const online = createArabicOnline({ server: (!app.isPackaged && process.env.GAMESHELF_ARABIC_SERVER) || config.arabicServer, dataDir });
+const packBuilder = createPackBuilder({
+  paths: findBuilder({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, repoDir: path.join(__dirname, '..') }),
+  outDir: path.join(dataDir, 'localization', 'builds'),
+  keyFile: localKey.keyFile,
+});
+// Most of a game's lines must have Arabic before its pack goes in.
+const ENOUGH_ARABIC = 0.9;
 let overlays = null; // created once the app is ready
 
 const arabicGame = (g) => ({ key: g.key, dir: g.dir, steamAppId: g.steamAppId || null, gameId: pageOf(g)?.id || null });
@@ -621,6 +636,47 @@ function registerIpc() {
       if (ready.ok && ready.mode === 'overlay') startOverlay(key, game, ready);
     }
     return { info: { ...result.info, overlayRunning: Boolean(overlays?.has(key)) }, error: result.error };
+  });
+  // A game with no Arabic pack here: whether GameShelf's server has its Arabic
+  // (the switch gets it), or whether it can be asked for.
+  handle('arabic:online', async (key) => {
+    const game = await installedGame(key);
+    const info = await arabic.info(arabicGame(game));
+    const serverKey = gameKey(arabicGame(game));
+    const out = { configured: online.configured, missing: Boolean(info.missing), canBuild: packBuilder.canBuild(info.tier), building: packBuilder.progress(key), server: null, error: null };
+    if (!info.missing || !online.configured || !serverKey) return out;
+    try {
+      out.server = await online.status(serverKey);
+    } catch (err) {
+      out.error = { text: err.message, vars: {} };
+    }
+    return out;
+  });
+  // Makes the pack on this PC, with the Arabic from the server (which translates
+  // what it doesn't have yet, once, for everyone), then turns Arabic on.
+  handle('arabic:get', async (key) => {
+    const game = await installedGame(key);
+    const before = await arabic.info(arabicGame(game));
+    if (!before.missing) return { done: true, info: before };
+    const send = (progress) => win && !win.isDestroyed() && win.webContents.send('arabic:progress', { key, ...progress });
+    try {
+      const result = await packBuilder.build({ ...arabicGame(game), tier: before.tier, title: pageOf(game)?.name || game.name },
+        { server: online.server, token: await online.token(), onProgress: send });
+      const have = result.total ? (result.total - result.missing) / result.total : 0;
+      if (have < ENOUGH_ARABIC) return { done: false, result, info: before };
+      await arabic.packs.add(result.packDir);
+      const { info, error } = await arabic.set(arabicGame(game), true);
+      return { done: true, result, info, error };
+    } catch (err) {
+      return { done: false, info: before, error: { text: err.message, vars: {} } };
+    }
+  });
+  // For games this PC can't make Arabic for: the request is counted on the server.
+  handle('arabic:request', async (key) => {
+    const game = await installedGame(key);
+    const serverKey = gameKey(arabicGame(game));
+    if (!serverKey) throw new Error('GameShelf doesn\'t know which game this is, so it can\'t ask for it.');
+    return online.request(serverKey, pageOf(game)?.name || game.name);
   });
   handle('arabic:packs', async () => ({ ready: Boolean(packKey), packs: (await arabic.packs.list()).map(({ dir, ...p }) => p) }));
   handle('arabic:add-pack', async () => {

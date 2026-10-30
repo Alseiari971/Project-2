@@ -82,6 +82,8 @@ OPENAI_API_KEY=
 # Spending limits: new lines per user per day, characters per month in all.
 TRANSLATE_DAILY_LINES=2000
 TRANSLATE_MONTHLY_CHARS=3000000
+# Your username on the site: can see the most asked-for games, and your pack builds teach it RE Engine games' font names.
+ARABIC_ADMINS=
 EOF
 fi
 chown root:root "$ENV_FILE"

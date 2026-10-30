@@ -60,7 +60,7 @@ function createArabicService({ dataDir, publicKey, overlayAvailable = process.pl
     const prefs = await readPrefs();
     const staged = (await localization.status(game.dir).catch(() => null))?.status === 'enabled';
     const base = { mode: 'unavailable', why: null, detail: null, enabled: false, staged, pack: null };
-    if (!publicKey) return { ...base, why: why('Arabic packs aren\'t set up in this copy of GameShelf.') };
+    if (![].concat(publicKey || []).some(Boolean)) return { ...base, why: why('Arabic packs aren\'t set up in this copy of GameShelf.') };
     if (!game.dir) return { ...base, why: why('GameShelf doesn\'t know where this game is installed.') };
 
     const found = await packs.forGame(game);
@@ -84,7 +84,8 @@ function createArabicService({ dataDir, publicKey, overlayAvailable = process.pl
       // There's a patch for this game, but it can't go in: say why.
       out = { ...base, why: result.why || why('There\'s no Arabic pack for this version of the game.') };
     } else {
-      out = { ...base, why: why('There\'s no Arabic pack for this game yet.') };
+      // Nothing on this PC yet: the app can get it from GameShelf's server (see online.js and builder.js).
+      out = { ...base, missing: true, tier: result.fileChanges ? result.tier : null, why: why('There\'s no Arabic pack for this game yet.') };
     }
     return { ...out, enabled: out.mode !== 'unavailable' && prefs[game.key] === true };
   }

@@ -14,6 +14,7 @@ const { createPriceService } = require('./src/prices');
 const { createSteamService } = require('./src/steam');
 const { createSteamStore } = require('./src/steam-store');
 const { createTranslationMemory } = require('./src/translation-memory');
+const { createArabicGames } = require('./src/arabic-games');
 
 function createApp({
   db = openDatabase(),
@@ -22,6 +23,7 @@ function createApp({
   steam = createSteamService(),
   steamStore = createSteamStore(),
   translations = createTranslationMemory({ db }),
+  arabicGames = createArabicGames({ db, translations }),
 } = {}) {
   const app = express();
   app.disable('x-powered-by');
@@ -42,7 +44,7 @@ function createApp({
   // Large enough for a resized avatar image.
   app.use(express.json({ limit: '500kb' }));
   app.use(loadUser(db));
-  app.use('/api', createApi({ db, games, prices, steam, steamStore, translations }));
+  app.use('/api', createApi({ db, games, prices, steam, steamStore, translations, arabicGames }));
   app.use(express.static(path.join(__dirname, 'public')));
 
   app.use((err, _req, res, _next) => {

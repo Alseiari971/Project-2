@@ -6,6 +6,7 @@ const { createApp } = require('../server');
 const { openDatabase } = require('../src/db');
 const { createLocalProvider } = require('../src/games/local');
 const { createTranslationMemory, sha256, problemWith } = require('../src/translation-memory');
+const { createArabicGames } = require('../src/arabic-games');
 
 // A stand-in for the OpenAI API: "عربي " before each line, or a broken answer when asked.
 function fakeOpenAI({ breakOnce = new Set() } = {}) {
@@ -30,7 +31,8 @@ function fakeOpenAI({ breakOnce = new Set() } = {}) {
 async function start(env = {}, openai = fakeOpenAI()) {
   const db = openDatabase(':memory:');
   const translations = createTranslationMemory({ db, env: { OPENAI_API_KEY: 'server-key', ...env }, fetch: openai.fetch });
-  const server = createApp({ db, games: createLocalProvider(), translations }).listen(0);
+  const arabicGames = createArabicGames({ db, translations, env });
+  const server = createApp({ db, games: createLocalProvider(), translations, arabicGames }).listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
   return { db, server, base, openai };
@@ -184,4 +186,55 @@ test('two players asking for the same new lines at once pay once', async (t) => 
   ]);
   assert.deepEqual(a.body.arabic, b.body.arabic);
   assert.equal(openai.calls.length, 1);
+});
+
+test('the desktop app gets a device token, asks for a game, and sees it become ready', async (t) => {
+  const { server, base, db } = await start({ ARABIC_ADMINS: 'hamad', TRANSLATE_DAILY_LINES: '2' });
+  t.after(() => server.close());
+  const app = client(base);
+  const made = await app('/api/arabic/devices', { method: 'POST' });
+  assert.equal(made.status, 201);
+  assert.match(made.body.token, /^gsd_/);
+  app.useToken(made.body.token);
+  const game = 'steam:1173690';
+
+  // A device can ask for Arabic and use the shared memory, but nothing that needs an account.
+  let status = (await app('/api/arabic/status', { method: 'POST', body: { games: [game, 'not a game'] } })).body.games;
+  assert.deepEqual(Object.keys(status), [game]);
+  assert.equal(status[game].status, 'none');
+  const asked = await app('/api/arabic/requests', { method: 'POST', body: { game, name: 'RE3 Demo' } });
+  assert.equal(asked.body.requests, 1);
+  assert.equal(asked.body.asked, true);
+  await app('/api/arabic/requests', { method: 'POST', body: { game } }); // asking twice counts once
+  assert.equal((await app('/api/me/tokens')).status, 401);
+
+  const lines = ['START GAME', 'OPTIONS', 'EXIT GAME'].map(line);
+  const first = await app('/api/translations/translate', { method: 'POST', body: { game, lines } });
+  assert.equal(Object.keys(first.body.arabic).length, 2); // the device's own daily limit
+  assert.equal(first.body.limited, true);
+  assert.equal(db.prepare('SELECT SUM(lines) AS n FROM device_usage').get().n, 2);
+
+  // The build tells how many lines the game has; font names are only taken from admins.
+  const fonts = ['natives/stm/escape/ui/ui0000/font/fot-newcinemaastd-d.oft.1', 'C:/Windows/evil.oft.1'];
+  status = (await app('/api/arabic/report', { method: 'POST', body: { game, name: 'RE3 Demo', engine: 'reengine', total: 3, fontTargets: fonts } })).body;
+  assert.deepEqual([status.status, status.total, status.translated, status.fontTargets], ['partial', 3, 2, []]);
+
+  const hamad = await signedIn(base, 'hamad');
+  await hamad('/api/translations/translate', { method: 'POST', body: { game, lines } });
+  status = (await hamad('/api/arabic/report', { method: 'POST', body: { game, engine: 'reengine', total: 3, fontTargets: fonts } })).body;
+  assert.deepEqual([status.status, status.translated, status.fontTargets], ['ready', 3, [fonts[0]]]);
+  assert.equal((await app('/api/arabic/status', { method: 'POST', body: { games: [game] } })).body.games[game].status, 'ready');
+
+  // Admins see what players ask for; others don't.
+  const list = (await hamad('/api/arabic/requests')).body.requests;
+  assert.deepEqual(list.map((r) => [r.game, r.name, r.requests, r.status]), [[game, 'RE3 Demo', 1, 'ready']]);
+  assert.equal((await (await signedIn(base, 'alice'))('/api/arabic/requests')).status, 403);
+});
+
+test('one address can only make a few device tokens a day', async (t) => {
+  const { server, base } = await start();
+  t.after(() => server.close());
+  const codes = [];
+  for (let i = 0; i < 6; i++) codes.push((await client(base)('/api/arabic/devices', { method: 'POST' })).status);
+  assert.deepEqual(codes, [201, 201, 201, 201, 201, 429]);
 });
