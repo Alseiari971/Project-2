@@ -13,7 +13,7 @@ const SOURCES = {
 export async function appSettingsView(app, params) {
   document.title = 'App settings · GameShelf';
   const desktop = window.gameshelfDesktop;
-  const { values, source, dataDir } = await desktop.getSettings();
+  const { values, source, dataDir, discord } = await desktop.getSettings();
   const field = (name, label, type = 'text') => html`
     <label>${label}<input class="input" name="${name}" type="${type}" value="${values[name]}" autocomplete="off" spellcheck="false"></label>`;
 
@@ -38,11 +38,12 @@ export async function appSettingsView(app, params) {
 
         <h2>Discord</h2>
         <label class="check-row">
-          <input type="checkbox" name="discordOn" ${values.DISCORD_ACTIVITY === 'off' ? '' : 'checked'}>
+          <input type="checkbox" name="discordOn" ${values.DISCORD_ACTIVITY === 'off' ? '' : 'checked'} ${discord ? '' : 'disabled'}>
           Show the game I'm playing on my Discord profile
         </label>
-        <div class="form-grid">${field('DISCORD_CLIENT_ID', 'Discord Application ID')}</div>
-        <p class="muted small">Make a free application named GameShelf in the ${link('https://discord.com/developers/applications', 'Discord Developer Portal')} and paste its Application ID here. The Discord app needs to be open on this PC, with "Share your detected activities" turned on under Activity Privacy.</p>
+        <p class="muted small">${discord
+          ? 'Shows the game, its cover and how long you’ve played while it runs. Discord needs to be open on this PC, with “Share your detected activities with others” turned on under Activity Privacy.'
+          : 'Not available in this copy of GameShelf yet.'}</p>
 
         <p class="form-error" id="settings-error" role="alert"></p>
         <div class="settings-actions">

@@ -13,6 +13,7 @@ const { processesOf, listProcesses, stopProcesses } = require('./processes');
 const { createCustomGames, suggestName } = require('./custom-games');
 const { getGpuPreference, setGpuPreference, pickMainProgram, createProgramStore, gogUninstaller } = require('./game-options');
 const { createDiscordPresence } = require('./discord');
+const config = require('./config.json');
 const { normalizeTitle } = require('../src/text');
 
 app.setName('GameShelf');
@@ -343,11 +344,16 @@ function schedulePoll() {
 
 let presence = null;
 
-// Restarted whenever the settings change, since the Discord application ID may have.
+// GameShelf's own Discord application, the same for everyone (like any app with
+// a Discord activity). Its ID isn't a secret: Discord sees it from every copy.
+// DISCORD_CLIENT_ID overrides it, for testing with another application.
+const discordAppId = () => process.env.DISCORD_CLIENT_ID || config.discordApplicationId;
+
+// Restarted whenever the settings change, since the player may have turned it off.
 function startPresence() {
   presence?.close();
-  const on = process.env.DISCORD_CLIENT_ID && process.env.DISCORD_ACTIVITY !== 'off';
-  presence = on ? createDiscordPresence({ clientId: process.env.DISCORD_CLIENT_ID }) : null;
+  const on = discordAppId() && process.env.DISCORD_ACTIVITY !== 'off';
+  presence = on ? createDiscordPresence({ clientId: discordAppId() }) : null;
   if (presence) installedGames().then(updatePresence).catch(() => {});
 }
 
@@ -413,7 +419,12 @@ function registerIpc() {
     return fn(...args);
   });
 
-  handle('settings:get', async () => ({ values: readSettings(settingsFile), source: games.name, dataDir: app.isPackaged ? dataDir : null }));
+  handle('settings:get', async () => ({
+    values: readSettings(settingsFile),
+    source: games.name,
+    dataDir: app.isPackaged ? dataDir : null,
+    discord: Boolean(discordAppId()),
+  }));
   handle('settings:save', async (input) => {
     fs.mkdirSync(path.dirname(settingsFile), { recursive: true });
     applySettings(writeSettings(settingsFile, input));

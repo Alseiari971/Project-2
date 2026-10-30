@@ -3,7 +3,7 @@
 const fs = require('node:fs');
 
 // DISCORD_ACTIVITY is "off" when the player turned the Discord activity off.
-const SETTINGS_KEYS = ['IGDB_CLIENT_ID', 'IGDB_CLIENT_SECRET', 'STEAM_API_KEY', 'DISCORD_CLIENT_ID', 'DISCORD_ACTIVITY'];
+const SETTINGS_KEYS = ['IGDB_CLIENT_ID', 'IGDB_CLIENT_SECRET', 'STEAM_API_KEY', 'DISCORD_ACTIVITY'];
 // API keys are letters, digits, dashes and underscores. Anything else is a paste mistake.
 const VALID = /^[\w-]{0,200}$/;
 
@@ -34,9 +34,6 @@ function cleanSettings(input) {
     const value = String(input?.[key] ?? '').trim();
     if (!VALID.test(value)) throw new Error(`${key} can only contain letters, numbers, dashes and underscores.`);
     values[key] = value;
-  }
-  if (values.DISCORD_CLIENT_ID && !/^\d{15,25}$/.test(values.DISCORD_CLIENT_ID)) {
-    throw new Error('The Discord Application ID is a long number, like 1234567890123456789.');
   }
   if (Boolean(values.IGDB_CLIENT_ID) !== Boolean(values.IGDB_CLIENT_SECRET)) {
     throw new Error('IGDB needs both the Client ID and the Client Secret.');
