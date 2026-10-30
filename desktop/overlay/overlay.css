@@ -1,5 +1,10 @@
 /* Arabic subtitles over a game. Thmanyah Sans when it's installed, else
-   Alexandria (bundled with GameShelf). */
+   Alexandria (bundled with GameShelf).
+
+   Two looks (App settings, sent as body[data-style]):
+   - floating (the default): white text with a heavy dark outline and shadow,
+     no box, so it reads over bright scenes without hiding the HUD around it;
+   - box: the same text on a dark box. */
 @font-face {
   font-family: "Thmanyah Local";
   src: local("Thmanyah Sans Bold"), local("ThmanyahSans-Bold");
@@ -26,10 +31,8 @@ html, body {
   transform: translateX(-50%);
   min-width: var(--min-width, 0);
   max-width: 86%;
-  padding: 0.35em 0.9em;
-  border-radius: 0.45em;
-  background: rgba(8, 8, 10, 0.86);
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06);
+  padding: 0.2em 0.6em;
+  background: transparent;
   opacity: 0;
   transition: opacity 80ms linear;
 }
@@ -42,6 +45,21 @@ html, body {
   font: 700 var(--size, 30px)/1.5 "Thmanyah Local", "Alexandria", "Segoe UI", Tahoma, sans-serif;
   text-align: center;
   white-space: pre-line;
+  /* The outline is drawn first and the letters over it, so it shows only
+     outside them (and never as lines where Arabic letters join). */
+  -webkit-text-stroke: 3px rgba(0, 0, 0, 0.95);
+  paint-order: stroke fill;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.95);
+}
+
+body[data-style="box"] .subtitle {
+  padding: 0.35em 0.9em;
+  border-radius: 0.45em;
+  background: rgba(8, 8, 10, 0.86);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+body[data-style="box"] .subtitle p {
+  -webkit-text-stroke: 0;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
 }
 /* Arabic already shaped and put in screen order (Presentation Forms) must not

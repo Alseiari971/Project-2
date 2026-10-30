@@ -4,6 +4,12 @@ import { html, bdi, th, mount, toast } from '../lib.js';
 import { addGame } from '../desktop.js';
 import { t, lang, LANGUAGES, setLang } from '../i18n.js';
 
+// The overlay's two looks (desktop/overlay/overlay.css). Names and notes go through t().
+const OVERLAY_STYLES = [
+  { id: 'floating', name: 'Floating text (no box)', note: 'Outlined Arabic just above the game\'s subtitles, with nothing around it, so the game stays in view. The game\'s English stays under it.' },
+  { id: 'box', name: 'Dark background box', note: 'Arabic on a dark box that covers the game\'s English subtitles.' },
+];
+
 const link = (href, text) => html`<a href="${href}" target="_blank" rel="noopener noreferrer">${text}</a>`;
 const SOURCES = {
   igdb: t('Connected to IGDB: every game on every platform.'),
@@ -68,6 +74,13 @@ export async function appSettingsView(app, params) {
         <h2>${t('Arabic subtitle packs')}</h2>
         <div id="arabic-packs"></div>
         <button class="btn btn-quiet" type="button" id="add-pack">${t('Add a pack')}</button>
+        <div class="overlay-style" id="overlay-style" hidden>
+          <h3>${t('Overlay subtitles')}</h3>
+          <div class="lang-choices" role="radiogroup" aria-label="${t('Overlay subtitles')}">
+            ${OVERLAY_STYLES.map((s) => html`<button type="button" class="mood-chip" role="radio" aria-checked="false" data-overlay-style="${s.id}">${t(s.name)}</button>`)}
+          </div>
+          <p class="muted small" id="overlay-style-note"></p>
+        </div>
       </section>
 
       <section class="panel">
@@ -103,10 +116,24 @@ export async function appSettingsView(app, params) {
   document.getElementById('add-game').addEventListener('click', () => addGame({ onAdded: showAdded }));
   showAdded();
 
+  // How the overlay draws Arabic, for games that get the overlay. Saved at once.
+  const showOverlayStyle = (style) => {
+    document.querySelectorAll('[data-overlay-style]').forEach((b) => {
+      const on = b.dataset.overlayStyle === style;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-checked', String(on));
+    });
+    document.getElementById('overlay-style-note').textContent = t(OVERLAY_STYLES.find((s) => s.id === style)?.note || '');
+  };
+  document.querySelectorAll('[data-overlay-style]').forEach((b) => b.addEventListener('click', async () => {
+    showOverlayStyle(await desktop.setArabicOverlayStyle(b.dataset.overlayStyle));
+  }));
+
   // Signed packs that give games Arabic: a patch the game loads, or the overlay.
   const KINDS = {
     unreal: 'Native patch (Unreal)',
     unity: 'Native patch (Unity)',
+    reengine: 'Native patch (RE Engine)',
     renpy: 'Native patch (Ren\'Py)',
     godot: 'Native patch (Godot)',
     overlay: 'Accessibility overlay',
@@ -116,6 +143,8 @@ export async function appSettingsView(app, params) {
     const el = document.getElementById('arabic-packs');
     if (!el) return;
     document.getElementById('add-pack').hidden = !ready;
+    document.getElementById('overlay-style').hidden = !ready;
+    if (ready) showOverlayStyle(await desktop.arabicOverlayStyle());
     mount(el, !ready
       ? html`<p class="muted">${t("Arabic packs aren't set up in this copy of GameShelf.")}</p>`
       : packs.length

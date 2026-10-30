@@ -7,7 +7,7 @@
 //   {
 //     "format": 1, "id": "some-game-ar", "version": "1.0.0", "language": "ar",
 //     "title": "Some Game in Arabic",           (optional, shown in App settings)
-//     "engine": "unreal" | "unity" | "renpy" | "godot" | "overlay",
+//     "engine": "unreal" | "unity" | "reengine" | "renpy" | "godot" | "overlay",
 //     "game": { "steamAppId": 1245620, "gameId": "elden-ring" },   (which game it's for)
 //     "overlay": { "region": [0, 0.78, 1, 0.22], "textLuma": 170, "darkText": false, "threshold": 0.72 },
 //     "requires": { "arch": "x64", "unityBackend": "mono", "unityVersion": "2019.4", "godot": 4 },
@@ -24,6 +24,8 @@
 //   after the game's own, so they win without replacing anything).
 // - Unity: BepInEx/ and dotnet/ (the mod loader), doorstop's files and the font
 //   bundle. The XUnity.AutoTranslator settings are written by GameShelf itself.
+// - RE Engine: a single .pak, re_chunk_000.pak.patch_XXX.pak; GameShelf puts
+//   in the next free number when it adds it (see reengine.js).
 // - Ren'Py: strings.json, fonts (.ttf, .otf) and license texts (.txt) in
 //   game/tl/arabic/gameshelf; Godot: the same in gameshelf_arabic. Data only:
 //   the scripts that read them are GameShelf's own (renpy.js, godot.js).
@@ -32,6 +34,7 @@ const fs = require('node:fs/promises');
 const crypto = require('node:crypto');
 const path = require('node:path');
 const { isInside, sha256File } = require('./files');
+const { PACK_TARGET: RE_TARGET } = require('./reengine');
 
 const MANIFEST = 'pack.json';
 const SIGNATURE = 'pack.json.sig';
@@ -82,6 +85,12 @@ function checkTarget(manifest, parts, target) {
     }
     return;
   }
+  if (manifest.engine === 'reengine') {
+    if (parts.length !== 1 || lower[0] !== RE_TARGET.toLowerCase()) {
+      throw new PackError(`"${target}" isn't allowed: RE Engine packs hold one file, ${RE_TARGET}.`);
+    }
+    return;
+  }
   if (manifest.engine === 'unreal') {
     if (parts.length !== 1 || !/_p\.(pak|utoc|ucas)$/i.test(parts[0])) {
       throw new PackError(`"${target}" isn't allowed: Unreal packs may only add .pak, .utoc or .ucas files ending in _P.`);
@@ -100,7 +109,7 @@ function checkManifest(manifest) {
   for (const key of ['id', 'version']) {
     if (typeof manifest[key] !== 'string' || !/^[\w.\-]{1,80}$/.test(manifest[key])) throw new PackError(`The pack's ${key} is missing or invalid.`);
   }
-  if (!['unreal', 'unity', 'renpy', 'godot', 'overlay'].includes(manifest.engine)) throw new PackError('The pack is for an engine GameShelf doesn\'t support.');
+  if (!['unreal', 'unity', 'reengine', 'renpy', 'godot', 'overlay'].includes(manifest.engine)) throw new PackError('The pack is for an engine GameShelf doesn\'t support.');
   if (manifest.title !== undefined && (typeof manifest.title !== 'string' || manifest.title.length > 120)) throw new PackError('The pack\'s title is invalid.');
   const { game, overlay } = manifest;
   if (game !== undefined) {
@@ -138,6 +147,7 @@ function checkManifest(manifest) {
     if (!/^[0-9a-f]{64}$/.test(file.sha256 || '')) throw new PackError(`"${file.target}" has no valid SHA-256.`);
     if (!Number.isInteger(file.size) || file.size < 0) throw new PackError(`"${file.target}" has no valid size.`);
   }
+  if (manifest.engine === 'reengine' && manifest.files.length !== 1) throw new PackError(`RE Engine packs hold one file, ${RE_TARGET}.`);
   if (DATA_DIRS[manifest.engine] && !manifest.files.some((f) => /(^|[\\/])strings\.json$/i.test(f.target))) {
     throw new PackError('The pack has no strings.json.');
   }

@@ -3,8 +3,8 @@
 //
 // Modes:
 // - 'native'      the game's engine takes an added patch (Unreal pak, Unity
-//                 mod, Ren'Py translation, Godot override) and there's a
-//                 signed pack for it;
+//                 mod, RE Engine patch file, Ren'Py translation, Godot
+//                 override) and there's a signed pack for it;
 // - 'overlay'     otherwise, when there's a signed overlay pack (anti-cheat,
 //                 signed paks and custom engines all end up here);
 // - 'unavailable' no pack for this game, or no way to use it here.
@@ -15,6 +15,7 @@ const path = require('node:path');
 const { createMatcher } = require('./fingerprint');
 const { createLocalization, fill, TIER_ENGINES } = require('./index');
 const { createPackLibrary } = require('./library');
+const { OVERLAY_STYLES, DEFAULT_STYLE } = require('./overlay-manager');
 
 const PREFLIGHT_TTL_MS = 60 * 1000;
 
@@ -24,6 +25,7 @@ function createArabicService({ dataDir, publicKey, overlayAvailable = process.pl
   localization ??= createLocalization({ dataDir });
   packs ??= createPackLibrary({ dir: path.join(dataDir, 'localization', 'packs'), publicKey });
   const prefsFile = path.join(dataDir, 'localization', 'arabic.json');
+  const overlayFile = path.join(dataDir, 'localization', 'overlay.json');
   const checks = new Map(); // game folder -> { at, result }
 
   async function readPrefs() {
@@ -113,6 +115,10 @@ function createArabicService({ dataDir, publicKey, overlayAvailable = process.pl
             return { info: await info(game), error: why('Arabic is off. GameShelf left {count} files that were changed or added after it.', { count: result.kept.length }) };
           }
         } catch (err) {
+          if (err.code === 'chain') {
+            // Arabic stays in (and the switch stays on) until the newer patch file is gone.
+            return { info: now, error: why('Arabic can\'t come out yet: {name} was added to the game after it, and the game would stop loading {name} without it. Take {name} out first.', { name: err.details[0].after }) };
+          }
           return { info: now, error: why(err.message) };
         }
       }
@@ -149,7 +155,24 @@ function createArabicService({ dataDir, publicKey, overlayAvailable = process.pl
     }
   }
 
-  return { info, set, prepareLaunch, packs, localization, recover: () => localization.recover(), fill };
+  /** How the overlay looks, for every game: 'floating' (outlined text, no box, the default) or 'box'. */
+  async function overlayStyle() {
+    try {
+      const { style } = JSON.parse(await fs.readFile(overlayFile, 'utf8'));
+      return OVERLAY_STYLES.includes(style) ? style : DEFAULT_STYLE;
+    } catch {
+      return DEFAULT_STYLE;
+    }
+  }
+
+  async function setOverlayStyle(style) {
+    if (!OVERLAY_STYLES.includes(style)) throw new Error(`Unknown overlay style "${style}".`);
+    await fs.mkdir(path.dirname(overlayFile), { recursive: true });
+    await fs.writeFile(overlayFile, JSON.stringify({ style }));
+    return style;
+  }
+
+  return { info, set, prepareLaunch, overlayStyle, setOverlayStyle, packs, localization, recover: () => localization.recover(), fill };
 }
 
 module.exports = { createArabicService };

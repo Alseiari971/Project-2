@@ -12,6 +12,9 @@
 //   was added (or is a settings file the mod rewrites), and a folder only if
 //   GameShelf created it. Anything else is left, and listed.
 // - Links (and Windows junctions) are never followed.
+// - A file in a numbered chain (RE Engine's patch files, which the game loads
+//   in order until a number is missing) is only taken out while it's the last
+//   one; otherwise nothing is removed and turning off says why.
 const fs = require('node:fs/promises');
 const crypto = require('node:crypto');
 const path = require('node:path');
@@ -157,7 +160,7 @@ function createStager({ stateDir }) {
           if (await fs.lstat(dir).catch(() => null)) break;
           if (!dirs.some((d) => fold(d) === fold(dir))) dirs.push(dir);
         }
-        planned.push({ path: target, sha256: entry.sha256, mutable: Boolean(entry.mutable) });
+        planned.push({ path: target, sha256: entry.sha256, mutable: Boolean(entry.mutable), ...(entry.chain ? { chain: entry.chain } : {}) });
       }
       if (conflicts.length) {
         throw new StageError('The game already has files with these names, so GameShelf won\'t add anything.', 'conflict', conflicts);
@@ -188,7 +191,24 @@ function createStager({ stateDir }) {
     });
   }
 
-  /** Takes away everything enable() added. Returns { removed, kept: [{ path, why }] }. */
+  // The name of a file in the same chain numbered after `file`, when `file`
+  // is still GameShelf's and so would be taken out.
+  async function laterInChain(file) {
+    const pattern = new RegExp(file.chain.pattern, 'i');
+    const info = await fs.lstat(file.path).catch(() => null);
+    if (!info?.isFile() || (await sha256File(file.path).catch(() => null)) !== file.sha256) return null;
+    const later = (await fs.readdir(path.dirname(file.path)).catch(() => []))
+      .map((name) => ({ name, number: Number(name.match(pattern)?.[1]) }))
+      .filter((f) => f.number > file.chain.number)
+      .sort((a, b) => a.number - b.number);
+    return later[0]?.name || null;
+  }
+
+  /**
+   * Takes away everything enable() added. Returns { removed, kept: [{ path, why }] }.
+   * Throws StageError 'chain' (and changes nothing) when a file in a numbered
+   * chain has another after it; details: [{ path, after }].
+   */
   async function disable(root) {
     const realRoot = await fs.realpath(root).catch(() => path.resolve(root));
     return locked(realRoot, async () => {
@@ -201,6 +221,12 @@ function createStager({ stateDir }) {
       if (!(await fs.lstat(realRoot).catch(() => null))) {
         await dropState(realRoot); // the game itself is gone
         return { removed: [], kept: [] };
+      }
+      for (const file of state.files.filter((f) => f.chain)) {
+        const after = await laterInChain(file);
+        if (after) {
+          throw new StageError(`${after} was added after ${path.basename(file.path)}, and the game would stop loading it if ${path.basename(file.path)} were taken out. Take ${after} out first.`, 'chain', [{ path: file.path, after }]);
+        }
       }
 
       const removed = [];

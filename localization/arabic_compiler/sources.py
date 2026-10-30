@@ -8,6 +8,8 @@
 - Unity asset files (.assets, .bundle, data.unity3d), with the UnityPy library;
 - Ren'Py scripts (.rpy), and Ren'Py archives (.rpa) holding them;
 - Godot translation tables (CSV with a "keys" column) and gettext .po/.pot files;
+- Capcom RE Engine message dumps (.msg.<version>.json/.csv from REMSG_Converter),
+  or a folder of message files extracted from your own copy (natives/...);
 - a game folder: loose .locres files, a Unity game's data folder, a Ren'Py
   game, or a Godot project (the game's source, or one you recovered from your
   own copy with GDRE Tools).
@@ -29,6 +31,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import locres as locres_format
+from . import remsg
 
 
 class SourceError(ValueError):
@@ -52,6 +55,10 @@ class Source:
     # True when the game looks lines up by key (Godot translation tables), so
     # the pack maps keys, not English, to Arabic.
     keyed: bool = False
+    # RE Engine: message dumps to write the Arabic into, and .msg files found
+    # without dumps ([(path, natives/... path)]).
+    msg_dumps: list = field(default_factory=list)
+    msg_files: list = field(default_factory=list)
 
 
 def _csv(path: Path) -> Source:
@@ -408,7 +415,42 @@ def _godot_project(folder: Path) -> Source:
     return Source(rows, engine='godot', notes=['Godot text was read from scenes and tr() calls. Check translations.csv for lines that aren\'t game text.'])
 
 
+# ---- Capcom RE Engine ----
+
+def msg_dump_source(dumps: list) -> Source:
+    """The English of RE Engine message dumps, keyed <natives path>#<guid>."""
+    rows = []
+    for dump in dumps:
+        for guid, english in dump.english.items():
+            if english and english.strip():
+                rows.append(Row(english, dump.arabic.get(guid), f'{dump.in_pak}#{guid}'))
+    return Source(rows, engine='reengine', msg_dumps=dumps)
+
+
+def _reengine_folder(folder: Path) -> Source:
+    """Files extracted from an RE Engine game's paks: natives/... with message dumps or .msg files."""
+    files = sorted(p for p in folder.rglob('*') if p.is_file())
+    try:
+        dumps = [remsg.read_dump(p) for p in files if remsg.DUMP_FILE.search(p.name) and remsg.is_dump(p)]
+    except remsg.MsgError as err:
+        raise SourceError(str(err)) from None
+    if dumps:
+        source = msg_dump_source(dumps)
+        source.notes.append(f'Read {len(dumps)} message dumps.')
+        return source
+    found = [(p, remsg.pak_path(p)) for p in files if remsg.MSG_FILE.search(p.name)]
+    if not found:
+        raise SourceError(f'Found no message files (.msg.<version>) or their dumps in {folder}.')
+    return Source([], engine='reengine', msg_files=found)
+
+
 def _game_folder(folder: Path) -> Source:
+    if (folder / 're_chunk_000.pak').is_file():
+        raise SourceError('This RE Engine game keeps its text inside its .pak files. Extract the message files (natives/stm/...) '
+                          'from your own copy with REtool or ree-pak, and run this on the extracted folder. Encrypted files '
+                          'need the game\'s own key, which this tool won\'t look for.')
+    if folder.name.lower() == 'natives' or (folder / 'natives').is_dir():
+        return _reengine_folder(folder)
     locres_files = sorted(folder.rglob('*.locres'))
     if locres_files:
         # The English: an "en" culture folder, the biggest file.
@@ -442,13 +484,23 @@ def _game_folder(folder: Path) -> Source:
     raise SourceError(f'Found no game text in {folder}. Give a .locres, Unity .assets, Ren\'Py .rpy/.rpa, CSV, .po, JSON or XUnity .txt file instead.')
 
 
-def read_source(path: str | Path, *, locres_path: str | None = None) -> Source:
+def read_source(path: str | Path, *, locres_path: str | None = None, msg_path: str | None = None) -> Source:
     path = Path(path)
     if path.is_dir():
         return _game_folder(path)
     if not path.is_file():
         raise SourceError(f'{path} doesn\'t exist.')
     suffix = path.suffix.lower()
+    if suffix in ('.json', '.csv') and remsg.is_dump(path):
+        try:
+            return msg_dump_source([remsg.read_dump(path, msg_path)])
+        except remsg.MsgError as err:
+            raise SourceError(str(err)) from None
+    if remsg.MSG_FILE.search(path.name):
+        try:
+            return Source([], engine='reengine', msg_files=[(path, remsg.checked_pak_path(msg_path or remsg.pak_path(path) or ''))])
+        except remsg.MsgError as err:
+            raise SourceError(str(err)) from None
     if suffix == '.csv':
         first = _first_line(path)
         return _godot_csv(path) if first.startswith(('keys,', 'key,', 'id,')) and 'source' not in first else _csv(path)

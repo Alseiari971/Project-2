@@ -3,6 +3,13 @@
 // and a hidden window that watches that area. One of each per running game;
 // they close with it.
 //
+// Two looks, picked in App settings:
+// - 'floating' (the default): outlined Arabic with no box, so the game's HUD
+//   stays visible around it. Without a box nothing can hide the game's
+//   English, so the Arabic always goes just above the English subtitles.
+// - 'box': Arabic on a dark box. When the capture can't see the overlay, the
+//   box goes right over the English subtitles and hides them.
+//
 // Every second the game's window is looked up (by its process IDs) so the
 // overlay follows it when it moves, hides when it's minimized, and captures
 // the right window. Windows captures a single window on its own when it can
@@ -18,6 +25,8 @@ const DEFAULT_PROFILE = { region: [0, 0.78, 1, 0.22], textLuma: 170, darkText: f
 const TRACK_MS = 1000;
 const START_TIMEOUT_MS = 2 * 60 * 1000;
 const HELPER_IDLE_MS = 60 * 1000;
+const OVERLAY_STYLES = ['floating', 'box'];
+const DEFAULT_STYLE = 'floating';
 
 // Windows 10 2004 (build 19041) and later can keep a window out of screen
 // captures; earlier versions would capture it as a black box.
@@ -27,9 +36,13 @@ function hidesFromCapture(platform = process.platform, release = os.release()) {
   return build >= 19041;
 }
 
-function createOverlayManager({ BrowserWindow, desktopCapturer, screen, ipcMain, helper, log = console.error, platform = process.platform, trackMs = TRACK_MS }) {
+function createOverlayManager({ BrowserWindow, desktopCapturer, screen, ipcMain, helper, log = console.error, platform = process.platform, trackMs = TRACK_MS, style: initialStyle = DEFAULT_STYLE }) {
   const sessions = new Map();
   let helperTimer = null;
+  let style = OVERLAY_STYLES.includes(initialStyle) ? initialStyle : DEFAULT_STYLE;
+
+  // Over the English only with a box to hide it, and only when the capture can't see the overlay.
+  const placementFor = (session) => (style === 'box' && session.canCover ? 'cover' : 'above');
 
   const byCapture = (event) => [...sessions.values()].find((s) => !s.capture.isDestroyed() && s.capture.webContents.id === event.sender.id);
   ipcMain.on('gs-capture:read', (event, image) => byCapture(event)?.subtitles.read({ bmp: Buffer.from(image.bmp), crop: image.crop }));
@@ -86,8 +99,8 @@ function createOverlayManager({ BrowserWindow, desktopCapturer, screen, ipcMain,
       session.display = display;
       config = { sourceId: source.id, windowRect: windowRect(bounds, display) };
     }
-    // Only cover the English when the capture can't see the overlay.
-    session.placement = own || hidesFromCapture(platform) ? 'cover' : 'above';
+    session.canCover = Boolean(own || hidesFromCapture(platform));
+    session.placement = placementFor(session);
     session.screenCapture = !own;
     session.capture.webContents.send('gs-capture:start', { ...session.profile, ...config });
   }
@@ -159,6 +172,9 @@ function createOverlayManager({ BrowserWindow, desktopCapturer, screen, ipcMain,
     overlay.setAlwaysOnTop(true, 'screen-saver');
     overlay.setContentProtection(true);
     overlay.loadFile(OVERLAY_HTML);
+    overlay.webContents.once('did-finish-load', () => {
+      if (!overlay.isDestroyed()) overlay.webContents.send('gs-overlay:style', style);
+    });
 
     const capture = new BrowserWindow({
       show: false,
@@ -188,6 +204,7 @@ function createOverlayManager({ BrowserWindow, desktopCapturer, screen, ipcMain,
       startedAt: Date.now(),
       stopped: false,
       placement: 'above',
+      canCover: false,
       status: null,
     };
     session.subtitles = createSubtitleSession({
@@ -218,6 +235,22 @@ function createOverlayManager({ BrowserWindow, desktopCapturer, screen, ipcMain,
     }
   }
 
+  /** Switches every overlay, and the next ones, to 'floating' or 'box'. */
+  function setStyle(next) {
+    if (!OVERLAY_STYLES.includes(next)) throw new Error(`Unknown overlay style "${next}".`);
+    style = next;
+    for (const session of sessions.values()) {
+      send(session, 'gs-overlay:style', style);
+      const placement = placementFor(session);
+      if (placement !== session.placement) {
+        // The band moves: the next subtitle read shows in the new place.
+        session.placement = placement;
+        session.subtitles.clear();
+        track(session);
+      }
+    }
+  }
+
   /** Called with the running games (key -> process IDs): overlays close with their game. */
   function sync(running) {
     for (const session of [...sessions.values()]) {
@@ -232,11 +265,13 @@ function createOverlayManager({ BrowserWindow, desktopCapturer, screen, ipcMain,
     sync,
     stopAll: () => [...sessions.keys()].forEach(stop),
     has: (key) => sessions.has(key),
+    setStyle,
+    style: () => style,
     status: (key) => {
       const s = sessions.get(key);
-      return s && { placement: s.placement, capture: s.status, ...s.subtitles.stats };
+      return s && { placement: s.placement, style, capture: s.status, ...s.subtitles.stats };
     },
   };
 }
 
-module.exports = { createOverlayManager, hidesFromCapture, DEFAULT_PROFILE };
+module.exports = { createOverlayManager, hidesFromCapture, DEFAULT_PROFILE, OVERLAY_STYLES, DEFAULT_STYLE };

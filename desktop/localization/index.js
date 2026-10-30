@@ -6,12 +6,15 @@
 //                   game loads after its own, with the Arabic text and font.
 // - 'unity-bepinex' Unity: BepInEx + XUnity.AutoTranslator reading the compiled
 //                   dictionary, with an Arabic TextMeshPro fallback font.
+// - 're-patch'      Capcom RE Engine: the pack's .pak as the game's next
+//                   numbered patch file (see reengine.js).
 // - 'renpy-tl'      Ren'Py: the Arabic lines and font in game/tl/arabic, shown
 //                   in the game's own dialogue box (see renpy.js).
 // - 'godot-override' Godot 3/4: an Arabic translation and fallback font the
 //                   game loads through override.cfg (see godot.js).
 // - 'overlay'       Everything else, and every game with anti-cheat: subtitles
 //                   drawn in GameShelf's own window, without touching the game.
+const fs = require('node:fs/promises');
 const path = require('node:path');
 const { scanAntiCheat } = require('./anticheat');
 const { fingerprint } = require('./engine');
@@ -21,10 +24,13 @@ const { sha256 } = require('./files');
 const { AUTO_TRANSLATOR_CONFIG, GENERATED, autoTranslatorConfig, unityMismatch } = require('./unity');
 const renpy = require('./renpy');
 const godot = require('./godot');
+const reengine = require('./reengine');
 
 // The pack engine each tier takes.
-const TIER_ENGINES = { 'unreal-pak': 'unreal', 'unity-bepinex': 'unity', 'renpy-tl': 'renpy', 'godot-override': 'godot' };
-const ENGINE_NAMES = { unreal: 'Unreal', unity: 'Unity', renpy: 'Ren\'Py', godot: 'Godot' };
+const TIER_ENGINES = { 'unreal-pak': 'unreal', 'unity-bepinex': 'unity', 're-patch': 'reengine', 'renpy-tl': 'renpy', 'godot-override': 'godot' };
+const ENGINE_NAMES = { unreal: 'Unreal', unity: 'Unity', reengine: 'RE Engine', renpy: 'Ren\'Py', godot: 'Godot' };
+// RE Engine patch numbers have three digits.
+const MAX_RE_PATCH = 999;
 const native = (tier) => ({ tier, fileChanges: true, reason: null, why: null });
 
 class LocalizationError extends Error {
@@ -68,6 +74,16 @@ async function preflight(root, { steamAppId, ownMods = false, maxEntries } = {})
     }
     return { ...base, ...native('unity-bepinex') };
   }
+  if (engine.engine === 'reengine') {
+    const re = engine.reengine;
+    const online = reengine.onlineGame({ steamAppId, programs: re.programs });
+    if (online) return { ...base, ...overlay('{name} is played online with others. To keep your account safe, GameShelf won\'t change its files.', { name: online.name }) };
+    if (re.gap !== null) {
+      return { ...base, ...overlay('This game\'s patch files skip {file}, so the game wouldn\'t load another one.', { file: reengine.patchName(re.gap) }) };
+    }
+    if (re.next > MAX_RE_PATCH) return { ...base, ...overlay('This game has no patch numbers left for another patch file.') };
+    return { ...base, ...native('re-patch') };
+  }
   if (engine.engine === 'renpy') return { ...base, ...native('renpy-tl') };
   if (engine.engine === 'godot') {
     if (!godot.hookScript(engine.godot.major)) {
@@ -87,6 +103,16 @@ function stagePlan(check, pack) {
   const files = pack.files.map((f) => ({ target: f.target, source: f.source, sha256: f.sha256 }));
   if (check.tier === 'unreal-pak') {
     return { anchor: engine.unreal.paksDir, files, generated: [] };
+  }
+  if (check.tier === 're-patch') {
+    // The pack's one .pak, as the next patch number, checked again as it's added.
+    const { next } = engine.reengine;
+    const [pak] = files;
+    return {
+      anchor: engine.reengine.dir,
+      files: [{ ...pak, target: reengine.patchName(next), chain: { pattern: reengine.PATCH.source, number: next } }],
+      generated: [],
+    };
   }
   if (check.tier === 'renpy-tl') {
     files.push({ target: renpy.HOOK_SCRIPT, content: renpy.SCRIPT, sha256: sha256(renpy.SCRIPT) });
@@ -137,6 +163,17 @@ async function enableArabic({ root, packDir, stager, publicKey, allowUnsigned = 
   const problem = (check.engine.unity && unityMismatch(check.engine.unity, requires))
     || (check.engine.godot && godot.godotMismatch(check.engine.godot, requires));
   if (problem) throw new LocalizationError(problem, 'mismatch');
+
+  if (wanted === 'reengine') {
+    const head = Buffer.alloc(4);
+    const handle = await fs.open(pack.files[0].source, 'r');
+    try {
+      await handle.read(head, 0, 4, 0);
+    } finally {
+      await handle.close();
+    }
+    if (head.toString('latin1') !== reengine.PAK_MAGIC) throw new LocalizationError('The pack\'s file isn\'t an RE Engine .pak.', 'pack');
+  }
 
   const result = await stager.enable({ root: check.root, pack: pack.manifest, ...stagePlan(check, pack) });
   return { ...result, tier: check.tier };

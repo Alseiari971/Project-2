@@ -33,6 +33,8 @@ contextBridge.exposeInMainWorld('gameshelfDesktop', {
   arabicPacks: () => ipcRenderer.invoke('arabic:packs'),
   addArabicPack: () => ipcRenderer.invoke('arabic:add-pack'),
   removeArabicPack: (id) => ipcRenderer.invoke('arabic:remove-pack', id),
+  arabicOverlayStyle: () => ipcRenderer.invoke('arabic:overlay-style'),
+  setArabicOverlayStyle: (style) => ipcRenderer.invoke('arabic:set-overlay-style', style),
   // The minimize, maximize and close buttons the page draws on Windows and Linux.
   platform: process.platform,
   minimizeWindow: () => ipcRenderer.invoke('window:minimize'),

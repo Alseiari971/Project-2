@@ -5,6 +5,8 @@
 // - Unity: a <Name>_Data folder (resources.assets, globalgamemanagers...) next
 //   to UnityPlayer.dll or <Name>.exe; IL2CPP when GameAssembly.dll is there,
 //   Mono otherwise. The Unity version is read from the data files' header.
+// - Capcom RE Engine: re_chunk_000.pak in the game's folder, with its
+//   numbered patch files (re_chunk_000.pak.patch_001.pak...).
 // - Ren'Py: a renpy folder next to a game folder of .rpa/.rpyc/.rpy scripts.
 // - Godot 3/4: the engine's program with a .pck of the same name next to it,
 //   or with the .pck added to the end of the program.
@@ -12,6 +14,7 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { list, findEntry, findPath, programArch } = require('./files');
+const reengine = require('./reengine');
 
 async function findUnreal(base) {
   const entries = await list(base);
@@ -108,6 +111,33 @@ async function findUnity(base) {
     };
   }
   return null;
+}
+
+async function findReEngine(base) {
+  const files = (await list(base)).filter((e) => e.isFile()).map((e) => e.name);
+  const basePak = files.find((n) => n.toLowerCase() === reengine.BASE_PAK);
+  if (!basePak) return null;
+  const patches = reengine.patchNumbers(files);
+  const programs = files.filter((n) => /\.exe$/i.test(n));
+  // The game's own program: the biggest .exe (crash reporters and installers are small).
+  let exe = null;
+  let biggest = -1;
+  for (const name of programs) {
+    const size = (await fs.stat(path.join(base, name)).catch(() => null))?.size ?? -1;
+    if (size > biggest) [exe, biggest] = [path.join(base, name), size];
+  }
+  return {
+    engine: 'reengine',
+    base,
+    reengine: {
+      dir: base,
+      exe,
+      programs,
+      arch: exe ? await programArch(exe) : null,
+      patches,
+      ...reengine.nextPatch(patches),
+    },
+  };
 }
 
 async function readHead(file, length, position = 0) {
@@ -222,7 +252,8 @@ async function fingerprint(root) {
   const realRoot = await fs.realpath(root);
   const bases = [realRoot, ...(await list(realRoot)).filter((e) => e.isDirectory()).map((e) => path.join(realRoot, e.name))];
   for (const base of bases) {
-    const found = (await findUnreal(base)) || (await findUnity(base)) || (await findRenpy(base)) || (await findGodot(base));
+    const found = (await findUnreal(base)) || (await findUnity(base)) || (await findReEngine(base))
+      || (await findRenpy(base)) || (await findGodot(base));
     if (found) return { root: realRoot, ...found };
   }
   return { root: realRoot, engine: 'custom', base: realRoot };

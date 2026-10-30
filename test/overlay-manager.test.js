@@ -48,7 +48,7 @@ function fakeElectron({ sources, failFirst = false, platform = 'linux' } = {}) {
   return { electron, windows, handlers, platform, sourceCalls: () => calls };
 }
 
-function setup({ win = { hwnd: '42', x: 500, y: 200, w: 1000, h: 500, minimized: false }, ...options } = {}) {
+function setup({ win = { hwnd: '42', x: 500, y: 200, w: 1000, h: 500, minimized: false }, style, ...options } = {}) {
   const fake = fakeElectron(options);
   const state = { win, lines: [{ text: 'We must reach the castle', box: { x: 100, y: 10, w: 400, h: 40 } }] };
   const helper = {
@@ -57,7 +57,7 @@ function setup({ win = { hwnd: '42', x: 500, y: 200, w: 1000, h: 500, minimized:
     recognize: async () => ({ lines: state.lines, ms: 1 }),
     close: () => { helper.closed = true; },
   };
-  const manager = createOverlayManager({ ...fake.electron, helper, platform: fake.platform, trackMs: 15, log: () => {} });
+  const manager = createOverlayManager({ ...fake.electron, helper, platform: fake.platform, trackMs: 15, log: () => {}, ...(style ? { style } : {}) });
   const matcher = { match: (text) => (/castle/.test(text) ? { arabic: 'القلعة', score: 0.9 } : null) };
   manager.start('game', { name: 'Game', matcher, getPids: () => [1234] });
   const [overlay, capture] = fake.windows;
@@ -77,8 +77,8 @@ test('the overlay is a click-through, always-on-top window kept out of captures'
   manager.stopAll();
 });
 
-test('the game\'s own window is captured when it can be, and the Arabic covers the English', async () => {
-  const { overlay, capture, manager } = setup({ sources: [{ id: 'screen:1:0', display_id: '7' }, { id: 'window:42:0' }] });
+test('the game\'s own window is captured when it can be, and the box covers the English', async () => {
+  const { overlay, capture, manager } = setup({ style: 'box', sources: [{ id: 'screen:1:0', display_id: '7' }, { id: 'window:42:0' }] });
   await wait(60);
   const [[channel, config]] = capture.sent;
   assert.equal(channel, 'gs-capture:start');
@@ -104,7 +104,7 @@ test('otherwise the screen is captured, and the Arabic goes just above the subti
 });
 
 test('a read subtitle reaches the overlay, placed where the English was', async () => {
-  const { overlay, capture, fake, manager } = setup({ sources: [{ id: 'window:42:0' }] });
+  const { overlay, capture, fake, manager } = setup({ style: 'box', sources: [{ id: 'window:42:0' }] });
   await wait(60);
   // The capture window reports a settled subtitle: its crop is the bottom 22% of a 1000x500 frame.
   fake.handlers['gs-capture:read']({ sender: { id: capture.webContents.id } }, {
@@ -121,6 +121,52 @@ test('a read subtitle reaches the overlay, placed where the English was', async 
   assert.equal(overlay.sent.filter(([c]) => c === 'gs-overlay:hide').length, 0);
   fake.handlers['gs-capture:clear']({ sender: { id: capture.webContents.id } });
   assert.equal(overlay.sent.filter(([c]) => c === 'gs-overlay:hide').length, 1);
+  manager.stopAll();
+});
+
+test('floating text (the default) never covers the English: it goes just above it', async (t) => {
+  const { overlay, manager } = setup({ sources: [{ id: 'window:42:0' }] });
+  t.after(() => manager.stopAll());
+  await wait(60);
+  assert.equal(manager.style(), 'floating');
+  // The capture could cover, but there's no box to hide the English with.
+  assert.equal(manager.status('game').placement, 'above');
+  assert.deepEqual(overlay.bounds, { x: 500, y: 480, width: 1000, height: 110 });
+  // The overlay page is told its look when it loads.
+  assert.deepEqual(overlay.sent.find(([c]) => c === 'gs-overlay:style'), ['gs-overlay:style', 'floating']);
+  manager.stopAll();
+});
+
+test('switching the style moves running overlays at once, and new ones start with it', async (t) => {
+  const { overlay, manager, fake } = setup({ sources: [{ id: 'window:42:0' }] });
+  t.after(() => manager.stopAll());
+  await wait(60);
+  const before = overlay.sent.length;
+  manager.setStyle('box');
+  assert.deepEqual(overlay.sent.slice(before), [['gs-overlay:style', 'box']]);
+  await wait(30);
+  assert.equal(manager.status('game').placement, 'cover');
+  assert.equal(manager.status('game').style, 'box');
+  assert.deepEqual(overlay.bounds, { x: 500, y: 590, width: 1000, height: 110 });
+
+  manager.setStyle('floating');
+  await wait(30);
+  assert.equal(manager.status('game').placement, 'above');
+  assert.deepEqual(overlay.bounds, { x: 500, y: 480, width: 1000, height: 110 });
+
+  manager.setStyle('box');
+  manager.start('other', { name: 'Other', matcher: { match: () => null }, getPids: () => [99] });
+  const other = fake.windows.at(-2);
+  await wait(10);
+  assert.deepEqual(other.sent.find(([c]) => c === 'gs-overlay:style'), ['gs-overlay:style', 'box']);
+  assert.throws(() => manager.setStyle('neon'), /Unknown overlay style/);
+  assert.equal(manager.style(), 'box');
+});
+
+test('with a screen capture, even the box goes above the subtitles (so OCR never reads it)', async () => {
+  const { manager } = setup({ style: 'box', sources: [{ id: 'screen:1:0', display_id: '7' }] });
+  await wait(60);
+  assert.equal(manager.status('game').placement, 'above');
   manager.stopAll();
 });
 

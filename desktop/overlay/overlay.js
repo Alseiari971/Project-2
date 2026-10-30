@@ -38,4 +38,9 @@
     box.classList.remove('on');
     hideTimer = setTimeout(() => { box.hidden = true; }, 90);
   });
+
+  // 'floating' (outlined text, no box) or 'box' (on a dark box), from App settings.
+  window.gsOverlay.onStyle((style) => {
+    document.body.dataset.style = style === 'box' ? 'box' : 'floating';
+  });
 })();

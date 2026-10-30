@@ -1454,6 +1454,9 @@ label { display: grid; gap: 8px; font-size: 13px; font-weight: 700; color: var(-
 .app-settings .panel h2:not(:first-child) { margin-top: 32px; }
 .app-settings .panel p a { text-decoration: underline; text-underline-offset: 2px; }
 .app-settings .panel > .btn { margin-top: 16px; }
+.app-settings .overlay-style { margin-top: 28px; }
+.app-settings .overlay-style h3 { font-size: 16px; margin-bottom: 12px; letter-spacing: -0.01em; }
+.app-settings .overlay-style p { margin: 10px 0 0; }
 .app-settings code { font-size: 13px; word-break: break-all; }
 .settings-status { display: flex; align-items: center; gap: 8px; margin: 0 0 16px !important; font-weight: 700; }
 .settings-status::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }

@@ -631,6 +631,12 @@ function registerIpc() {
     return arabic.packs.add(folder);
   });
   handle('arabic:remove-pack', async (id) => arabic.packs.remove(String(id)));
+  handle('arabic:overlay-style', async () => arabic.overlayStyle());
+  handle('arabic:set-overlay-style', async (style) => {
+    const saved = await arabic.setOverlayStyle(String(style));
+    overlays?.setStyle(saved); // overlays already showing change at once
+    return saved;
+  });
 
   handle('data-folder:open', async () => {
     await shell.openPath(app.isPackaged ? dataDir : path.join(__dirname, '..', 'data'));
@@ -661,6 +667,7 @@ async function start() {
   await startServer();
   registerIpc();
   overlays = createOverlayManager({ BrowserWindow, desktopCapturer, screen, ipcMain, helper: ocrHelper });
+  arabic.overlayStyle().then((style) => overlays.setStyle(style)).catch((err) => console.error('Arabic overlay style:', err.message));
   // Takes back any Arabic patch that was cut short by a crash.
   arabic.recover().catch((err) => console.error('Could not tidy up Arabic patches:', err.message));
   if (process.platform !== 'darwin') Menu.setApplicationMenu(null);
