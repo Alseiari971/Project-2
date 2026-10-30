@@ -14,7 +14,7 @@ const read = (file, fallback) => {
   }
 };
 
-process.stdout.write(`${JSON.stringify({ type: 'ready', ocr: process.env.FAKE_OCR_OFF !== '1', language: 'en-US' })}\n`);
+process.stdout.write(`${JSON.stringify({ type: 'ready', ocr: process.env.FAKE_OCR_OFF !== '1', language: 'en-US', startMs: 5, warmupMs: 1 })}\n`);
 
 readline.createInterface({ input: process.stdin }).on('line', (line) => {
   const [id, op, argument = ''] = line.split('\t');
@@ -36,6 +36,7 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
         box: { x: Math.round(width * 0.25), y: Math.round((height * (i + 1)) / (all.length + 2)), w: Math.round(width * 0.5), h: Math.round(height / (all.length + 2)) },
       })) : [];
       reply.ms = delay;
+      reply.decodeMs = 0;
     }
   } else if (op === 'window') {
     const raw = process.env.FAKE_WINDOW_FILE ? read(process.env.FAKE_WINDOW_FILE, 'null') : 'null';

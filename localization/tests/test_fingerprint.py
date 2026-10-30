@@ -8,8 +8,8 @@ import unittest
 from pathlib import Path
 
 from arabic_compiler.__main__ import main
-from arabic_compiler.fingerprint import (FingerprintTable, build_table, english_text, fingerprint, normalize,
-                                         overlay_text)
+from arabic_compiler.fingerprint import (FingerprintTable, build_table, english_template, english_text, fill_slots,
+                                         fingerprint, normalize, overlay_text, words)
 
 VECTORS = json.loads((Path(__file__).resolve().parents[2] / 'test/fixtures/fingerprint-vectors.json').read_text(encoding='utf-8'))
 
@@ -75,8 +75,9 @@ class NoisyOcr(unittest.TestCase):
         self.assertIsNone(table().lookup('The bridqe is out. Well have to find anather way acress the river'))
 
     def test_filled_in_slots(self):
-        self.assertFinds('Hello, Arthur! Welcome to Riverwood.', 'Hello, {0}! Welcome to <color=#ff0>Riverwood</color>.')
-        self.assertFinds('Hello, Maximilian the Third! Welcome to Riverwood.', 'Hello, {0}! Welcome to <color=#ff0>Riverwood</color>.')
+        self.assertEqual(table().lookup('Hello, Arthur! Welcome to Riverwood.').arabic, 'مرحبًا يا \u2068Arthur\u2069! أهلًا بك في ريفروود.')
+        self.assertEqual(table().lookup('Hello, Maximilian the Third! Welcome to Riverwood.').arabic,
+                         'مرحبًا يا \u2068Maximilian the Third\u2069! أهلًا بك في ريفروود.')
         self.assertFinds('Press E to open the gate', 'Press [E] to open the gate.')
 
     def test_the_closest_of_two_similar_lines_wins(self):
@@ -96,6 +97,54 @@ class NoisyOcr(unittest.TestCase):
     def test_lines_far_off_in_length_are_skipped(self):
         long_read = 'We must reach the castle before nightfall, said the old knight to his weary companions.'
         self.assertIsNone(table().lookup(long_read))
+
+
+class Splicing(unittest.TestCase):
+    """The text the game fills in ({0}, %s) goes into the Arabic where its placeholder was."""
+
+    PAIRS = [
+        ('{0} gave you {1} gold coins.', 'أعطاك {0} {1} من القطع الذهبية.'),
+        ('%s has joined %s.', 'انضم %2$s إلى %1$s.'),
+        ('You found %d arrows in the %s chest.', 'وجدت %d سهمًا في صندوق %s.'),
+        ('Press [E] to talk to {name}.', 'اضغط [E] للتحدث مع {name}.'),
+        ('Score: 100%%', 'النتيجة: 100%%'),
+    ]
+
+    def lookup(self, read):
+        return FingerprintTable(build_table(self.PAIRS)[0]).lookup(read).arabic
+
+    def test_placeholders_become_numbered_slots(self):
+        self.assertEqual(english_template('Hi {0}, you have %d [E] %%')[0], ['{0}', '%d'])
+        self.assertEqual(overlay_text('أهلًا {0}، لديك %d', ['{0}', '%d']), 'أهلًا {#0}، لديك {#1}')
+        self.assertEqual(overlay_text('لديك %2$s و %1$s', ['%s', '%s']), 'لديك {#1} و {#0}')
+        self.assertEqual(overlay_text('أهلًا {other}', ['{0}']), 'أهلًا …')
+
+    def test_names_and_numbers_are_spliced_in(self):
+        self.assertEqual(self.lookup('Old Man Jenkins gave you 250 gold coins.'), 'أعطاك \u2068Old Man Jenkins\u2069 \u2068250\u2069 من القطع الذهبية.')
+        self.assertEqual(self.lookup('You found 12 arrows in the rusty chest.'), 'وجدت \u206812\u2069 سهمًا في صندوق \u2068rusty\u2069.')
+        self.assertEqual(self.lookup('Press E to talk to Mira.'), 'اضغط [E] للتحدث مع \u2068Mira\u2069.')
+
+    def test_translations_can_reorder_numbered_arguments(self):
+        self.assertEqual(self.lookup('Sir Kay has joined The Order.'), 'انضم \u2068The Order\u2069 إلى \u2068Sir Kay\u2069.')
+
+    def test_misread_anchor_words_still_work(self):
+        self.assertEqual(table().lookup('Hel1o, Arthur! VVelcome to Riverwood.').arabic, 'مرحبًا يا \u2068Arthur\u2069! أهلًا بك في ريفروود.')
+
+    def test_an_ellipsis_when_the_name_cant_be_found(self):
+        _, anchors = english_template('Hello, {0}! Welcome to Riverwood.')
+        self.assertEqual(fill_slots('مرحبًا يا {#0}!', anchors, 'Greetings Arthur, come in'), 'مرحبًا يا …!')
+        self.assertEqual(fill_slots('مرحبًا يا {#0}!', [], 'Hello Arthur'), 'مرحبًا يا …!')
+        long_name = 'Hello, ' + 'Bartholomew ' * 6 + '! Welcome to Riverwood.'
+        self.assertEqual(fill_slots('مرحبًا يا {#0}!', anchors, long_name), 'مرحبًا يا …!')
+
+    def test_only_word_hashes_are_stored_around_slots(self):
+        data, _ = build_table(self.PAIRS)
+        dumped = json.dumps(data, ensure_ascii=False).lower()
+        for word in ['gave', 'gold', 'joined', 'arrows', 'chest', 'talk']:
+            self.assertNotIn(word, dumped)
+
+    def test_words_keep_where_they_came_from(self):
+        self.assertEqual(words('Hello, Arthur!'), [('hello', 0, 5), ('arthur', 7, 13)])
 
 
 class Vectors(unittest.TestCase):

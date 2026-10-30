@@ -140,12 +140,26 @@ test('the helper reads images and finds windows over its line protocol', async (
   fs.writeFileSync(path.join(dir, 'window'), JSON.stringify({ hwnd: '123', x: 10, y: 20, w: 800, h: 600, minimized: false }));
   const helper = helperWith({ FAKE_OCR_TEXT_FILE: path.join(dir, 'text'), FAKE_WINDOW_FILE: path.join(dir, 'window') });
   try {
-    assert.deepEqual(await helper.ready(), { ocr: true, language: 'en-US' });
+    assert.deepEqual(await helper.ready(), { ocr: true, language: 'en-US', startMs: 5, warmupMs: 1 });
     const read = await helper.recognize(bmp());
     assert.deepEqual(read.lines.map((l) => l.text), ['Line one', 'Line two']);
     assert.deepEqual(await helper.findWindow([4242]), { hwnd: '123', x: 10, y: 20, w: 800, h: 600, minimized: false });
     assert.equal(await helper.findWindow([]), null);
     await assert.rejects(helper.recognize(Buffer.from('not an image')), /Not a BMP/);
+  } finally {
+    helper.close();
+  }
+});
+
+test('one helper process serves every request, and stays warm between them', async () => {
+  const helper = helperWith();
+  try {
+    await helper.ready();
+    const reads = await Promise.all(Array.from({ length: 25 }, () => helper.recognize(bmp())));
+    for (let i = 0; i < 25; i++) await helper.recognize(bmp());
+    assert.equal(reads.length, 25);
+    assert.equal(helper.starts, 1);
+    assert.equal(helper.running, true);
   } finally {
     helper.close();
   }
@@ -159,6 +173,7 @@ test('a helper that dies is started again on the next request', async () => {
     assert.equal(helper.running, false);
     assert.equal((await helper.recognize(bmp())).lines.length, 1);
     assert.equal(helper.running, true);
+    assert.equal(helper.starts, 2);
   } finally {
     helper.close();
   }
@@ -206,7 +221,7 @@ test('a matched line is shown where the English was, and a miss hides it', async
   await settle();
   const round = (box) => Object.fromEntries(Object.entries(box).map(([k, v]) => [k, Math.round(v * 1000) / 1000]));
   assert.deepEqual(shown.map(([what, arabic, box]) => [what, arabic, box && round(box)]), [['show', 'عربي: Known line', { x: 0.1, y: 0.81, w: 0.2, h: 0.02 }], ['hide', undefined, undefined]]);
-  assert.deepEqual({ ...session.stats, lastOcrMs: undefined }, { reads: 2, matches: 1, misses: 1, errors: 0, lastOcrMs: undefined });
+  assert.deepEqual({ ...session.stats, lastOcrMs: undefined }, { reads: 2, matches: 1, misses: 1, errors: 0, lastOcrMs: undefined, ocrMs: 5 });
 });
 
 test('clearing while OCR is busy drops its answer', async () => {

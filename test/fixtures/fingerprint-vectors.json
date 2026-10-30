@@ -42,7 +42,45 @@
     55972,
     61196,
     61403
-   ]
+   ],
+   "words": [
+    [
+     "we",
+     0,
+     2
+    ],
+    [
+     "must",
+     3,
+     7
+    ],
+    [
+     "reach",
+     8,
+     13
+    ],
+    [
+     "the",
+     14,
+     17
+    ],
+    [
+     "castle",
+     18,
+     24
+    ],
+    [
+     "before",
+     25,
+     31
+    ],
+    [
+     "nlghtfall",
+     32,
+     41
+    ]
+   ],
+   "anchors": []
   },
   {
    "text": "I'll be RIGHT back!",
@@ -65,7 +103,30 @@
     57332,
     57334,
     61206
-   ]
+   ],
+   "words": [
+    [
+     "lll",
+     0,
+     4
+    ],
+    [
+     "be",
+     5,
+     7
+    ],
+    [
+     "rlght",
+     8,
+     13
+    ],
+    [
+     "back",
+     14,
+     18
+    ]
+   ],
+   "anchors": []
   },
   {
    "text": "Café — naïve façade",
@@ -89,7 +150,25 @@
     59399,
     60322,
     64241
-   ]
+   ],
+   "words": [
+    [
+     "cafe",
+     0,
+     4
+    ],
+    [
+     "nalve",
+     7,
+     12
+    ],
+    [
+     "facade",
+     13,
+     19
+    ]
+   ],
+   "anchors": []
   },
   {
    "text": "Hello, {0}! Welcome to <color=#ff0>Riverwood</color>.",
@@ -121,6 +200,59 @@
     50807,
     55475,
     62940
+   ],
+   "words": [
+    [
+     "hello",
+     0,
+     5
+    ],
+    [
+     "o",
+     8,
+     9
+    ],
+    [
+     "welcome",
+     12,
+     19
+    ],
+    [
+     "to",
+     20,
+     22
+    ],
+    [
+     "color",
+     24,
+     29
+    ],
+    [
+     "ffo",
+     31,
+     34
+    ],
+    [
+     "rlverwood",
+     35,
+     44
+    ],
+    [
+     "color",
+     46,
+     51
+    ]
+   ],
+   "anchors": [
+    [
+     [
+      2158673163
+     ],
+     [
+      2392237075,
+      3043672228
+     ]
+    ]
    ]
   },
   {
@@ -148,7 +280,40 @@
     56477,
     60870,
     64341
-   ]
+   ],
+   "words": [
+    [
+     "press",
+     0,
+     5
+    ],
+    [
+     "e",
+     7,
+     8
+    ],
+    [
+     "to",
+     10,
+     12
+    ],
+    [
+     "open",
+     13,
+     17
+    ],
+    [
+     "the",
+     18,
+     21
+    ],
+    [
+     "gate",
+     22,
+     26
+    ]
+   ],
+   "anchors": []
   },
   {
    "text": "OK",
@@ -159,7 +324,15 @@
    "grams": [
     10737,
     49971
-   ]
+   ],
+   "words": [
+    [
+     "ok",
+     0,
+     2
+    ]
+   ],
+   "anchors": []
   },
   {
    "text": "a",
@@ -169,7 +342,15 @@
    "simhash": "c37f221a1310d9cc",
    "grams": [
     55756
-   ]
+   ],
+   "words": [
+    [
+     "a",
+     0,
+     1
+    ]
+   ],
+   "anchors": []
   },
   {
    "text": "The 10 modern vvorkers",
@@ -195,7 +376,30 @@
     57215,
     58155,
     63357
-   ]
+   ],
+   "words": [
+    [
+     "the",
+     0,
+     3
+    ],
+    [
+     "lo",
+     4,
+     6
+    ],
+    [
+     "modem",
+     7,
+     13
+    ],
+    [
+     "workers",
+     14,
+     22
+    ]
+   ],
+   "anchors": []
   },
   {
    "text": "Line one\nline two",
@@ -216,7 +420,30 @@
     49072,
     50377,
     53153
-   ]
+   ],
+   "words": [
+    [
+     "llne",
+     0,
+     4
+    ],
+    [
+     "one",
+     5,
+     8
+    ],
+    [
+     "llne",
+     9,
+     13
+    ],
+    [
+     "two",
+     14,
+     17
+    ]
+   ],
+   "anchors": []
   },
   {
    "text": "  ",
@@ -224,7 +451,9 @@
    "slots": 0,
    "length": 0,
    "simhash": "0000000000000000",
-   "grams": []
+   "grams": [],
+   "words": [],
+   "anchors": []
   },
   {
    "text": "Ünïcödé ﬁnal fig. ¹²³",
@@ -251,7 +480,30 @@
     53362,
     58572,
     59192
-   ]
+   ],
+   "words": [
+    [
+     "unlcode",
+     0,
+     7
+    ],
+    [
+     "flnal",
+     8,
+     12
+    ],
+    [
+     "flg",
+     13,
+     16
+    ],
+    [
+     "l23",
+     18,
+     21
+    ]
+   ],
+   "anchors": []
   },
   {
    "text": "rnrn|||000111",
@@ -270,62 +522,152 @@
     36366,
     50320,
     53779
-   ]
+   ],
+   "words": [
+    [
+     "mmlllooolll",
+     0,
+     13
+    ]
+   ],
+   "anchors": []
   }
  ],
  "table": {
-  "format": 1,
+  "format": 2,
   "kind": "gameshelf-overlay-fingerprints",
   "normalization": 1,
   "entries": [
+   [
+    "035cb3193573e64c",
+    9,
+    "/mCOanVuznaoikOVSM1F0Rj2",
+    "انضم {#1} إلى {#0}.",
+    2,
+    [
+     [
+      [],
+      [
+       804230467,
+       2678433825
+      ]
+     ],
+     [
+      [
+       804230467,
+       2678433825
+      ],
+      []
+     ]
+    ]
+   ],
+   [
+    "52f998195465d975",
+    13,
+    "gBnXW0+CcKE5pT60vMTu1fHYA9pt3MbtVfs=",
+    "اضغط [E] للتحدث مع {#0}.",
+    2,
+    [
+     [
+      [
+       126512239,
+       3043672228
+      ],
+      []
+     ]
+    ]
+   ],
    [
     "122b4019153d4e84",
     14,
     "LgOdLGE2BUlrTJpMgnYEw8rKoc/t2vTf9t8W7w==",
     "سأعود حالًا.",
-    0
+    0,
+    []
+   ],
+   [
+    "5216871931908084",
+    16,
+    "qScmQQRfmmCRZpFndoBtgaiKXJPnmImfXKHOqAW04uw=",
+    "أعطاك {#0} {#1} من القطع الذهبية.",
+    2,
+    [
+     [
+      [],
+      [
+       72465924,
+       2040439132
+      ]
+     ],
+     [
+      [
+       72465924,
+       2040439132
+      ],
+      [
+       245792979,
+       611232602
+      ]
+     ]
+    ]
    ],
    [
     "430158197464b54c",
     17,
     "0AJ4DQguzD96V+9XTGxJcM6E4Ypck1yhkrUcu3zVp/BA8Q==",
     "لا تدعهم يرونك.",
-    0
+    0,
+    []
    ],
    [
     "42e182194466dd31",
     18,
     "CSwXQddbOmsVd+N5sJXxmCOcrKQ5pSLUfNXu1QPandzG7VX7",
     "اضغط [E] لفتح البوابة.",
-    1
+    1,
+    []
    ],
    [
     "12189b1921ef4dae",
     23,
     "vxSlF0Ub+BwpIARJHk6JVt5lymdqaWFvq3pmfC6JAo2+mdinoqtVunfGs9jc9Q==",
-    "مرحبًا يا …! أهلًا بك في ريفروود.",
-    1
+    "مرحبًا يا {#0}! أهلًا بك في ريفروود.",
+    1,
+    [
+     [
+      [
+       2158673163
+      ],
+      [
+       2392237075,
+       3043672228
+      ]
+     ]
+    ]
    ],
    [
     "c2ea2a1954782140",
     31,
     "8gEqCgwTzBVcIekjYyVkJdAneTFuOIU6HUDsQ2tMAF3wYOZoV2vPdFN3wZHzm2evA70cwpLLt8x81ZDam+Y=",
     "يجب أن نصل إلى القرية قبل الفجر.",
-    0
+    0,
+    []
    ],
    [
     "c2eb2819547c1b0a",
     35,
     "8gEME8wVYyXQJwguYDF5MRgybjiFOi09ckKaTDpVil3wYOZoz3SvgPObDp5Iq2evA70Ew5LLt8wT0hrTfNWQ2qTaDO/b7w==",
     "يجب أن نصل إلى القلعة قبل حلول الليل.",
-    0
+    0,
+    []
    ],
    [
     "c27d8a19656d966c",
     52,
     "hAIuA0EEZRO/FPsV+BwpINswdTaISlxON1O+Vs5ZVmLMY5FmxWedakV3gXhmfPx+0IKPh6aJAo0Kjx2YXJponkqfO6FToeysZ7RGvGS/d8Yizf/PfNWz2A3lLPcq+lX7a/4=",
     "الجسر مدمر. علينا أن نجد طريقًا آخر لعبور النهر.",
-    0
+    0,
+    []
    ]
   ]
  },
@@ -352,7 +694,17 @@
   },
   {
    "query": "Hello, Arthur! Welcome to Riverwood.",
-   "arabic": "مرحبًا يا …! أهلًا بك في ريفروود.",
+   "arabic": "مرحبًا يا ⁨Arthur⁩! أهلًا بك في ريفروود.",
+   "score": 0.913043
+  },
+  {
+   "query": "Hello, Maximilian the Third! Welcome to Riverwood.",
+   "arabic": "مرحبًا يا ⁨Maximilian the Third⁩! أهلًا بك في ريفروود.",
+   "score": 0.913043
+  },
+  {
+   "query": "Hel1o, Arthur! VVelcome to Riverwood.",
+   "arabic": "مرحبًا يا ⁨Arthur⁩! أهلًا بك في ريفروود.",
    "score": 0.913043
   },
   {
@@ -374,6 +726,21 @@
    "query": "Dont let them see you",
    "arabic": "لا تدعهم يرونك.",
    "score": 1.0
+  },
+  {
+   "query": "Old Man Jenkins gave you 250 gold coins.",
+   "arabic": "أعطاك ⁨Old Man Jenkins⁩ ⁨250⁩ من القطع الذهبية.",
+   "score": 0.8125
+  },
+  {
+   "query": "Sir Kay has joined The Order.",
+   "arabic": "انضم ⁨The Order⁩ إلى ⁨Sir Kay⁩.",
+   "score": 0.777778
+  },
+  {
+   "query": "Press E to talk to Mira.",
+   "arabic": "اضغط [E] للتحدث مع ⁨Mira⁩.",
+   "score": 0.769231
   },
   {
    "query": "Completely different text here",

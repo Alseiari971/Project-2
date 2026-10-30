@@ -1,16 +1,20 @@
 # GameShelf's OCR and window helper for the Arabic subtitle overlay.
 #
-# Started once by the app (desktop/localization/ocr.js) and kept running. It
-# reads one request per line on stdin, "<id>\t<op>\t<argument>", and writes one
-# JSON reply per line on stdout:
+# Started once by the app (desktop/localization/ocr.js) and kept running for as
+# long as an overlay needs it: PowerShell, the WinRT types, the C# window code
+# and the OCR engine (with its language model, by reading a blank picture once)
+# all load at start, so each subtitle costs only the decode and the OCR itself.
+# It reads one request per line on stdin, "<id>\t<op>\t<argument>", and writes
+# one JSON reply per line on stdout:
 #   ping                       -> {"id":1,"pong":true}
-#   ocr     <base64 BMP image> -> {"id":2,"lines":[{"text":"...","box":{x,y,w,h}}],"ms":31}
+#   ocr     <base64 BMP image> -> {"id":2,"lines":[{"text":"...","box":{x,y,w,h}}],"ms":19,"decodeMs":2}
 #   window  <pid,pid,...>      -> {"id":3,"window":{"hwnd":"...","x":0,"y":0,"w":1920,"h":1080,"minimized":false}}
-# The first line it writes says whether OCR is available.
+# The first line it writes says whether OCR is available and how long starting took.
 #
 # OCR is Windows' own (Windows.Media.Ocr, Windows 10 and 11), so the screen
 # never leaves the computer.
 
+$started = [System.Diagnostics.Stopwatch]::StartNew()
 $ErrorActionPreference = 'Stop'
 [Console]::InputEncoding = New-Object System.Text.UTF8Encoding $false
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
@@ -24,12 +28,19 @@ $null = [Windows.Storage.StorageFile, Windows.Storage, ContentType = WindowsRunt
 $null = [Windows.Storage.Streams.IRandomAccessStream, Windows.Storage.Streams, ContentType = WindowsRuntime]
 $null = [Windows.Globalization.Language, Windows.Foundation, ContentType = WindowsRuntime]
 
-# Waits for a WinRT IAsyncOperation<T> and returns its result.
+# Waits for a WinRT IAsyncOperation<T> and returns its result. The generic
+# method for each result type is made once and kept.
 $getAwaiter = [System.WindowsRuntimeSystemExtensions].GetMember('GetAwaiter') |
   Where-Object { $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' } |
   Select-Object -First 1
+$awaiters = @{}
 function Await($operation, [Type]$resultType) {
-  $getAwaiter.MakeGenericMethod($resultType).Invoke($null, @($operation)).GetResult()
+  $awaiter = $awaiters[$resultType]
+  if (-not $awaiter) {
+    $awaiter = $getAwaiter.MakeGenericMethod($resultType)
+    $awaiters[$resultType] = $awaiter
+  }
+  $awaiter.Invoke($null, @($operation)).GetResult()
 }
 
 Add-Type -TypeDefinition @'
@@ -106,8 +117,11 @@ function Read-Bitmap([byte[]]$bytes) {
   Await ($decoder.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
 }
 
+$script:decodeMs = 0
 function Read-Text([byte[]]$bytes) {
+  $watch = [System.Diagnostics.Stopwatch]::StartNew()
   $bitmap = Read-Bitmap $bytes
+  $script:decodeMs = $watch.ElapsedMilliseconds
   try {
     $result = Await ($engine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult])
   } finally {
@@ -127,7 +141,52 @@ function Read-Text([byte[]]$bytes) {
   }
 }
 
-$ready = @{ type = 'ready'; ocr = [bool]$engine; language = $(if ($engine) { $engine.RecognizerLanguage.LanguageTag } else { $null }) }
+# Read a small blank picture once, so Windows loads the OCR model now rather
+# than on the first subtitle: a white 64 x 16 greyscale BMP, made by the app's
+# own encoder (grayBmp in change-detector.js).
+$warmupMs = $null
+if ($engine) {
+  try {
+    $warm = [System.Diagnostics.Stopwatch]::StartNew()
+    $blank = (
+  'Qk02CAAAAAAAADYEAAAoAAAAQAAAAPD///8BAAgAAAAAAAAEAAATCwAAEwsAAAABAAAAAQAAAAAAAAEBAQACAgIAAwMDAAQEBAAF' +
+  'BQUABgYGAAcHBwAICAgACQkJAAoKCgALCwsADAwMAA0NDQAODg4ADw8PABAQEAAREREAEhISABMTEwAUFBQAFRUVABYWFgAXFxcA' +
+  'GBgYABkZGQAaGhoAGxsbABwcHAAdHR0AHh4eAB8fHwAgICAAISEhACIiIgAjIyMAJCQkACUlJQAmJiYAJycnACgoKAApKSkAKioq' +
+  'ACsrKwAsLCwALS0tAC4uLgAvLy8AMDAwADExMQAyMjIAMzMzADQ0NAA1NTUANjY2ADc3NwA4ODgAOTk5ADo6OgA7OzsAPDw8AD09' +
+  'PQA+Pj4APz8/AEBAQABBQUEAQkJCAENDQwBEREQARUVFAEZGRgBHR0cASEhIAElJSQBKSkoAS0tLAExMTABNTU0ATk5OAE9PTwBQ' +
+  'UFAAUVFRAFJSUgBTU1MAVFRUAFVVVQBWVlYAV1dXAFhYWABZWVkAWlpaAFtbWwBcXFwAXV1dAF5eXgBfX18AYGBgAGFhYQBiYmIA' +
+  'Y2NjAGRkZABlZWUAZmZmAGdnZwBoaGgAaWlpAGpqagBra2sAbGxsAG1tbQBubm4Ab29vAHBwcABxcXEAcnJyAHNzcwB0dHQAdXV1' +
+  'AHZ2dgB3d3cAeHh4AHl5eQB6enoAe3t7AHx8fAB9fX0Afn5+AH9/fwCAgIAAgYGBAIKCggCDg4MAhISEAIWFhQCGhoYAh4eHAIiI' +
+  'iACJiYkAioqKAIuLiwCMjIwAjY2NAI6OjgCPj48AkJCQAJGRkQCSkpIAk5OTAJSUlACVlZUAlpaWAJeXlwCYmJgAmZmZAJqamgCb' +
+  'm5sAnJycAJ2dnQCenp4An5+fAKCgoAChoaEAoqKiAKOjowCkpKQApaWlAKampgCnp6cAqKioAKmpqQCqqqoAq6urAKysrACtra0A' +
+  'rq6uAK+vrwCwsLAAsbGxALKysgCzs7MAtLS0ALW1tQC2trYAt7e3ALi4uAC5ubkAurq6ALu7uwC8vLwAvb29AL6+vgC/v78AwMDA' +
+  'AMHBwQDCwsIAw8PDAMTExADFxcUAxsbGAMfHxwDIyMgAycnJAMrKygDLy8sAzMzMAM3NzQDOzs4Az8/PANDQ0ADR0dEA0tLSANPT' +
+  '0wDU1NQA1dXVANbW1gDX19cA2NjYANnZ2QDa2toA29vbANzc3ADd3d0A3t7eAN/f3wDg4OAA4eHhAOLi4gDj4+MA5OTkAOXl5QDm' +
+  '5uYA5+fnAOjo6ADp6ekA6urqAOvr6wDs7OwA7e3tAO7u7gDv7+8A8PDwAPHx8QDy8vIA8/PzAPT09AD19fUA9vb2APf39wD4+PgA' +
+  '+fn5APr6+gD7+/sA/Pz8AP39/QD+/v4A////AP//////////////////////////////////////////////////////////////' +
+  '////////////////////////////////////////////////////////////////////////////////////////////////////' +
+  '////////////////////////////////////////////////////////////////////////////////////////////////////' +
+  '////////////////////////////////////////////////////////////////////////////////////////////////////' +
+  '////////////////////////////////////////////////////////////////////////////////////////////////////' +
+  '////////////////////////////////////////////////////////////////////////////////////////////////////' +
+  '////////////////////////////////////////////////////////////////////////////////////////////////////' +
+  '////////////////////////////////////////////////////////////////////////////////////////////////////' +
+  '////////////////////////////////////////////////////////////////////////////////////////////////////' +
+  '////////////////////////////////////////////////////////////////////////////////////////////////////' +
+  '////////////////////////////////////////////////////////////////////////////////////////////////////' +
+  '////////////////////////////////////////////////////////////////////////////////////////////////////' +
+  '////////////////////////////////////////////////////////////////////////////////////////////////////' +
+  '////////////////////////////////////////////////////////////////////////////////////////////////////' +
+  '//8='
+)
+    $null = @(Read-Text ([Convert]::FromBase64String($blank)))
+    $warmupMs = $warm.ElapsedMilliseconds
+  } catch {
+    $warmupMs = $null
+  }
+}
+
+$ready = @{ type = 'ready'; ocr = [bool]$engine; language = $(if ($engine) { $engine.RecognizerLanguage.LanguageTag } else { $null }); startMs = $started.ElapsedMilliseconds; warmupMs = $warmupMs }
 [Console]::Out.WriteLine(($ready | ConvertTo-Json -Compress))
 [Console]::Out.Flush()
 
@@ -144,6 +203,7 @@ while ($true) {
         $watch = [System.Diagnostics.Stopwatch]::StartNew()
         $reply.lines = @(Read-Text ([Convert]::FromBase64String($parts[2])))
         $reply.ms = $watch.ElapsedMilliseconds
+        $reply.decodeMs = $script:decodeMs
       }
       'window' {
         $pids = @($parts[2].Split(',') | Where-Object { $_ } | ForEach-Object { [uint32]$_ })

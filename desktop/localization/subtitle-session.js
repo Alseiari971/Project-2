@@ -16,7 +16,8 @@ function createSubtitleSession({ recognize, match, show, hide, log = () => {} })
   let busy = false;
   let showing = false;
   let closed = false;
-  const stats = { reads: 0, matches: 0, misses: 0, errors: 0, lastOcrMs: null };
+  // ocrMs: a running average of the helper's time per read (decode + OCR).
+  const stats = { reads: 0, matches: 0, misses: 0, errors: 0, lastOcrMs: null, ocrMs: null };
 
   // OCR boxes are in the OCR image's pixels; image.crop says where that image
   // sits in the window: { x, y, width, height, scale, frameWidth, frameHeight,
@@ -51,6 +52,7 @@ function createSubtitleSession({ recognize, match, show, hide, log = () => {} })
         continue;
       }
       stats.lastOcrMs = result.ms ?? Date.now() - started;
+      stats.ocrMs = stats.ocrMs === null ? stats.lastOcrMs : Math.round((stats.ocrMs * 0.8 + stats.lastOcrMs * 0.2) * 10) / 10;
       if (job.generation !== generation || closed) continue; // a newer read or a clear came in
       const text = result.lines.map((l) => l.text).join(' ').trim();
       const found = text ? match(text) : null;

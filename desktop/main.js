@@ -501,6 +501,8 @@ function registerIpc() {
     const game = await installedGame(key);
     if (running.has(key)) return null;
     const ready = await arabic.prepareLaunch(arabicGame(game)).catch((err) => ({ mode: 'error', ok: false, error: { text: err.message, vars: {} } }));
+    // Start the OCR helper now, so it's warm by the time the game shows anything.
+    if (ready.mode === 'overlay' && ready.ok) ocrHelper.ready().catch(() => {});
     await launch(game);
     starting.set(key, Date.now());
     if (ready.mode === 'overlay' && ready.ok) startOverlay(key, game, ready);

@@ -9,3 +9,6 @@ public/fonts/thmanyah/
 
 # Python bytecode (localization compiler)
 __pycache__/
+
+# Packs made by scripts/build-arabic-pack.py (signed packs and the translation cache)
+build/

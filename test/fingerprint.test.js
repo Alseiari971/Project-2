@@ -3,7 +3,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fixture = require('./fixtures/fingerprint-vectors.json');
-const { normalize, fingerprint, loadTable, lookup, createMatcher } = require('../desktop/localization/fingerprint');
+const { normalize, fingerprint, words, wordHash, fillSlots, loadTable, lookup, createMatcher } = require('../desktop/localization/fingerprint');
 
 // What the Python english_text() does to these vector texts before normalizing.
 const shownEnglish = (text) => text
@@ -17,6 +17,15 @@ test('fingerprints match the Python builder exactly', () => {
     assert.equal(n, v.normalized, v.text);
     const fp = fingerprint(n);
     assert.deepEqual({ length: fp.length, simhash: fp.simhash, grams: [...fp.grams] }, { length: v.length, simhash: v.simhash, grams: v.grams }, v.text);
+  }
+});
+
+test('words and the hashes around slots match the Python builder', () => {
+  for (const v of fixture.vectors) {
+    assert.deepEqual(words(v.text).map((w) => [w.word, w.start, w.end]), v.words, v.text);
+    // Every anchor hash the builder stored is one of these words' hashes.
+    const hashes = new Set(words(v.text).map((w) => wordHash(w.word)));
+    for (const [before, after] of v.anchors) for (const h of [...before, ...after]) assert.ok(hashes.has(h), v.text);
   }
 });
 
@@ -35,9 +44,25 @@ test('misread letters, missing spaces and capitals still find the line', () => {
   for (const read of ['We rnust reach the castle bef0re nightfall', 'WE MUST REACH THE CASTLE\nBEFORE NIGHTFALL', 'Wemustreachthecastlebeforenightfall', 'We must reach the casIle before nightfall.']) {
     assert.equal(matcher.match(read)?.arabic, castle, read);
   }
-  assert.equal(matcher.match('Hello, Arthur! Welcome to Riverwood.')?.arabic, 'مرحبًا يا …! أهلًا بك في ريفروود.');
+  assert.equal(matcher.match('Hello, Arthur! Welcome to Riverwood.')?.arabic, 'مرحبًا يا \u2068Arthur\u2069! أهلًا بك في ريفروود.');
   assert.equal(matcher.match('Completely different text here'), null);
   assert.equal(matcher.match(''), null);
+});
+
+test('names the game fills in are spliced into the Arabic', () => {
+  const matcher = createMatcher(fixture.table);
+  assert.equal(matcher.match('Old Man Jenkins gave you 250 gold coins.')?.arabic, 'أعطاك \u2068Old Man Jenkins\u2069 \u2068250\u2069 من القطع الذهبية.');
+  assert.equal(matcher.match('Sir Kay has joined The Order.')?.arabic, 'انضم \u2068The Order\u2069 إلى \u2068Sir Kay\u2069.');
+  assert.equal(matcher.match('Press E to talk to Mira.')?.arabic, 'اضغط [E] للتحدث مع \u2068Mira\u2069.');
+  // Not found: an ellipsis, never a guess.
+  assert.equal(fillSlots('مرحبًا يا {#0}!', [[[wordHash('hello')], [wordHash('welcome')]]], 'Greetings Arthur, come in'), 'مرحبًا يا …!');
+  assert.equal(fillSlots('مرحبًا يا {#0}!', [], 'Hello Arthur'), 'مرحبًا يا …!');
+  assert.equal(fillSlots('بلا خانات', [], 'whatever'), 'بلا خانات');
+});
+
+test('old tables (format 1) still work', () => {
+  const old = { ...fixture.table, format: 1, entries: fixture.table.entries.map((e) => e.slice(0, 5)) };
+  assert.equal(createMatcher(old).match('Hello, Arthur! Welcome to Riverwood.')?.arabic, 'مرحبًا يا …! أهلًا بك في ريفروود.');
 });
 
 test('the threshold is a setting', () => {

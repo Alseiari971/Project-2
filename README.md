@@ -113,7 +113,7 @@ Many single-player games have no Arabic, and most game engines can't draw it: th
 
 The pieces, in `localization/` and `desktop/localization/`:
 
-**1. The Arabic compiler** (Python, run when a pack is made, not on players' PCs). It turns Arabic translations into text a left-to-right engine shows correctly:
+**1. The Arabic compiler** (Python, run when a pack is made, not on players' PCs). It turns Arabic translations into text an engine without Arabic support shows correctly (Unity's text, and most custom engines; Unreal Engine shapes Arabic itself, so its packs get plain Arabic):
 - letters already joined, using only Arabic Presentation Forms-B (U+FE70–U+FEFF), the glyphs game fonts are built from;
 - lines over 55 characters wrapped first, in reading order, then each line put in screen order on its own, so two-line subtitles read top to bottom;
 - the game's markup kept working: `<color=#fff>…</color>`, Unreal's `</>`, `{0}`, `%s`, `%1$s`, `%PLAYER%`, `[E]`, `[Press E]`, `<sprite=…>`, `<br>` and `\n`.
@@ -125,7 +125,7 @@ pip install -r localization/requirements.txt
 cd localization && python -m arabic_compiler translations.csv --out build/my-game
 ```
 
-The input is a CSV with `source` and `arabic` columns (or JSON). It writes the XUnity.AutoTranslator dictionary, a CSV and JSON of the compiled lines (for Unreal `.locres` tools), `charset.txt` (every glyph the game's Arabic font needs) and `fingerprints.json` for the overlay (below). Tests: `cd localization && python -m unittest discover -s tests`.
+The input is a CSV with `source` and `arabic` columns (or JSON). It writes the XUnity.AutoTranslator dictionary, a CSV and JSON of the compiled lines (for other engines' tools), `charset.txt` (every glyph the game's Arabic font needs) and `fingerprints.json` for the overlay (below). Tests: `cd localization && python -m unittest discover -s tests`. To go from a game to a signed pack in one command, see [the pack generator](#making-a-pack-in-one-command).
 
 **2. Checks before launch** (`desktop/localization/`). Before anything is changed, GameShelf:
 - looks for anti-cheat software in the game's folder (Easy Anti-Cheat, BattlEye, Riot Vanguard, Ricochet, EA Javelin, PunkBuster, GameGuard, XIGNCODE3, Anti-Cheat Expert and others). If any is found, or the check can't finish, the game's files are never changed; only the overlay is offered;
@@ -140,10 +140,11 @@ Files are only ever added, never replaced: if any name is taken, nothing is adde
 **4. The overlay** (Windows 10 and 11). When the game starts, GameShelf finds its window and keeps a see-through, click-through band over its subtitle area (the bottom 22% unless the pack says otherwise). It never takes focus or clicks, and closes when the game does.
 - Windows captures the game's window. A few times a second the subtitle area's brightness is checked against the last frame, which costs well under a millisecond. Only when the text has changed and then held still for one tick (so subtitles that type out or fade in aren't read halfway) is it read with Windows' own OCR. When the text disappears, the Arabic is hidden at once, without OCR.
 - What OCR read is looked up in the pack's `fingerprints.json`. That file holds fingerprints of the English lines, not the lines themselves: each line's length, a 64-bit SimHash and its hashed character trigrams. Lookups ignore case, punctuation, spaces and the letters OCR mixes up (I/l/1, O/0, rn/m), allow for names the game fills in (`{0}`), and show the Arabic only when the match scores at least 0.72. A 50,000-line table answers in about a millisecond.
+- Names and numbers the game fills in are copied from the screen into the Arabic: "Hello, {0}!" read as "Hello, Arthur!" shows «مرحبًا يا Arthur!». The table keeps, for each slot, only hashes of the two words on either side, and finds them again in what OCR read; when it can't, the Arabic shows "…" there.
 - The Arabic is drawn by the app itself, properly joined and right to left, in Thmanyah Sans if it's installed or Alexandria. It covers the English when the overlay can't end up in the capture (the game's window is captured on its own, or Windows 10 2004 and later); otherwise it sits just above.
 - In testing with a stand-in game, the Arabic appeared about 0.16 s after a subtitle changed, plus whatever Windows' OCR takes on the PC. It works with windowed and borderless games, not exclusive full screen. It needs Windows' English OCR, which English Windows has; elsewhere add English under Language settings.
 
-The OCR runs in a Windows PowerShell helper (`desktop/localization/ocr-helper.ps1`), so nothing needs to be compiled. To try the overlay elsewhere, `scripts/fake-ocr-helper.js` stands in for it: run the app with `GAMESHELF_OCR_HELPER=scripts/fake-ocr-helper.js` (and `GAMESHELF_PACK_KEY_FILE` pointing at a test `pack-signing.pub`).
+The OCR runs in a Windows PowerShell helper (`desktop/localization/ocr-helper.ps1`), so nothing needs to be compiled. It's one long-running process, started when Play is pressed (while the game is still loading) and shared by every overlay until a minute after the last one closes. PowerShell, the WinRT types and the OCR engine load once, and a blank picture is read at start so Windows loads its OCR model before the first subtitle; after that each subtitle costs only decoding the picture and the OCR itself. Its timings show in the overlay's stats (`window.gameshelfDesktop.arabicInfo(key)` in the developer tools: `ocrMs`). To try the overlay elsewhere, `scripts/fake-ocr-helper.js` stands in for it: run the app with `GAMESHELF_OCR_HELPER=scripts/fake-ocr-helper.js` (and `GAMESHELF_PACK_KEY_FILE` pointing at a test `pack-signing.pub`).
 
 **Packs** come from a folder with `pack.json` (each file's place and SHA-256) and `pack.json.sig`. Add them in App settings under **Arabic subtitle packs**. Each pack says which game it's for (a Steam app ID or a GameShelf game ID). A Unity pack puts a DLL in the game's folder, so packs must be signed with GameShelf's key, and each file must match its hash. Make the key once, and keep `pack-signing.key` secret, outside the repository:
 
@@ -167,6 +168,27 @@ node scripts/localization-pack.js make my-pack --engine overlay --id my-game-ar-
 
 Still to come: downloading packs from a server (for now they're added in App settings).
 
+### Making a pack in one command
+
+`scripts/build-arabic-pack.py` goes from a game's English to a signed pack: it reads the text, translates what isn't translated yet, compiles it and signs the pack.
+
+```bash
+export OPENAI_API_KEY=...
+```
+```bash
+python scripts/build-arabic-pack.py "C:/Games/My Game" --id my-game-ar --version 1.0.0 --steam-app-id 123456 --key ../gameshelf-keys/pack-signing.key --provider openai --model <model> --context "A fantasy RPG set in a desert kingdom"
+```
+
+- **What it reads:** a game folder (loose `.locres` files, or a Unity game's `_Data` folder), or a single `.locres`, Unity `.assets`, CSV (`source`, optional `arabic` and `key` columns), JSON, or XUnity `.txt` file. Unity asset files need `pip install UnityPy`, and the lines it picks out are a best guess, so check them. Text inside a game's `.pak` files has to be extracted first, from your own copy, with UnrealPak or FModel; the script never looks for decryption keys.
+- **Translating:** `--provider openai` (any OpenAI-compatible API; `--api-base` for others) or `--provider gemini`, with the key in `OPENAI_API_KEY` or `GEMINI_API_KEY`. Lines go out in parallel batches (`--batch`, `--workers`). Every tag and placeholder must come back unchanged or the line is asked for again; lines that still fail are listed, not packed. `--glossary terms.csv` keeps names and terms consistent.
+- **Resuming:** every answer is saved to `translation-cache.sqlite` as it arrives, so a run that's stopped or fails continues where it left off, and rebuilding costs nothing.
+- **Checking:** it always writes `translations.csv`. Machine translation is a draft: have someone who knows the game read it (`--review` stops there), fix lines, then run the script on the edited CSV. Only its blank lines get translated.
+- **What it makes** (`--kind`, which defaults to what the source is):
+  - `overlay`: `fingerprints.json`, for any game.
+  - `unity`: give `--bepinex` and `--autotranslator` (their release zips: BepInEx 5 for Mono games, BepInEx 6 for IL2CPP) and `--font-bundle` (a TextMeshPro font with the glyphs in `compiled/charset.txt`).
+  - `unreal`: the game's `.locres` with plain Arabic in it (`--shape` if the game turned shaping off), packed into `pakchunk99-ArabicLocalization_P.pak` with [repak](https://github.com/trumank/repak) (`--pak-version` to match the game) or UnrealPak (`--packer-path`). The game's font must have Arabic letters too; fonts are game assets this doesn't change.
+- **Output:** `build/arabic-packs/<id>/pack` is the signed pack to add in App settings.
+
 ## Project layout
 
 ```
@@ -187,7 +209,7 @@ src/games/genres.js  genres you can browse by
 desktop/             the Windows app (Electron): window, settings file, installed and running games, games added by hand, app icon
 desktop/localization/ Arabic in games: anti-cheat check, engine detection, signed packs and their files, the subtitle overlay (capture, change detection, OCR helper, fingerprint matching)
 desktop/overlay/     the overlay's two windows: the Arabic subtitles, and the hidden capture
-localization/        the Arabic compiler (Python) for engines that can't shape Arabic
+localization/        the Arabic compiler (Python) for engines that can't shape Arabic, the overlay's fingerprints, and the pack generator (.locres files, game text, translation)
 public/css/          the stylesheet
 public/fonts/        the Manrope and Alexandria fonts (SIL Open Font License)
 public/js/i18n.js    English and Arabic: t() for phrases, tn() for counts; lang/ar.js has the Arabic
@@ -197,7 +219,7 @@ public/js/palette.js the search pop-up
 public/js/preview.js hover previews; discover.js the discovery queue; art-color.js the page tint
 public/js/seasons.js when each season runs, and its look (season-fx.js draws its decoration)
 public/js/views/     one file per page (home, browse, game, library, profile, edit profile, import, community, log in, about & legal, app settings)
-scripts/             developer tools (search-debug, localization-pack, fake-ocr-helper)
+scripts/             developer tools (search-debug, localization-pack, build-arabic-pack, fake-ocr-helper)
 test/                automated tests: npm test
 ```
 

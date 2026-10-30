@@ -1,5 +1,8 @@
 // Talks to the OCR helper (ocr-helper.ps1 on Windows): one long-running
-// process, so PowerShell and Windows' OCR start once rather than per subtitle.
+// process, so PowerShell, the WinRT types and Windows' OCR engine load once
+// (and the OCR model is warmed up) rather than per subtitle. It's started when
+// Play is pressed, while the game is still loading, and is shared by every
+// overlay until a minute after the last one closes.
 // Requests go out as "<id>\t<op>\t<argument>" lines, answers come back as JSON
 // lines. A helper that dies is started again on the next request.
 const fs = require('node:fs');
@@ -41,6 +44,7 @@ function createOcrHelper({ spawnHelper, timeoutMs = 4000, startTimeoutMs = 20000
   let child = null;
   let ready = null;
   let nextId = 1;
+  let starts = 0;
   const waiting = new Map();
 
   function failAll(message) {
@@ -54,6 +58,7 @@ function createOcrHelper({ spawnHelper, timeoutMs = 4000, startTimeoutMs = 20000
   function start() {
     if (!spawnHelper) return Promise.reject(new OcrError('The subtitle overlay needs Windows 10 or newer.'));
     child = spawnHelper();
+    starts++;
     const proc = child;
     let buffered = '';
     let stderr = '';
@@ -75,7 +80,7 @@ function createOcrHelper({ spawnHelper, timeoutMs = 4000, startTimeoutMs = 20000
           }
           if (message.type === 'ready') {
             clearTimeout(timer);
-            resolve({ ocr: Boolean(message.ocr), language: message.language || null });
+            resolve({ ocr: Boolean(message.ocr), language: message.language || null, startMs: message.startMs ?? null, warmupMs: message.warmupMs ?? null });
             continue;
           }
           const entry = waiting.get(message.id);
@@ -121,12 +126,12 @@ function createOcrHelper({ spawnHelper, timeoutMs = 4000, startTimeoutMs = 20000
   }
 
   return {
-    /** Starts the helper if needed; resolves to { ocr, language }. */
+    /** Starts the helper if needed; resolves to { ocr, language, startMs, warmupMs }. */
     ready: () => (child ? ready : start()),
-    /** The lines Windows reads in a BMP image: { lines: [{ text, box }], ms }. */
+    /** The lines Windows reads in a BMP image: { lines: [{ text, box }], ms, decodeMs } (ms includes decoding). */
     async recognize(image) {
       const reply = await request('ocr', Buffer.from(image).toString('base64'));
-      return { lines: Array.isArray(reply.lines) ? reply.lines : [], ms: reply.ms ?? null };
+      return { lines: Array.isArray(reply.lines) ? reply.lines : [], ms: reply.ms ?? null, decodeMs: reply.decodeMs ?? null };
     },
     /** The game's main window: { hwnd, x, y, w, h, minimized } in screen pixels, or null. */
     async findWindow(pids) {
@@ -146,6 +151,10 @@ function createOcrHelper({ spawnHelper, timeoutMs = 4000, startTimeoutMs = 20000
     },
     get running() {
       return Boolean(child);
+    },
+    /** How many times the helper process has been started (it should be once). */
+    get starts() {
+      return starts;
     },
   };
 }
