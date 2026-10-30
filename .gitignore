@@ -6,3 +6,6 @@ dist/
 
 # Thmanyah Sans font files (their license does not allow redistributing them)
 public/fonts/thmanyah/
+
+# Python bytecode (localization compiler)
+__pycache__/

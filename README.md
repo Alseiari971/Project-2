@@ -103,6 +103,50 @@ Every page, menu, message and error has an Arabic translation, with Arabic plura
 
 **Adding a phrase.** Text in the code is written in English and passed through `t()` (from `public/js/i18n.js`). Add its Arabic to `public/js/lang/ar.js`. `npm test` fails if any phrase, or any error message from the server, has no Arabic.
 
+## Arabic subtitles in games (in progress)
+
+Many single-player games have no Arabic, and most game engines can't draw it: they show Arabic as separate letters in reverse order. The Windows app is getting a one-click **Arabic** switch next to Play. What's built so far, in `localization/` and `desktop/localization/`:
+
+**1. The Arabic compiler** (Python, run when a pack is made, not on players' PCs). It turns Arabic translations into text a left-to-right engine shows correctly:
+- letters already joined, using only Arabic Presentation Forms-B (U+FE70–U+FEFF), the glyphs game fonts are built from;
+- lines over 55 characters wrapped first, in reading order, then each line put in screen order on its own, so two-line subtitles read top to bottom;
+- the game's markup kept working: `<color=#fff>…</color>`, Unreal's `</>`, `{0}`, `%s`, `%1$s`, `%PLAYER%`, `[E]`, `[Press E]`, `<sprite=…>`, `<br>` and `\n`.
+
+```bash
+pip install -r localization/requirements.txt
+```
+```bash
+cd localization && python -m arabic_compiler translations.csv --out build/my-game
+```
+
+The input is a CSV with `source` and `arabic` columns (or JSON). It writes the XUnity.AutoTranslator dictionary, a CSV and JSON of the compiled lines (for Unreal `.locres` tools), and `charset.txt`, every glyph the game's Arabic font needs. Tests: `cd localization && python -m unittest discover -s tests`.
+
+**2. Checks before launch** (`desktop/localization/`). Before anything is changed, GameShelf:
+- looks for anti-cheat software in the game's folder (Easy Anti-Cheat, BattlEye, Riot Vanguard, Ricochet, EA Javelin, PunkBuster, GameGuard, XIGNCODE3, Anti-Cheat Expert and others). If any is found, or the check can't finish, the game's files are never changed; only the overlay (coming next) is offered;
+- works out the engine: Unreal Engine 4/5 (`Engine/` plus `Content/Paks/*.pak` or `.utoc`), Unity (`UnityPlayer.dll`, `<Game>_Data/`, Mono or IL2CPP, and its version), or a custom engine (overlay only). Unreal games with signed paks, and Unity games that already have BepInEx mods, also get the overlay only.
+
+**3. Adding and removing the Arabic files.**
+- **Unreal:** a patch pak named like `pakchunk99-ArabicLocalization_P.pak` goes into `Content/Paks`, where the game loads it after its own files.
+- **Unity:** BepInEx and XUnity.AutoTranslator, with the compiled dictionary and an Arabic TextMeshPro fallback font. GameShelf writes the AutoTranslator settings itself: no translation service at all, only the dictionary, so nothing is sent anywhere and lookups are instant.
+
+Files are only ever added, never replaced: if any name is taken, nothing is added. A record is saved before the first file is written, so a crash halfway is undone on the next start. Turning Arabic off removes only files that are still exactly what was added, and folders GameShelf created; anything the player changed or added is left and listed. Nothing is changed while the game is running.
+
+**Packs** come from a folder with `pack.json` (each file's place and SHA-256) and `pack.json.sig`. A Unity pack puts a DLL in the game's folder, so packs must be signed with GameShelf's key, and each file must match its hash. Make the key once, and keep `pack-signing.key` secret, outside the repository:
+
+```bash
+node scripts/localization-pack.js keygen ../gameshelf-keys
+```
+
+Put the contents of `pack-signing.pub` in `desktop/config.json` as `"localizationPackKey"`. Until it's set, no pack is accepted. Then sign each pack:
+
+```bash
+node scripts/localization-pack.js make my-pack --engine unity --id my-game-ar --version 1.0.0 --key ../gameshelf-keys/pack-signing.key --font-bundle gameshelf_arabic_sdf --backend mono
+```
+
+**Before publishing packs:** a translation of a game's text is based on the publisher's work, so a pack needs the publisher's permission, or a community translation the publisher allows. Some games' terms also forbid changing their files even offline, so only make packs for games whose publishers allow mods. Packs never get around encrypted or signed game files.
+
+Still to come: the Arabic switch next to Play, downloading packs, and the overlay for every other game.
+
 ## Project layout
 
 ```
@@ -121,6 +165,8 @@ src/games/local.js   built-in sample catalog (data/games.json)
 src/games/stores.js  "where to buy" store links
 src/games/genres.js  genres you can browse by
 desktop/             the Windows app (Electron): window, settings file, installed and running games, games added by hand, app icon
+desktop/localization/ Arabic in games: anti-cheat check, engine detection, signed packs, adding and removing their files
+localization/        the Arabic compiler (Python) for engines that can't shape Arabic
 public/css/          the stylesheet
 public/fonts/        the Manrope and Alexandria fonts (SIL Open Font License)
 public/js/i18n.js    English and Arabic: t() for phrases, tn() for counts; lang/ar.js has the Arabic
@@ -130,7 +176,7 @@ public/js/palette.js the search pop-up
 public/js/preview.js hover previews; discover.js the discovery queue; art-color.js the page tint
 public/js/seasons.js when each season runs, and its look (season-fx.js draws its decoration)
 public/js/views/     one file per page (home, browse, game, library, profile, edit profile, import, community, log in, about & legal, app settings)
-scripts/             developer tools (search-debug)
+scripts/             developer tools (search-debug, localization-pack)
 test/                automated tests: npm test
 ```
 
