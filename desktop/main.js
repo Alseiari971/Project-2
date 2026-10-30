@@ -384,6 +384,7 @@ function updatePresence(installed) {
     launcher: LAUNCHER_NAMES[game.launcher],
     startedAt: runningSince.get(key),
     image: page?.poster || page?.image || null,
+    badge: config.discordBadgeImage,
     url,
   });
 }

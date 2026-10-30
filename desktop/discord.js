@@ -49,8 +49,8 @@ function createDecoder(onMessage) {
 const clip = (text, max) => String(text).slice(0, max);
 const isHttps = (url) => typeof url === 'string' && url.startsWith('https://') && url.length <= 512;
 
-/** What Discord shows: the game, the launcher, time played, its cover and a link. */
-function buildActivity({ name, launcher, startedAt, image, url }, { showDetails = true } = {}) {
+/** What Discord shows: the game, the launcher, time played, its cover with a GameShelf badge, and a link. */
+function buildActivity({ name, launcher, startedAt, image, badge, url }, { showDetails = true } = {}) {
   const activity = {
     type: 0,
     details: clip(name, 128).padEnd(2, ' '),
@@ -58,7 +58,11 @@ function buildActivity({ name, launcher, startedAt, image, url }, { showDetails 
     timestamps: { start: startedAt },
     instance: false,
   };
-  if (isHttps(image)) activity.assets = { large_image: image, large_text: clip(name, 128).padEnd(2, ' ') };
+  const assets = {};
+  if (isHttps(image)) Object.assign(assets, { large_image: image, large_text: clip(name, 128).padEnd(2, ' ') });
+  // The small round badge on the cover's corner.
+  if (isHttps(badge)) Object.assign(assets, { small_image: badge, small_text: 'GameShelf' });
+  if (Object.keys(assets).length) activity.assets = assets;
   if (isHttps(url)) activity.buttons = [{ label: 'View game', url }];
   if (showDetails) activity.status_display_type = SHOW_DETAILS;
   return activity;
