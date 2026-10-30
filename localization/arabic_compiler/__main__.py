@@ -10,6 +10,9 @@ It writes, into --out:
   compiled.csv                    key, source, compiled (for Unreal .locres tools)
   compiled.json                   {source: compiled}
   charset.txt                     every non-ASCII glyph used, for building the font
+  fingerprints.json               the subtitle overlay's lookup table: fingerprints
+                                  of the English (not the English itself) and the
+                                  Arabic in reading order, for the app to shape
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ import json
 import sys
 from pathlib import Path
 
+from .fingerprint import build_table
 from .rtl import DEFAULT_MAX_LINE, ArabicCompiler, UnshapedTextError, glyphs_needed
 from .xunity import FILE_NAME, write_translations
 
@@ -75,6 +79,10 @@ def main(argv=None) -> int:
     (args.out / 'compiled.json').write_text(
         json.dumps({s: c for _, s, c in compiled}, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
     (args.out / 'charset.txt').write_text(glyphs_needed(c for _, _, c in compiled), encoding='utf-8')
+    table, table_warnings = build_table((source, arabic) for _, source, arabic in rows)
+    for warning in table_warnings:
+        print(f'fingerprints, {warning}', file=sys.stderr)
+    (args.out / 'fingerprints.json').write_text(json.dumps(table, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
 
     print(f'Compiled {len(compiled)} of {len(rows)} lines into {args.out} ({written} in {FILE_NAME}).')
     return 1 if problems else 0

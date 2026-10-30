@@ -24,12 +24,15 @@ class LocalizationError extends Error {
   }
 }
 
-const overlay = (reason) => ({ tier: 'overlay', fileChanges: false, reason });
+// `reason` is the English sentence; `why` is the same as { text, vars }, for
+// the app to translate.
+const fill = (text, vars = {}) => text.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? vars[k] : m));
+const overlay = (text, vars) => ({ tier: 'overlay', fileChanges: false, reason: fill(text, vars), why: { text, vars: vars || {} } });
 
 /**
  * Looks at a game before anything is changed. Returns { root, engine,
- * antiCheat, tier, fileChanges, reason }; `reason` says why only the overlay
- * is possible. `ownMods` is true when the BepInEx found is GameShelf's own.
+ * antiCheat, tier, fileChanges, reason, why }; `reason` says why only the
+ * overlay is possible. `ownMods` is true when the BepInEx found is GameShelf's own.
  */
 async function preflight(root, { steamAppId, ownMods = false, maxEntries } = {}) {
   const engine = await fingerprint(root);
@@ -38,21 +41,21 @@ async function preflight(root, { steamAppId, ownMods = false, maxEntries } = {})
 
   if (antiCheat.found.length) {
     const names = [...new Set(antiCheat.found.map((a) => a.name))].join(', ');
-    return { ...base, ...overlay(`This game uses ${names}. To keep your account safe, GameShelf won't change its files.`) };
+    return { ...base, ...overlay('This game uses {names}. To keep your account safe, GameShelf won\'t change its files.', { names }) };
   }
   if (!antiCheat.complete) {
     return { ...base, ...overlay('GameShelf couldn\'t check all of this game\'s files for anti-cheat software, so it won\'t change them.') };
   }
   if (engine.engine === 'unreal') {
     if (engine.unreal.signedPaks) return { ...base, ...overlay('This game only loads files signed by its developer.') };
-    return { ...base, tier: 'unreal-pak', fileChanges: true, reason: null };
+    return { ...base, tier: 'unreal-pak', fileChanges: true, reason: null, why: null };
   }
   if (engine.engine === 'unity') {
     if (engine.unity.bepinex && !ownMods) return { ...base, ...overlay('This game already has BepInEx mods. GameShelf leaves your mods as they are.') };
     if (engine.unity.arch && engine.unity.arch !== 'x64' && engine.unity.arch !== 'x86') {
-      return { ...base, ...overlay(`BepInEx doesn't run on ${engine.unity.arch} builds of Unity games.`) };
+      return { ...base, ...overlay('BepInEx doesn\'t run on {arch} builds of Unity games.', { arch: engine.unity.arch }) };
     }
-    return { ...base, tier: 'unity-bepinex', fileChanges: true, reason: null };
+    return { ...base, tier: 'unity-bepinex', fileChanges: true, reason: null, why: null };
   }
   return { ...base, ...overlay('This game\'s engine can\'t take added text, so the overlay is used.') };
 }
@@ -124,4 +127,4 @@ function createLocalization({ dataDir }) {
   };
 }
 
-module.exports = { preflight, enableArabic, disableArabic, createLocalization, LocalizationError, StageError };
+module.exports = { preflight, enableArabic, disableArabic, createLocalization, LocalizationError, StageError, fill };

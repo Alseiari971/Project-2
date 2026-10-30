@@ -1,6 +1,6 @@
 import { html, bdi, ltr, th, api, mount, state, year, formatDate, STATUS_LABELS, toast, hueFor, onLeave, rememberGame, refreshLibrary, gameHref, scrollEdges, scrollRow } from '../lib.js';
 import { gameTile, row, enableRows, userChip, statusBadge, starInput, wireStarInput, starValue, formatHours } from '../components.js';
-import { desktop, playButton, wireLaunchButtons } from '../desktop.js';
+import { desktop, playButton, arabicToggle, wireLaunchButtons } from '../desktop.js';
 import { icon } from '../icons.js';
 import { t, tn, locale, isArabic } from '../i18n.js';
 
@@ -419,7 +419,7 @@ export async function gameView(app, id, params) {
     .then((found) => {
       const slot = document.getElementById('play-slot');
       if (!found || !slot) return;
-      mount(slot, playButton(found, game.name));
+      mount(slot, html`${playButton(found, game.name)}${arabicToggle(found)}`);
       wireLaunchButtons(slot);
       document.getElementById('buy-btn')?.remove();
     })

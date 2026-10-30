@@ -1,8 +1,9 @@
 // Runs before GameShelf's own scripts in the desktop window. It marks the page
 // as the desktop app (for the title bar styles) and gives the App settings page
 // a narrow way to read and save the API keys, the Play buttons a way to find
-// and start installed games, and the window buttons a way to minimize, maximize
-// and close the window. Nothing else from the computer is exposed.
+// and start installed games (and switch Arabic subtitles on), and the window
+// buttons a way to minimize, maximize and close the window. Nothing else from
+// the computer is exposed.
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('gameshelfDesktop', {
@@ -26,6 +27,12 @@ contextBridge.exposeInMainWorld('gameshelfDesktop', {
   addGame: (details) => ipcRenderer.invoke('custom:add', details),
   addedGames: () => ipcRenderer.invoke('custom:list'),
   removeAddedGame: (key) => ipcRenderer.invoke('custom:remove', key),
+  // The "Arabic subtitles" switch next to Play, and the Arabic packs.
+  arabicInfo: (key) => ipcRenderer.invoke('arabic:info', key),
+  setArabic: (key, on) => ipcRenderer.invoke('arabic:set', key, on),
+  arabicPacks: () => ipcRenderer.invoke('arabic:packs'),
+  addArabicPack: () => ipcRenderer.invoke('arabic:add-pack'),
+  removeArabicPack: (id) => ipcRenderer.invoke('arabic:remove-pack', id),
   // The minimize, maximize and close buttons the page draws on Windows and Linux.
   platform: process.platform,
   minimizeWindow: () => ipcRenderer.invoke('window:minimize'),

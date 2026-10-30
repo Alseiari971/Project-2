@@ -6,13 +6,16 @@ const fs = require('node:fs');
 const http = require('node:http');
 const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
-const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, shell, desktopCapturer, screen } = require('electron');
 const { SETTINGS_KEYS, readSettings, writeSettings } = require('./settings');
 const { LAUNCHER_NAMES, scanInstalledGames } = require('./installed');
 const { processesOf, listProcesses, stopProcesses } = require('./processes');
 const { createCustomGames, suggestName } = require('./custom-games');
 const { getGpuPreference, setGpuPreference, pickMainProgram, createProgramStore, gogUninstaller } = require('./game-options');
 const { createDiscordPresence } = require('./discord');
+const { createArabicService } = require('./localization/service');
+const { createOcrHelper, defaultSpawn } = require('./localization/ocr');
+const { createOverlayManager } = require('./localization/overlay-manager');
 const config = require('./config.json');
 const { normalizeTitle } = require('../src/text');
 
@@ -42,7 +45,11 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on('second-instance', () => {
-    if (!win) return;
+    // The window may be closed while Arabic subtitles keep the app running for a game.
+    if (!win) {
+      if (origin) createWindow('/');
+      return;
+    }
     if (win.isMinimized()) win.restore();
     win.focus();
   });
@@ -53,7 +60,11 @@ if (!app.requestSingleInstanceLock()) {
   });
   app.on('window-all-closed', () => app.quit());
   // Closing the connection clears the activity on Discord.
-  app.on('will-quit', () => presence?.close());
+  app.on('will-quit', () => {
+    presence?.close();
+    overlays?.stopAll();
+    ocrHelper.close();
+  });
 }
 
 function applySettings(values) {
@@ -269,6 +280,33 @@ async function findGamePages(installed) {
   }
 }
 
+// ---- Arabic subtitles ---------------------------------------------------------------
+
+// Packs are signed with GameShelf's key (see scripts/localization-pack.js);
+// its public half goes in config.json. When developing, GAMESHELF_PACK_KEY_FILE
+// can point at a test key, and GAMESHELF_OCR_HELPER at a stand-in OCR helper.
+const packKey = config.localizationPackKey
+  || (!app.isPackaged && process.env.GAMESHELF_PACK_KEY_FILE ? fs.readFileSync(process.env.GAMESHELF_PACK_KEY_FILE, 'utf8') : null);
+const devOcrHelper = !app.isPackaged ? process.env.GAMESHELF_OCR_HELPER : null;
+const ocrHelper = createOcrHelper({ spawnHelper: defaultSpawn({ dataDir, devHelper: devOcrHelper }) });
+const arabic = createArabicService({ dataDir, publicKey: packKey, overlayAvailable: process.platform === 'win32' || Boolean(devOcrHelper) });
+let overlays = null; // created once the app is ready
+
+const arabicGame = (g) => ({ key: g.key, dir: g.dir, steamAppId: g.steamAppId || null, gameId: pageOf(g)?.id || null });
+
+function startOverlay(key, game, ready) {
+  overlays.start(key, {
+    name: pageOf(game)?.name || game.name,
+    matcher: ready.matcher,
+    profile: ready.profile,
+    getPids: () => running.get(key),
+    // Until the game's processes show up, look for them every second instead of every few.
+    refresh: () => {
+      if (Date.now() - lastCheck > RECHECK_MS) checkRunning();
+    },
+  });
+}
+
 // Games added by hand carry the GameShelf game picked when adding them.
 const pageOf = (g) => (g.launcher === 'custom' ? g.game : matches.get(g.key));
 const describe = (g) => ({ key: g.key, launcher: LAUNCHER_NAMES[g.launcher] });
@@ -321,6 +359,7 @@ function checkRunning() {
         if (!game.exe) programs.remember(game.key, pickMainProgram(own.map((p) => p.path)));
       }
       running = now;
+      overlays?.sync(running);
       for (const key of now.keys()) if (!runningSince.has(key)) runningSince.set(key, Date.now());
       for (const key of runningSince.keys()) if (!now.has(key)) runningSince.delete(key);
       updatePresence(installed);
@@ -456,13 +495,18 @@ function registerIpc() {
     return game ? describe(game) : null;
   });
   // Only games found by the scan or added by hand can be started; the page passes just the key.
+  // With Arabic on, the patch goes in (or the overlay's table loads) before the
+  // game starts; if that fails the game still starts, in English, and the page says why.
   handle('installed:launch', async (key) => {
     const game = await installedGame(key);
-    if (running.has(key)) return;
+    if (running.has(key)) return null;
+    const ready = await arabic.prepareLaunch(arabicGame(game)).catch((err) => ({ mode: 'error', ok: false, error: { text: err.message, vars: {} } }));
     await launch(game);
     starting.set(key, Date.now());
+    if (ready.mode === 'overlay' && ready.ok) startOverlay(key, game, ready);
     sendStates();
     schedulePoll();
+    return { arabic: { mode: ready.mode, ok: ready.ok, error: ready.error || null } };
   });
   handle('installed:stop', async (key) => {
     starting.delete(key);
@@ -557,6 +601,35 @@ function registerIpc() {
     customGames.remove(key);
   });
 
+  // The "Arabic subtitles" switch next to Play.
+  handle('arabic:info', async (key) => {
+    const game = await installedGame(key);
+    return { ...(await arabic.info(arabicGame(game))), overlayRunning: Boolean(overlays?.has(key)), overlay: overlays?.status(key) || null };
+  });
+  handle('arabic:set', async (key, on) => {
+    const game = await installedGame(key);
+    const isRunning = async () => {
+      await checkRunning();
+      return running.has(key);
+    };
+    const result = await arabic.set(arabicGame(game), Boolean(on), { isRunning });
+    // The overlay can come and go while the game runs.
+    if (!on) overlays?.stop(key);
+    else if (result.info.mode === 'overlay' && !result.error && running.has(key) && !overlays.has(key)) {
+      const ready = await arabic.prepareLaunch(arabicGame(game));
+      if (ready.ok && ready.mode === 'overlay') startOverlay(key, game, ready);
+    }
+    return { info: { ...result.info, overlayRunning: Boolean(overlays?.has(key)) }, error: result.error };
+  });
+  handle('arabic:packs', async () => ({ ready: Boolean(packKey), packs: (await arabic.packs.list()).map(({ dir, ...p }) => p) }));
+  handle('arabic:add-pack', async () => {
+    const result = await dialog.showOpenDialog(win, { title: 'Choose an Arabic pack folder', buttonLabel: 'Add pack', properties: ['openDirectory'] });
+    const folder = result.filePaths[0];
+    if (result.canceled || !folder) return null;
+    return arabic.packs.add(folder);
+  });
+  handle('arabic:remove-pack', async (id) => arabic.packs.remove(String(id)));
+
   handle('data-folder:open', async () => {
     await shell.openPath(app.isPackaged ? dataDir : path.join(__dirname, '..', 'data'));
   });
@@ -585,6 +658,9 @@ async function start() {
   scannedGames();
   await startServer();
   registerIpc();
+  overlays = createOverlayManager({ BrowserWindow, desktopCapturer, screen, ipcMain, helper: ocrHelper });
+  // Takes back any Arabic patch that was cut short by a crash.
+  arabic.recover().catch((err) => console.error('Could not tidy up Arabic patches:', err.message));
   if (process.platform !== 'darwin') Menu.setApplicationMenu(null);
   // The first time the installed app opens, it starts on App settings to add the free keys.
   createWindow(firstRun && app.isPackaged ? '/#/app-settings?welcome=1' : '/');

@@ -1,0 +1,394 @@
+{
+ "vectors": [
+  {
+   "text": "We must reach the castle before nightfall.",
+   "normalized": "we must reach the castle before nlghtfall",
+   "slots": 0,
+   "length": 35,
+   "simhash": "c2eb2819547c1b0a",
+   "grams": [
+    498,
+    4876,
+    5580,
+    9571,
+    10192,
+    11784,
+    12640,
+    12665,
+    12824,
+    14446,
+    14981,
+    15661,
+    17010,
+    19610,
+    21818,
+    23946,
+    24816,
+    26854,
+    29903,
+    32943,
+    39923,
+    40462,
+    43848,
+    44903,
+    48387,
+    49924,
+    52114,
+    52407,
+    53779,
+    54042,
+    54652,
+    55952,
+    55972,
+    61196,
+    61403
+   ]
+  },
+  {
+   "text": "I'll be RIGHT back!",
+   "normalized": "lll be rlght back",
+   "slots": 0,
+   "length": 14,
+   "simhash": "122b4019153d4e84",
+   "grams": [
+    814,
+    11421,
+    13921,
+    18693,
+    19563,
+    19610,
+    30338,
+    49924,
+    51914,
+    53153,
+    56045,
+    57332,
+    57334,
+    61206
+   ]
+  },
+  {
+   "text": "Café — naïve façade",
+   "normalized": "cafe nalve facade",
+   "slots": 0,
+   "length": 15,
+   "simhash": "e7a2d8190477eae5",
+   "grams": [
+    3457,
+    13652,
+    19185,
+    21746,
+    27398,
+    29829,
+    31846,
+    32948,
+    34807,
+    35677,
+    40553,
+    45870,
+    59399,
+    60322,
+    64241
+   ]
+  },
+  {
+   "text": "Hello, {0}! Welcome to <color=#ff0>Riverwood</color>.",
+   "normalized": "hello welcome to rlverwood",
+   "slots": 1,
+   "length": 23,
+   "simhash": "12189b1921ef4dae",
+   "grams": [
+    5311,
+    6053,
+    6981,
+    7416,
+    8233,
+    18692,
+    19998,
+    22153,
+    26078,
+    26570,
+    26986,
+    28513,
+    31403,
+    31846,
+    35118,
+    36098,
+    39358,
+    42968,
+    43938,
+    47701,
+    50807,
+    55475,
+    62940
+   ]
+  },
+  {
+   "text": "Press [E] to open the gate.",
+   "normalized": "press to open the gate",
+   "slots": 1,
+   "length": 18,
+   "simhash": "42e182194466dd31",
+   "grams": [
+    11273,
+    16663,
+    23511,
+    27450,
+    30485,
+    31203,
+    38320,
+    39153,
+    39971,
+    42156,
+    42297,
+    54306,
+    54652,
+    54766,
+    55811,
+    56477,
+    60870,
+    64341
+   ]
+  },
+  {
+   "text": "OK",
+   "normalized": "ok",
+   "slots": 0,
+   "length": 2,
+   "simhash": "0208491801180131",
+   "grams": [
+    10737,
+    49971
+   ]
+  },
+  {
+   "text": "a",
+   "normalized": "a",
+   "slots": 0,
+   "length": 1,
+   "simhash": "c37f221a1310d9cc",
+   "grams": [
+    55756
+   ]
+  },
+  {
+   "text": "The 10 modern vvorkers",
+   "normalized": "the lo modem workers",
+   "slots": 0,
+   "length": 17,
+   "simhash": "0ac85019314767b5",
+   "grams": [
+    3811,
+    8721,
+    9117,
+    11953,
+    16082,
+    17203,
+    22134,
+    22157,
+    25984,
+    26565,
+    30146,
+    35118,
+    46013,
+    54652,
+    57215,
+    58155,
+    63357
+   ]
+  },
+  {
+   "text": "Line one\nline two",
+   "normalized": "llne one llne two",
+   "slots": 0,
+   "length": 14,
+   "simhash": "0238d21921711689",
+   "grams": [
+    4753,
+    7416,
+    20433,
+    23727,
+    30029,
+    30414,
+    38665,
+    44713,
+    45592,
+    49072,
+    50377,
+    53153
+   ]
+  },
+  {
+   "text": "  ",
+   "normalized": "",
+   "slots": 0,
+   "length": 0,
+   "simhash": "0000000000000000",
+   "grams": []
+  },
+  {
+   "text": "Ünïcödé ﬁnal fig. ¹²³",
+   "normalized": "unlcode flnal flg l23",
+   "slots": 0,
+   "length": 18,
+   "simhash": "526e9b193d93b130",
+   "grams": [
+    11953,
+    12961,
+    13652,
+    14380,
+    23033,
+    23222,
+    32154,
+    35170,
+    38210,
+    41299,
+    42468,
+    44344,
+    45338,
+    47701,
+    48184,
+    53362,
+    58572,
+    59192
+   ]
+  },
+  {
+   "text": "rnrn|||000111",
+   "normalized": "mmlllooolll",
+   "slots": 0,
+   "length": 11,
+   "simhash": "120a631915b84419",
+   "grams": [
+    8228,
+    9533,
+    18073,
+    19563,
+    19998,
+    23275,
+    33081,
+    36366,
+    50320,
+    53779
+   ]
+  }
+ ],
+ "table": {
+  "format": 1,
+  "kind": "gameshelf-overlay-fingerprints",
+  "normalization": 1,
+  "entries": [
+   [
+    "122b4019153d4e84",
+    14,
+    "LgOdLGE2BUlrTJpMgnYEw8rKoc/t2vTf9t8W7w==",
+    "سأعود حالًا.",
+    0
+   ],
+   [
+    "430158197464b54c",
+    17,
+    "0AJ4DQguzD96V+9XTGxJcM6E4Ypck1yhkrUcu3zVp/BA8Q==",
+    "لا تدعهم يرونك.",
+    0
+   ],
+   [
+    "42e182194466dd31",
+    18,
+    "CSwXQddbOmsVd+N5sJXxmCOcrKQ5pSLUfNXu1QPandzG7VX7",
+    "اضغط [E] لفتح البوابة.",
+    1
+   ],
+   [
+    "12189b1921ef4dae",
+    23,
+    "vxSlF0Ub+BwpIARJHk6JVt5lymdqaWFvq3pmfC6JAo2+mdinoqtVunfGs9jc9Q==",
+    "مرحبًا يا …! أهلًا بك في ريفروود.",
+    1
+   ],
+   [
+    "c2ea2a1954782140",
+    31,
+    "8gEqCgwTzBVcIekjYyVkJdAneTFuOIU6HUDsQ2tMAF3wYOZoV2vPdFN3wZHzm2evA70cwpLLt8x81ZDam+Y=",
+    "يجب أن نصل إلى القرية قبل الفجر.",
+    0
+   ],
+   [
+    "c2eb2819547c1b0a",
+    35,
+    "8gEME8wVYyXQJwguYDF5MRgybjiFOi09ckKaTDpVil3wYOZoz3SvgPObDp5Iq2evA70Ew5LLt8wT0hrTfNWQ2qTaDO/b7w==",
+    "يجب أن نصل إلى القلعة قبل حلول الليل.",
+    0
+   ],
+   [
+    "c27d8a19656d966c",
+    52,
+    "hAIuA0EEZRO/FPsV+BwpINswdTaISlxON1O+Vs5ZVmLMY5FmxWedakV3gXhmfPx+0IKPh6aJAo0Kjx2YXJponkqfO6FToeysZ7RGvGS/d8Yizf/PfNWz2A3lLPcq+lX7a/4=",
+    "الجسر مدمر. علينا أن نجد طريقًا آخر لعبور النهر.",
+    0
+   ]
+  ]
+ },
+ "lookups": [
+  {
+   "query": "We rnust reach the castle bef0re nightfall",
+   "arabic": "يجب أن نصل إلى القلعة قبل حلول الليل.",
+   "score": 1.0
+  },
+  {
+   "query": "Wemustreachthecastlebeforenightfall.",
+   "arabic": "يجب أن نصل إلى القلعة قبل حلول الليل.",
+   "score": 1.0
+  },
+  {
+   "query": "l'll be right back",
+   "arabic": "سأعود حالًا.",
+   "score": 1.0
+  },
+  {
+   "query": "WE MUST REACH THE CASTLE\nBEFORE NIGHTFALL",
+   "arabic": "يجب أن نصل إلى القلعة قبل حلول الليل.",
+   "score": 1.0
+  },
+  {
+   "query": "Hello, Arthur! Welcome to Riverwood.",
+   "arabic": "مرحبًا يا …! أهلًا بك في ريفروود.",
+   "score": 0.913043
+  },
+  {
+   "query": "Press E to open the gate",
+   "arabic": "اضغط [E] لفتح البوابة.",
+   "score": 0.888889
+  },
+  {
+   "query": "We must reach the village before dawn",
+   "arabic": "يجب أن نصل إلى القرية قبل الفجر.",
+   "score": 1.0
+  },
+  {
+   "query": "The bridge is 0ut. We'll have to fínd another vvay across the rlver.",
+   "arabic": "الجسر مدمر. علينا أن نجد طريقًا آخر لعبور النهر.",
+   "score": 1.0
+  },
+  {
+   "query": "Dont let them see you",
+   "arabic": "لا تدعهم يرونك.",
+   "score": 1.0
+  },
+  {
+   "query": "Completely different text here",
+   "arabic": null,
+   "score": null
+  },
+  {
+   "query": "",
+   "arabic": null,
+   "score": null
+  },
+  {
+   "query": "Hello!",
+   "arabic": null,
+   "score": null
+  }
+ ]
+}

@@ -65,6 +65,12 @@ export async function appSettingsView(app, params) {
       </section>
 
       <section class="panel">
+        <h2>${t('Arabic subtitle packs')}</h2>
+        <div id="arabic-packs"></div>
+        <button class="btn btn-quiet" type="button" id="add-pack">${t('Add a pack')}</button>
+      </section>
+
+      <section class="panel">
         <h2>${t('Your data')}</h2>
         <p class="muted">${t('Accounts, game lists and profiles you make in the app are saved on this computer only. Your keys stay here too and are only sent to IGDB and Steam.')}</p>
         ${dataDir ? html`<p class="muted small">${t('Folder:')} <code dir="ltr">${dataDir}</code></p>` : ''}
@@ -96,6 +102,38 @@ export async function appSettingsView(app, params) {
   };
   document.getElementById('add-game').addEventListener('click', () => addGame({ onAdded: showAdded }));
   showAdded();
+
+  // Signed packs that give games Arabic: a patch the game loads, or the overlay.
+  const KINDS = { unreal: 'Native patch (Unreal)', unity: 'Native patch (Unity)', overlay: 'Accessibility overlay' };
+  const showPacks = async () => {
+    const { ready, packs } = await desktop.arabicPacks();
+    const el = document.getElementById('arabic-packs');
+    if (!el) return;
+    document.getElementById('add-pack').hidden = !ready;
+    mount(el, !ready
+      ? html`<p class="muted">${t("Arabic packs aren't set up in this copy of GameShelf.")}</p>`
+      : packs.length
+        ? html`<div class="added-list">${packs.map((p) => html`
+            <div class="added-row">
+              <div><strong>${bdi(p.title || p.id)}</strong><span class="muted small">${t(KINDS[p.engine])} · ${t('version {version}', { version: p.version })}</span></div>
+              <button class="btn btn-sm btn-quiet" type="button" data-remove-pack="${p.id}">${t('Remove')}</button>
+            </div>`)}</div>`
+        : html`<p class="muted">${t('A pack gives a game Arabic subtitles. Packs are checked before they\'re added, and only packs signed for GameShelf are accepted.')}</p>`);
+    el.querySelectorAll('[data-remove-pack]').forEach((b) => b.addEventListener('click', async () => {
+      await desktop.removeArabicPack(b.dataset.removePack);
+      showPacks();
+    }));
+  };
+  document.getElementById('add-pack').addEventListener('click', async () => {
+    try {
+      const added = await desktop.addArabicPack();
+      if (added) toast(t('Added {name}', { name: added.title || added.id }));
+    } catch (err) {
+      toast(t(err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')), { error: true });
+    }
+    showPacks();
+  });
+  showPacks();
   document.getElementById('settings-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const button = e.submitter;

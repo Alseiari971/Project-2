@@ -28,6 +28,57 @@ export function playButton({ key, launcher }, name) {
     </div>`;
 }
 
+/**
+ * The "Arabic subtitles" switch beside Play. Its note says how Arabic would
+ * come: a patch the game loads (Native patch), subtitles drawn over the game
+ * (Accessibility overlay), or not at all (Unavailable, with the reason on hover).
+ */
+export function arabicToggle({ key }) {
+  return html`
+    <button type="button" class="arabic-toggle is-checking" data-arabic="${key}" role="switch" aria-checked="false" disabled>
+      <span class="arabic-mark" aria-hidden="true">ع</span>
+      <span class="arabic-label"><strong>${t('Arabic subtitles')}</strong><small>${t('Checking…')}</small></span>
+      <span class="switch" aria-hidden="true"><span></span></span>
+    </button>`;
+}
+
+const MODE_LABELS = { native: 'Native patch', overlay: 'Accessibility overlay', unavailable: 'Unavailable' };
+const explain = (message) => (message ? t(message.text, message.vars) : '');
+
+function paintArabic(button, info) {
+  const mode = info?.mode || 'unavailable';
+  button.classList.remove('is-checking', 'mode-native', 'mode-overlay', 'mode-unavailable');
+  button.classList.add(`mode-${mode}`);
+  button.classList.toggle('is-on', Boolean(info?.enabled));
+  button.setAttribute('aria-checked', String(Boolean(info?.enabled)));
+  button.disabled = mode === 'unavailable';
+  mount(button.querySelector('small'), html`${t(MODE_LABELS[mode])}`);
+  const notes = mode === 'unavailable'
+    ? [explain(info?.why)]
+    : [t(mode === 'native' ? 'Adds an Arabic patch the game loads. Turning it off takes it out.' : 'Shows Arabic over the game, read from its English subtitles. The game isn\'t changed.'), explain(info?.detail)];
+  button.title = notes.filter(Boolean).join('\n');
+}
+
+function wireArabic(button) {
+  const key = button.dataset.arabic;
+  desktop.arabicInfo(key).then((info) => paintArabic(button, info)).catch(() => paintArabic(button, null));
+  button.addEventListener('click', async () => {
+    if (button.dataset.busy || button.disabled) return;
+    button.dataset.busy = '1';
+    const on = button.getAttribute('aria-checked') !== 'true';
+    try {
+      const { info, error } = await desktop.setArabic(key, on);
+      paintArabic(button, info);
+      if (error) toast(explain(error), { error: info.enabled !== on }); // red only when it didn't switch
+      else toast(t(on ? 'Arabic subtitles on' : 'Arabic subtitles off'));
+    } catch (err) {
+      toast(errorText(err), { error: true });
+    } finally {
+      delete button.dataset.busy;
+    }
+  });
+}
+
 /** A game on the Home row, with a round Play button on its art. */
 export function installedTile({ key, launcher, game }) {
   const tile = game.id
@@ -84,8 +135,15 @@ export function wireLaunchButtons(root, { onAdded } = {}) {
           await desktop.stop(key);
           toast(t('Closed {name}', { name: button.dataset.name }));
         } else {
-          await desktop.launch(key);
-          toast(t('Starting {name}…', { name: button.dataset.name }));
+          const started = await desktop.launch(key);
+          const arabic = started?.arabic;
+          if (arabic && !arabic.ok && arabic.mode !== 'off') {
+            toast(t('Starting {name} in English: {reason}', { name: button.dataset.name, reason: explain(arabic.error) }), { error: true });
+          } else if (arabic?.mode === 'native' || arabic?.mode === 'overlay') {
+            toast(t('Starting {name} with Arabic subtitles…', { name: button.dataset.name }));
+          } else {
+            toast(t('Starting {name}…', { name: button.dataset.name }));
+          }
         }
       } catch (err) {
         toast(errorText(err), { error: true });
@@ -95,6 +153,7 @@ export function wireLaunchButtons(root, { onAdded } = {}) {
     });
   });
   root.querySelectorAll('[data-options]').forEach(wireOptions);
+  root.querySelectorAll('[data-arabic]').forEach(wireArabic);
   root.querySelectorAll('[data-add-game]').forEach((button) => button.addEventListener('click', () => addGame({ onAdded })));
   // Catches games started outside GameShelf, from Steam or a shortcut.
   desktop.gameStates().then((next) => {

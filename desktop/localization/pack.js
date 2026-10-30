@@ -6,7 +6,10 @@
 //
 //   {
 //     "format": 1, "id": "some-game-ar", "version": "1.0.0", "language": "ar",
-//     "engine": "unreal" | "unity",
+//     "title": "Some Game in Arabic",           (optional, shown in App settings)
+//     "engine": "unreal" | "unity" | "overlay",
+//     "game": { "steamAppId": 1245620, "gameId": "elden-ring" },   (which game it's for)
+//     "overlay": { "region": [0, 0.78, 1, 0.22], "textLuma": 170, "darkText": false, "threshold": 0.72 },
 //     "requires": { "arch": "x64", "unityBackend": "mono", "unityVersion": "2019.4" },
 //     "fontBundle": "gameshelf_arabic_sdf",      (Unity: TextMeshPro font, in the game folder)
 //     "uguiFont": "Arial",                       (Unity: optional font for older UI text)
@@ -20,6 +23,7 @@
 //   after the game's own, so they win without replacing anything).
 // - Unity: BepInEx/ and dotnet/ (the mod loader), doorstop's files and the font
 //   bundle. The XUnity.AutoTranslator settings are written by GameShelf itself.
+// - Overlay: only fingerprints.json, which never goes into the game's folder.
 const fs = require('node:fs/promises');
 const crypto = require('node:crypto');
 const path = require('node:path');
@@ -59,6 +63,10 @@ function safeParts(value, what) {
 
 function checkTarget(manifest, parts, target) {
   const lower = parts.map((p) => p.toLowerCase());
+  if (manifest.engine === 'overlay') {
+    if (parts.length !== 1 || lower[0] !== 'fingerprints.json') throw new PackError(`"${target}" isn't allowed: overlay packs hold only fingerprints.json.`);
+    return;
+  }
   if (manifest.engine === 'unreal') {
     if (parts.length !== 1 || !/_p\.(pak|utoc|ucas)$/i.test(parts[0])) {
       throw new PackError(`"${target}" isn't allowed: Unreal packs may only add .pak, .utoc or .ucas files ending in _P.`);
@@ -77,7 +85,26 @@ function checkManifest(manifest) {
   for (const key of ['id', 'version']) {
     if (typeof manifest[key] !== 'string' || !/^[\w.\-]{1,80}$/.test(manifest[key])) throw new PackError(`The pack's ${key} is missing or invalid.`);
   }
-  if (!['unreal', 'unity'].includes(manifest.engine)) throw new PackError('The pack is for an engine GameShelf doesn\'t support.');
+  if (!['unreal', 'unity', 'overlay'].includes(manifest.engine)) throw new PackError('The pack is for an engine GameShelf doesn\'t support.');
+  if (manifest.title !== undefined && (typeof manifest.title !== 'string' || manifest.title.length > 120)) throw new PackError('The pack\'s title is invalid.');
+  const { game, overlay } = manifest;
+  if (game !== undefined) {
+    const steamOk = game?.steamAppId === undefined || (Number.isInteger(game.steamAppId) && game.steamAppId > 0);
+    const idOk = game?.gameId === undefined || (typeof game.gameId === 'string' && /^[\w.\-]{1,120}$/.test(game.gameId));
+    if (!game || typeof game !== 'object' || !steamOk || !idOk || (game.steamAppId === undefined && game.gameId === undefined)) {
+      throw new PackError('The pack\'s game must have a Steam app ID or a GameShelf game ID.');
+    }
+  }
+  if (overlay !== undefined) {
+    const share = (n) => typeof n === 'number' && n >= 0 && n <= 1;
+    const region = overlay?.region;
+    const regionOk = region === undefined || (Array.isArray(region) && region.length === 4 && region.every(share)
+      && region[2] > 0 && region[3] > 0 && region[0] + region[2] <= 1.0001 && region[1] + region[3] <= 1.0001);
+    const lumaOk = overlay?.textLuma === undefined || (Number.isInteger(overlay.textLuma) && overlay.textLuma >= 30 && overlay.textLuma <= 250);
+    const thresholdOk = overlay?.threshold === undefined || (typeof overlay.threshold === 'number' && overlay.threshold >= 0.5 && overlay.threshold <= 0.99);
+    const darkOk = overlay?.darkText === undefined || typeof overlay.darkText === 'boolean';
+    if (!overlay || typeof overlay !== 'object' || !regionOk || !lumaOk || !thresholdOk || !darkOk) throw new PackError('The pack\'s overlay settings are invalid.');
+  }
   if (manifest.fontBundle !== undefined && !/^[\w.\-]{1,80}$/.test(manifest.fontBundle)) throw new PackError('The pack\'s font bundle name is invalid.');
   if (!Array.isArray(manifest.files) || !manifest.files.length || manifest.files.length > MAX_FILES) {
     throw new PackError('The pack lists no files, or too many.');

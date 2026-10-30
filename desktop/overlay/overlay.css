@@ -1,0 +1,52 @@
+/* Arabic subtitles over a game. Thmanyah Sans when it's installed, else
+   Alexandria (bundled with GameShelf). */
+@font-face {
+  font-family: "Thmanyah Local";
+  src: local("Thmanyah Sans Bold"), local("ThmanyahSans-Bold");
+  font-weight: 700;
+}
+@font-face {
+  font-family: "Alexandria";
+  src: url("../../public/fonts/alexandria-arabic.woff2") format("woff2");
+  font-weight: 300 800;
+}
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+}
+
+.subtitle {
+  position: absolute;
+  /* Where the English was (set from OCR), or near the bottom. */
+  left: var(--center-x, 50%);
+  bottom: var(--bottom, 7%);
+  transform: translateX(-50%);
+  min-width: var(--min-width, 0);
+  max-width: 86%;
+  padding: 0.35em 0.9em;
+  border-radius: 0.45em;
+  background: rgba(8, 8, 10, 0.86);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06);
+  opacity: 0;
+  transition: opacity 80ms linear;
+}
+.subtitle.on { opacity: 1; }
+.subtitle[hidden] { display: none; }
+
+.subtitle p {
+  margin: 0;
+  color: #fff;
+  font: 700 var(--size, 30px)/1.5 "Thmanyah Local", "Alexandria", "Segoe UI", Tahoma, sans-serif;
+  text-align: center;
+  white-space: pre-line;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+}
+/* Arabic already shaped and put in screen order (Presentation Forms) must not
+   be reordered again: draw it left to right exactly as it comes. */
+.subtitle p.forms {
+  direction: ltr;
+  unicode-bidi: bidi-override;
+}

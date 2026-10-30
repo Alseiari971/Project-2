@@ -6,11 +6,14 @@
 //     commit it) and pack-signing.pub (goes in desktop/config.json as
 //     "localizationPackKey").
 //
-//   node scripts/localization-pack.js make <pack folder> --engine unreal|unity --id <id> --version <x.y.z>
-//        --key pack-signing.key [--font-bundle <name>] [--backend mono|il2cpp] [--unity <version>] [--arch x64]
+//   node scripts/localization-pack.js make <pack folder> --engine unreal|unity|overlay --id <id> --version <x.y.z>
+//        --key pack-signing.key (--steam-app-id <n> | --game-id <GameShelf id>) [--title "..."]
+//        [--font-bundle <name>] [--backend mono|il2cpp] [--unity <version>] [--arch x64]
+//        [--region x,y,w,h] [--text-luma 170] [--dark-text] [--threshold 0.72]
 //     Lists every file under <pack folder>/payload (each lands at the same
 //     path in the game: in Content/Paks for Unreal, in the game folder for
-//     Unity), writes pack.json and signs it.
+//     Unity; an overlay pack holds just fingerprints.json from the Arabic
+//     compiler), writes pack.json and signs it.
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -29,7 +32,9 @@ async function payloadFiles(dir, base = dir) {
 function flags(args) {
   const out = {};
   for (let i = 0; i < args.length; i++) {
-    if (args[i].startsWith('--')) out[args[i].slice(2)] = args[++i];
+    if (!args[i].startsWith('--')) continue;
+    const name = args[i].slice(2);
+    out[name] = args[i + 1] === undefined || args[i + 1].startsWith('--') ? true : args[++i];
   }
   return out;
 }
@@ -46,6 +51,15 @@ async function main([command, folder, ...rest]) {
   if (command === 'make' && folder) {
     const opt = flags(rest);
     for (const name of ['engine', 'id', 'version', 'key']) if (!opt[name]) throw new Error(`--${name} is required.`);
+    if (!opt['steam-app-id'] && !opt['game-id']) throw new Error('--steam-app-id or --game-id is required: it says which game the pack is for.');
+    const game = {};
+    if (opt['steam-app-id']) game.steamAppId = Number(opt['steam-app-id']);
+    if (opt['game-id']) game.gameId = opt['game-id'];
+    const overlay = {};
+    if (opt.region) overlay.region = opt.region.split(',').map(Number);
+    if (opt['text-luma']) overlay.textLuma = Number(opt['text-luma']);
+    if (opt['dark-text']) overlay.darkText = true;
+    if (opt.threshold) overlay.threshold = Number(opt.threshold);
     const files = (await payloadFiles(path.join(folder, 'payload'))).map((rel) => ({ source: `payload/${rel}`, target: rel }));
     const requires = {};
     if (opt.backend) requires.unityBackend = opt.backend;
@@ -55,6 +69,9 @@ async function main([command, folder, ...rest]) {
       id: opt.id,
       version: opt.version,
       engine: opt.engine,
+      game,
+      ...(opt.title ? { title: opt.title } : {}),
+      ...(Object.keys(overlay).length ? { overlay } : {}),
       ...(opt['font-bundle'] ? { fontBundle: opt['font-bundle'] } : {}),
       ...(opt['ugui-font'] ? { uguiFont: opt['ugui-font'] } : {}),
       ...(Object.keys(requires).length ? { requires } : {}),
