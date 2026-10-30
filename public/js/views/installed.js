@@ -13,7 +13,7 @@ export async function installedView(app, key) {
     <div class="page installed-page">
       <div class="page-head">
         <h1>${bdi(name)}</h1>
-        <p class="muted">${t(game.launcher)}${game.steamAppId ? html` · ${t('Steam app {id}', { id: game.steamAppId })}` : ''}</p>
+        <p class="muted">${t(game.launcher)}${game.steamAppId ? html` · <span class="nowrap">${t('Steam app {id}', { id: game.steamAppId })}</span>` : ''}</p>
       </div>
       <div class="installed-actions">${playButton(game, name)}${arabicToggle(game)}</div>
       <p class="muted small">${t('GameShelf has no page for this game, but you can start it here and turn on Arabic subtitles.')}</p>
