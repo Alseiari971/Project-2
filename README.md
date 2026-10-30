@@ -27,6 +27,7 @@ Look up any game in the world, see where to buy it, and keep a public list of th
   - up to 4 showcases: favorite game, a hand-picked collection, highest rated, completed games, stats or a custom text box
   - levels, XP and bronze/silver/gold badges earned from your list, plus a comment wall
 - Each game page shows who on GameShelf has played it.
+- **English and Arabic:** the whole site and app in either language, switched with the globe button in the top bar (or in App settings). Arabic turns everything right to left: the sidebar moves to the right, arrows point the other way, and in the Windows app the window buttons move to the left. See [Arabic](#arabic) below.
 
 ## Run it
 
@@ -55,7 +56,7 @@ Good to know:
 - The installer isn't code-signed, so the first time Windows may show "Windows protected your PC". Click **More info**, then **Run anyway**. Signing needs a paid code-signing certificate.
 - If `npm run dist` stops with "Cannot create symbolic link", turn on **Developer Mode** in Windows Settings (System, For developers) or run the terminal as administrator, then try again.
 - **Play installed games:** the app finds games installed through Steam, the Epic Games Launcher and GOG Galaxy. They show up in an "Installed on this PC" row on Home, and their game pages get a **Play** button that starts the game through its launcher. While a game runs, Play turns into a white **Stop** button (this also notices games started from Steam or a shortcut). Stop asks the game to close and forces it after 5 seconds. The arrow on the right of the Play button opens the game's options: which graphics card Windows uses for it (the same setting as Windows' Graphics settings; for Steam and Epic games this appears after you've played once, so GameShelf knows which program is the game), Open game folder, and for Steam games launch options and properties, Verify game files and Uninstall. GOG games can be uninstalled too, and games you added can be removed. Other launchers (Xbox app, EA app, Ubisoft Connect, Battle.net) aren't detected yet, but any game can be added by hand: click **Add a game** at the end of the Home row and pick its `.exe` file. Added games are listed, and can be removed, in App settings.
-- Store links and trailers open in your normal web browser. The window's top bar works as the title bar: drag it to move the window. Mouse back/forward buttons, Alt+Left/Right, F5, F11 and Ctrl +/- zoom work as you'd expect.
+- Store links and trailers open in your normal web browser. The window's top bar works as the title bar: drag it to move the window, double-click it to maximize. Its round minimize, maximize and close buttons sit at the right, or at the left in Arabic. Mouse back/forward buttons, Alt+Left/Right, F5, F11 and Ctrl +/- zoom work as you'd expect.
 - **Discord activity:** while you play a game started from GameShelf, your Discord profile shows it: the game's name, its cover, which launcher, how long you've played, and a "View game" button. Players don't set anything up; it works whenever the Discord app is open on the same PC with **Share your detected activities with others** turned on (Discord settings, Activity Privacy). It can be turned off in App settings. It talks only to the Discord app on the PC; no Discord login is involved.
 
   **One-time setup for whoever builds GameShelf:** Discord needs to know the activity comes from GameShelf, so GameShelf has its own Discord application, the same for every player (like any app with a Discord activity). Create it once at https://discord.com/developers/applications (**New Application**, named `GameShelf`, with `desktop/icon.png` as its App Icon), then put its **Application ID** in `desktop/config.json` as `discordApplicationId`. The ID is public, not a secret, so it's fine to commit. Until it's set, the Discord option is greyed out.
@@ -94,6 +95,14 @@ Steam import only works for profiles whose **Game details** are set to Public in
 
 When using RAWG, if a search shows odd games, `npm run search-debug -- <search words>` prints everything RAWG returned (popularity, stores) and which results GameShelf kept. It uses the RAWG key in your `.env`.
 
+## Arabic
+
+Every page, menu, message and error has an Arabic translation, with Arabic plurals (لعبة واحدة، لعبتان، 3 ألعاب، 11 لعبة). The first visit picks Arabic when the browser or Windows is set to Arabic; after that the visitor's choice is remembered on their device. Numbers use Western digits (2026, $29.99), like the game stores. The About this game text and system requirements come from Steam's Arabic store page when the publisher wrote one, and stay in English otherwise. Game names, store names and what users write stay as they are, and keep their own direction inside Arabic text.
+
+**Fonts.** Arabic text uses [Alexandria](https://fonts.google.com/specimen/Alexandria) (SIL Open Font License), which comes with GameShelf. If [Thmanyah Sans](https://thmanyah.com) is installed on the computer, it's used instead. Thmanyah's license doesn't allow passing its font files on, so they aren't in this repository or the installer. To use Thmanyah on a website you host, put the files you downloaded from Thmanyah in `public/fonts/thmanyah/`, named `regular.otf`, `medium.otf`, `bold.otf` and `black.otf` (that folder is in `.gitignore`).
+
+**Adding a phrase.** Text in the code is written in English and passed through `t()` (from `public/js/i18n.js`). Add its Arabic to `public/js/lang/ar.js`. `npm test` fails if any phrase, or any error message from the server, has no Arabic.
+
 ## Project layout
 
 ```
@@ -113,7 +122,9 @@ src/games/stores.js  "where to buy" store links
 src/games/genres.js  genres you can browse by
 desktop/             the Windows app (Electron): window, settings file, installed and running games, games added by hand, app icon
 public/css/          the stylesheet
-public/fonts/        the Manrope font (SIL Open Font License)
+public/fonts/        the Manrope and Alexandria fonts (SIL Open Font License)
+public/js/i18n.js    English and Arabic: t() for phrases, tn() for counts; lang/ar.js has the Arabic
+public/js/boot.js    sets the page's language and direction before it's drawn
 public/js/main.js    navigation and page routing
 public/js/palette.js the search pop-up
 public/js/preview.js hover previews; discover.js the discovery queue; art-color.js the page tint
@@ -131,6 +142,7 @@ GameShelf credits each source where its data appears and on the About & legal pa
 - **CheapShark**: prices. Buy buttons use CheapShark's own redirect links, as its terms ask.
 - **Steam store pages**: "About this game", system requirements, achievements, features and Metacritic scores, credited and linked back to the store page.
 - **YouTube**: trailers play in YouTube's official embedded player (privacy-enhanced mode), only after the visitor presses play.
+- **Fonts**: Manrope and Alexandria are under the SIL Open Font License (license files in `public/fonts/`). Thmanyah Sans isn't included; see [Arabic](#arabic).
 
 Users can delete their account and all their data from Edit profile. This isn't legal advice; check each service's current terms before launching publicly.
 

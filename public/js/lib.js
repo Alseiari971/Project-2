@@ -1,11 +1,12 @@
 // Shared helpers: safe HTML templating, API calls, app state, small utilities.
+import { t, locale } from './i18n.js';
 
 export const STATUS_LABELS = {
-  playing: 'Playing',
-  completed: 'Completed',
-  played: 'Played',
-  want: 'Want to play',
-  dropped: 'Dropped',
+  playing: t('Playing'),
+  completed: t('Completed'),
+  played: t('Played'),
+  want: t('Want to play'),
+  dropped: t('Dropped'),
 };
 
 // The logged-in user (or null), their editable profile settings, and their
@@ -26,6 +27,26 @@ export const escapeHtml = (value) =>
 export function html(strings, ...values) {
   const render = (v) => (v instanceof Raw ? v.value : Array.isArray(v) ? v.map(render).join('') : v === false || v == null ? '' : escapeHtml(v));
   return raw(strings.reduce((out, str, i) => out + str + (i < values.length ? render(values[i]) : ''), ''));
+}
+
+/**
+ * Text from the game data or from users (names, pitches), set apart so it keeps
+ * its own direction: "7 Days to Die" or "Free to play." inside an Arabic page,
+ * or an Arabic name inside an English one, without its digits or full stop
+ * jumping to the other end.
+ */
+export const bdi = (text) => html`<bdi>${text}</bdi>`;
+// The same for plain text (toasts, translated sentences): prices and
+// percentages always read left to right, "$29.95" and "−12%".
+export const ltr = (text) => `\u2066${text}\u2069`;
+
+/**
+ * A translated sentence with pieces of HTML (links, bold words) placed into
+ * its {placeholders}, such as a link given as { store: html`<a ...>` }.
+ * The translation itself is escaped; only the pieces are HTML.
+ */
+export function th(text, parts) {
+  return raw(escapeHtml(t(text)).replace(/\{(\w+)\}/g, (m, k) => (k in parts ? html`${parts[k]}`.value : m)));
 }
 
 /** Renders a template into an element and applies dynamic styles. */
@@ -76,7 +97,8 @@ export async function api(path, { method = 'GET', body } = {}) {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const err = new Error(data.error || `Request failed (${res.status})`);
+    // The server answers in English; t() turns its messages into Arabic.
+    const err = new Error(data.error ? t(data.error) : t('Request failed ({status})', { status: res.status }));
     err.status = res.status;
     throw err;
   }
@@ -132,11 +154,11 @@ export function hueFor(text) {
   return h;
 }
 
-export const year = (date) => (date ? date.slice(0, 4) : 'TBA');
+export const year = (date) => (date ? date.slice(0, 4) : t('TBA'));
 
 export function formatDate(date) {
-  if (!date) return 'TBA';
-  return new Date(date + 'T00:00:00').toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+  if (!date) return t('TBA');
+  return new Date(date + 'T00:00:00').toLocaleDateString(locale, { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
 // SQLite timestamps are UTC without a zone marker.
@@ -145,11 +167,11 @@ export const parseDbTime = (value) => new Date(value.replace(' ', 'T') + 'Z');
 export function timeAgo(value) {
   const seconds = (parseDbTime(value).getTime() - Date.now()) / 1000;
   const units = [['year', 31536000], ['month', 2592000], ['week', 604800], ['day', 86400], ['hour', 3600], ['minute', 60]];
-  const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
+  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
   for (const [unit, size] of units) {
     if (Math.abs(seconds) >= size) return rtf.format(Math.round(seconds / size), unit);
   }
-  return 'just now';
+  return t('just now');
 }
 
 export const gameHref = (id) => `#/game/${encodeURIComponent(id)}`;
@@ -160,6 +182,17 @@ const cleanups = [];
 export const onLeave = (fn) => cleanups.push(fn);
 export function runCleanups() {
   while (cleanups.length) cleanups.pop()();
+}
+
+// Sideways scrolling rows. Their start is on the left in English and on the
+// right in Arabic, where scrollLeft counts down from 0 instead of up.
+export function scrollEdges(el, slack = 8) {
+  const x = Math.abs(el.scrollLeft);
+  return { atStart: x < slack, atEnd: x + el.clientWidth > el.scrollWidth - slack };
+}
+export function scrollRow(el, forward, share = 0.85) {
+  const sign = (forward ? 1 : -1) * (getComputedStyle(el).direction === 'rtl' ? -1 : 1);
+  el.scrollBy({ left: sign * el.clientWidth * share, behavior: 'smooth' });
 }
 
 export function toast(message, { error = false } = {}) {

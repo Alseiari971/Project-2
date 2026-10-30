@@ -1,57 +1,65 @@
 // About, credits, terms and privacy, in plain language.
-import { html, mount } from '../lib.js';
+import { html, th, mount } from '../lib.js';
+import { t } from '../i18n.js';
 
 const link = (href, text) => html`<a href="${href}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+// A list item with a bold lead-in: "Cookies: one cookie keeps you logged in."
+const item = (lead, text, parts = {}) => html`<li><strong>${t(lead)}</strong> ${th(text, parts)}</li>`;
 
 export async function legalView(app) {
-  document.title = 'About & legal · GameShelf';
+  document.title = `${t('About & legal')} · ${t('GameShelf')}`;
   mount(app, html`
     <div class="page legal">
-      <div class="page-head"><h1>About & legal</h1></div>
-      <p class="muted lead">GameShelf helps you find games, see where to buy them and keep a list of what you play. It doesn't sell anything.</p>
+      <div class="page-head"><h1>${t('About & legal')}</h1></div>
+      <p class="muted lead">${t("GameShelf helps you find games, see where to buy them and keep a list of what you play. It doesn't sell anything.")}</p>
 
       <section class="panel">
-        <h2>Where the information comes from</h2>
+        <h2>${t('Where the information comes from')}</h2>
         <ul class="plain-list">
-          <li><strong>Game details, covers, screenshots and trailers:</strong> ${link('https://www.igdb.com', 'IGDB')}, the game database run by Twitch.</li>
-          <li><strong>PC prices and deals:</strong> ${link('https://www.cheapshark.com', 'CheapShark')}. Buy buttons go through CheapShark to the store, and prices can change at any time. Always check the price on the store before you pay.</li>
-          <li><strong>"About this game", system requirements, achievements and features:</strong> each game's public Steam store page, written by the publisher.</li>
-          <li><strong>Metacritic scores</strong> come from Steam and link to ${link('https://www.metacritic.com', 'Metacritic')}.</li>
-          <li><strong>Trailers</strong> play in YouTube's own player, in its privacy-enhanced mode, and only when you press play.</li>
-          <li><strong>Steam library import</strong> uses the Steam Web API and only reads profiles whose game details are public.</li>
+          ${item('Game details, covers, screenshots and trailers:', '{igdb}, the game database run by Twitch.', { igdb: link('https://www.igdb.com', 'IGDB') })}
+          ${item('PC prices and deals:', '{cheapshark}. Buy buttons go through CheapShark to the store, and prices can change at any time. Always check the price on the store before you pay.', { cheapshark: link('https://www.cheapshark.com', 'CheapShark') })}
+          ${item('"About this game", system requirements, achievements and features:', "each game's public Steam store page, written by the publisher.")}
+          ${item('Metacritic scores', 'come from Steam and link to {metacritic}.', { metacritic: link('https://www.metacritic.com', 'Metacritic') })}
+          ${item('Trailers', "play in YouTube's own player, in its privacy-enhanced mode, and only when you press play.")}
+          ${item('Steam library import', 'uses the Steam Web API and only reads profiles whose game details are public.')}
         </ul>
-        <p class="muted small">GameShelf isn't affiliated with or endorsed by Valve, Twitch, IGDB, CheapShark, Metacritic, YouTube or any game publisher or store.</p>
+        <p class="muted small">${t("GameShelf isn't affiliated with or endorsed by Valve, Twitch, IGDB, CheapShark, Metacritic, YouTube or any game publisher or store.")}</p>
       </section>
 
       <section class="panel">
-        <h2>Trademarks and artwork</h2>
-        <p>Game titles, logos, cover art, screenshots and descriptions belong to their publishers and developers. GameShelf shows them to identify the games and help you find where to buy them, and links back to the source. If you own content shown here and want it changed or removed, contact the people running this site.</p>
+        <h2>${t('Trademarks and artwork')}</h2>
+        <p>${t('Game titles, logos, cover art, screenshots and descriptions belong to their publishers and developers. GameShelf shows them to identify the games and help you find where to buy them, and links back to the source. If you own content shown here and want it changed or removed, contact the people running this site.')}</p>
       </section>
 
       <section class="panel">
-        <h2>Privacy</h2>
+        <h2>${t('Privacy')}</h2>
         <ul class="plain-list">
-          <li><strong>What we store:</strong> your username, display name, a scrambled (hashed) version of your password, your game list, ratings, hours, profile settings, avatar and the comments you write.</li>
-          <li><strong>Cookies:</strong> one cookie keeps you logged in. There are no ads, trackers or analytics.</li>
-          <li><strong>What's public:</strong> your profile, game list and the comments you post can be seen by anyone.</li>
-          <li><strong>Your device:</strong> recently viewed games and your grid or list choice are kept in your browser only.</li>
-          <li><strong>Deleting your data:</strong> you can delete your account at any time from Edit profile. That removes your account, list, profile and comments.</li>
-        </ul>
-      </section>
-
-      <section class="panel">
-        <h2>Community rules</h2>
-        <ul class="plain-list">
-          <li>Be respectful. No harassment, hate, threats or sharing other people's personal information.</li>
-          <li>No spam, scams or links to pirated games or cheats that break games' terms.</li>
-          <li>Only upload avatars you have the right to use.</li>
-          <li>You can delete any comment on your own profile. Accounts that break these rules can be removed.</li>
+          ${item('What we store:', 'your username, display name, a scrambled (hashed) version of your password, your game list, ratings, hours, profile settings, avatar and the comments you write.')}
+          ${item('Cookies:', 'one cookie keeps you logged in. There are no ads, trackers or analytics.')}
+          ${item("What's public:", 'your profile, game list and the comments you post can be seen by anyone.')}
+          ${item('Your device:', 'recently viewed games, your language and your grid or list choice are kept in your browser only.')}
+          ${item('Deleting your data:', 'you can delete your account at any time from Edit profile. That removes your account, list, profile and comments.')}
         </ul>
       </section>
 
       <section class="panel">
-        <h2>Terms of use</h2>
-        <p>GameShelf is provided as it is. We try to keep information accurate but can't guarantee prices, release dates or store details. Purchases happen on the stores' own sites under their terms. By creating an account you agree to these terms and the community rules.</p>
+        <h2>${t('Community rules')}</h2>
+        <ul class="plain-list">
+          <li>${t("Be respectful. No harassment, hate, threats or sharing other people's personal information.")}</li>
+          <li>${t("No spam, scams or links to pirated games or cheats that break games' terms.")}</li>
+          <li>${t('Only upload avatars you have the right to use.')}</li>
+          <li>${t('You can delete any comment on your own profile. Accounts that break these rules can be removed.')}</li>
+        </ul>
+      </section>
+
+      <section class="panel">
+        <h2>${t('Terms of use')}</h2>
+        <p>${t("GameShelf is provided as it is. We try to keep information accurate but can't guarantee prices, release dates or store details. Purchases happen on the stores' own sites under their terms. By creating an account you agree to these terms and the community rules.")}</p>
+      </section>
+
+      <section class="panel">
+        <h2>${t('Fonts')}</h2>
+        <p>${th('Manrope and Alexandria are used under the {ofl}. When the Thmanyah Sans font is installed on your computer, the Arabic text uses it instead; it is not part of GameShelf.', { ofl: link('https://openfontlicense.org', 'SIL Open Font License') })}</p>
       </section>
     </div>
   `);

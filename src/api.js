@@ -352,7 +352,8 @@ function createApi({ db, games, prices, steam, steamStore }) {
     const { id } = req.params;
     const game = GAME_ID_RE.test(id) ? await games.getGame(id) : null;
     if (!game) return res.status(404).json({ error: 'Game not found.' });
-    const details = game.steamAppId && steamStore ? await steamStore.details(game.steamAppId).catch(() => null) : null;
+    const lang = req.query.lang === 'ar' ? 'ar' : 'en';
+    const details = game.steamAppId && steamStore ? await steamStore.details(game.steamAppId, { lang }).catch(() => null) : null;
     res.json({ steam: details });
   }));
 

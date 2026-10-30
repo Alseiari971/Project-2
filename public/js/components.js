@@ -1,12 +1,13 @@
 // Reusable pieces of UI shared by several pages.
-import { html, raw, hueFor, year, gameHref, profileHref, STATUS_LABELS, applyStyles, mount } from './lib.js';
+import { html, bdi, raw, hueFor, year, gameHref, profileHref, STATUS_LABELS, applyStyles, mount, scrollEdges, scrollRow } from './lib.js';
 import { icon } from './icons.js';
+import { t } from './i18n.js';
 
 /** Game artwork, or a colored title card when there is no image. */
 export function art(game, cls = 'tile-art', src = game.image) {
   return src
     ? html`<img class="${cls}" src="${src}" alt="" loading="lazy" referrerpolicy="no-referrer" ${game.fallbackImage ? html`data-fallback="${game.fallbackImage}"` : ''}>`
-    : html`<div class="${cls} art-fallback" data-hue="${hueFor(game.name)}"><span>${game.name}</span></div>`;
+    : html`<div class="${cls} art-fallback" data-hue="${hueFor(game.name)}"><span>${bdi(game.name)}</span></div>`;
 }
 
 // Steam store banners have the title built in. Saved list entries don't carry
@@ -21,7 +22,7 @@ const hasTitleArt = (game) => Boolean(game.image) && (game.artHasTitle ?? STEAM_
 export function titleArt(game, tag = 'h1') {
   const inner = game.logo
     ? html`<img class="logo-art" src="${game.logo}" alt="${game.name}" referrerpolicy="no-referrer">`
-    : html`${game.name}`;
+    : bdi(game.name);
   return html`${raw(`<${tag} class="title-art${game.logo ? ' has-logo' : ''}">`)}${inner}${raw(`</${tag}>`)}`;
 }
 
@@ -31,7 +32,7 @@ export const starValue = (rating) => String(rating / 2);
 /** Read-only star display. */
 export function stars(rating, size = '') {
   const row = (cls) => html`<span class="${cls}">${[1, 2, 3, 4, 5].map(() => icon('star'))}</span>`;
-  return html`<span class="stars ${size}" data-progress="${rating / 10}" role="img" aria-label="${starValue(rating)} out of 5 stars">
+  return html`<span class="stars ${size}" data-progress="${rating / 10}" role="img" aria-label="${t('{n} out of 5 stars', { n: starValue(rating) })}">
     ${row('stars-bg')}${row('stars-fg')}
   </span>`;
 }
@@ -43,7 +44,7 @@ export function starInput(rating) {
       ${stars(rating || 0, 'lg')}
       <div class="star-hit">
         ${Array.from({ length: 10 }, (_, i) => i + 1).map((n) => html`
-          <button type="button" data-rating="${n}" aria-label="${starValue(n)} stars"></button>`)}
+          <button type="button" data-rating="${n}" aria-label="${t('{n} stars', { n: starValue(n) })}"></button>`)}
       </div>
     </div>`;
 }
@@ -62,7 +63,7 @@ export function wireStarInput(el, onPick) {
 
 /** What a hover preview (preview.js) needs to know about a game card. */
 function previewData(game) {
-  const meta = [game.released ? year(game.released) : '', ...(game.genres || []).slice(0, 2)].filter(Boolean).join(' · ');
+  const meta = [game.released ? year(game.released) : '', ...(game.genres || []).slice(0, 2).map((g) => t(g))].filter(Boolean).join(' · ');
   return html`data-preview="${game.id || game.gameId}" data-steam="${game.steamAppId || ''}" data-meta="${meta}" data-wide="${game.backdrop || game.image || ''}"`;
 }
 
@@ -79,7 +80,7 @@ export function gameTile(game, { tag = '', corner = '' } = {}) {
       <div class="tile-frame ${overlay ? 'needs-title' : ''}">
         ${art(game)}
         ${tag ? html`<span class="card-tag">${tag}</span>` : ''}
-        <span class="tile-overlay-title ${overlay ? '' : 'visually-hidden'}">${game.name}</span>
+        <span class="tile-overlay-title ${overlay ? '' : 'visually-hidden'}">${bdi(game.name)}</span>
         ${corner ? html`<span class="card-corner">${corner}</span>` : ''}
       </div>
     </a>`;
@@ -91,7 +92,7 @@ export function gameListRow(game, columns = []) {
   return html`
     <a class="list-row" href="${gameHref(id)}" title="${game.name}">
       ${game.image ? html`<img class="list-thumb" src="${game.image}" alt="" loading="lazy" referrerpolicy="no-referrer">` : html`<span class="list-thumb"></span>`}
-      <span class="list-name">${game.name}</span>
+      <span class="list-name">${bdi(game.name)}</span>
       ${columns.map((c) => html`<span class="list-col">${c}</span>`)}
     </a>`;
 }
@@ -116,9 +117,9 @@ export function pillGroup(options, active, { label = '', name = '' } = {}) {
 /** Grid / list switch, top-right of a page. The choice is remembered per browser. */
 export function viewToggle(view) {
   return html`
-    <div class="view-toggle" role="group" aria-label="View">
-      <button type="button" class="${view === 'grid' ? 'active' : ''}" data-view="grid" aria-label="Grid view" aria-pressed="${view === 'grid'}">${icon('grid')}</button>
-      <button type="button" class="${view === 'list' ? 'active' : ''}" data-view="list" aria-label="List view" aria-pressed="${view === 'list'}">${icon('list')}</button>
+    <div class="view-toggle" role="group" aria-label="${t('View')}">
+      <button type="button" class="${view === 'grid' ? 'active' : ''}" data-view="grid" aria-label="${t('Grid view')}" aria-pressed="${view === 'grid'}">${icon('grid')}</button>
+      <button type="button" class="${view === 'list' ? 'active' : ''}" data-view="list" aria-label="${t('List view')}" aria-pressed="${view === 'list'}">${icon('list')}</button>
     </div>`;
 }
 
@@ -146,7 +147,7 @@ function composedPoster(game) {
   return html`
     <div class="poster-composed">
       ${game.image ? html`<span class="poster-blur" data-bg="${game.image}"></span><img class="poster-shot" src="${game.image}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}
-      <span class="poster-title">${game.name}</span>
+      <span class="poster-title">${bdi(game.name)}</span>
       ${game.released ? html`<span class="poster-year">${year(game.released)}</span>` : ''}
     </div>`;
 }
@@ -160,7 +161,7 @@ export function posterTile(game) {
           ? html`<img class="poster-art" src="${game.poster}" alt="" loading="lazy" referrerpolicy="no-referrer">`
           : composedPoster(game)}
       </div>
-      <span class="poster-caption">${game.name}</span>
+      <span class="poster-caption">${bdi(game.name)}</span>
     </a>`;
 }
 
@@ -184,7 +185,7 @@ export const ratingBadge = (rating) => (rating ? html`<span class="rating-pill">
 export function formatHours(minutes) {
   if (!minutes) return '';
   const hours = minutes / 60;
-  return hours < 1 ? '<1 h' : `${hours < 10 ? Math.round(hours * 10) / 10 : Math.round(hours).toLocaleString()} h`;
+  return hours < 1 ? t('<1 h') : t('{n} h', { n: hours < 10 ? Math.round(hours * 10) / 10 : Math.round(hours).toLocaleString('en') });
 }
 
 /** A library entry card: status tag top-left, rating and hours bottom-right. */
@@ -204,12 +205,12 @@ export function row({ title, href, items, id = '', cls = '', head = null }) {
     <section class="row ${cls}" ${raw(id ? `id="${id}"` : '')}>
       ${head || html`<div class="row-head">
         <h2>${title}</h2>
-        ${href ? html`<a class="row-more" href="${href}">See all ${icon('right')}</a>` : ''}
+        ${href ? html`<a class="row-more" href="${href}">${t('See all')} ${icon('right', 'flip')}</a>` : ''}
       </div>`}
       <div class="row-viewport">
-        <button class="row-arrow prev" type="button" aria-label="Scroll left">${icon('left')}</button>
+        <button class="row-arrow prev" type="button" aria-label="${t('Previous')}">${icon('left', 'flip')}</button>
         <div class="row-track">${items}</div>
-        <button class="row-arrow next" type="button" aria-label="Scroll right">${icon('right')}</button>
+        <button class="row-arrow next" type="button" aria-label="${t('Next')}">${icon('right', 'flip')}</button>
       </div>
     </section>`;
 }
@@ -219,11 +220,12 @@ export function enableRows(root) {
   root.querySelectorAll('.row-viewport').forEach((viewport) => {
     const track = viewport.querySelector('.row-track');
     const update = () => {
-      viewport.classList.toggle('at-start', track.scrollLeft < 8);
-      viewport.classList.toggle('at-end', track.scrollLeft + track.clientWidth > track.scrollWidth - 8);
+      const { atStart, atEnd } = scrollEdges(track);
+      viewport.classList.toggle('at-start', atStart);
+      viewport.classList.toggle('at-end', atEnd);
     };
-    viewport.querySelector('.prev').addEventListener('click', () => track.scrollBy({ left: -track.clientWidth * 0.85, behavior: 'smooth' }));
-    viewport.querySelector('.next').addEventListener('click', () => track.scrollBy({ left: track.clientWidth * 0.85, behavior: 'smooth' }));
+    viewport.querySelector('.prev').addEventListener('click', () => scrollRow(track, false));
+    viewport.querySelector('.next').addEventListener('click', () => scrollRow(track, true));
     track.addEventListener('scroll', update, { passive: true });
     update();
   });
@@ -241,14 +243,14 @@ export function avatar(user, size = 'sm') {
 export function userChip(user, extra = '') {
   return html`
     <a class="user-chip" href="${profileHref(user.username)}">
-      ${avatar(user)}<span class="user-chip-name">${user.displayName}</span>${extra}
+      ${avatar(user)}<span class="user-chip-name">${bdi(user.displayName)}</span>${extra}
     </a>`;
 }
 
 export function levelBadge(level, size = '') {
   // Ring color changes every 10 levels, like Steam.
   const tier = Math.min(9, Math.floor(level / 10));
-  return html`<span class="level level-tier-${tier} ${size}" title="Level ${level}"><span>${level}</span></span>`;
+  return html`<span class="level level-tier-${tier} ${size}" title="${t('Level {n}', { n: level })}"><span>${level}</span></span>`;
 }
 
 export const emptyState = (title, body = '', action = '') =>
@@ -319,7 +321,7 @@ document.addEventListener('error', (e) => {
     const div = document.createElement('div');
     div.className = 'tile-art art-fallback';
     div.dataset.hue = hueFor(name);
-    div.innerHTML = html`<span>${name}</span>`.value;
+    div.innerHTML = html`<span>${bdi(name)}</span>`.value;
     const parent = img.parentElement;
     img.replaceWith(div);
     applyStyles(parent);

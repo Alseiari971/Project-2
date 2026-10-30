@@ -25,7 +25,6 @@ const HOST = '127.0.0.1';
 const FIRST_PORT = 41730;
 const PORT_TRIES = 10;
 const CHROME_COLOR = '#111215'; // --chrome in public/css/styles.css
-const TOP_BAR_HEIGHT = 63; // --top-h minus its bottom border
 
 const dataDir = app.getPath('userData');
 // Installed: keys and the database live in the user's app data folder.
@@ -147,12 +146,11 @@ function createWindow(startPath) {
     icon: path.join(__dirname, 'icon.png'),
     backgroundColor: CHROME_COLOR,
     show: false,
-    // GameShelf's top bar is the title bar. Windows and Linux draw the
-    // minimize, maximize and close buttons over its right end.
+    // GameShelf's top bar is the title bar. On Windows and Linux the page draws
+    // its own minimize, maximize and close buttons, at the end of the top bar:
+    // the right in English, the left in Arabic. A Mac keeps its own buttons.
     titleBarStyle: 'hidden',
-    ...(process.platform === 'darwin'
-      ? { trafficLightPosition: { x: 18, y: 24 } }
-      : { titleBarOverlay: { color: CHROME_COLOR, symbolColor: '#e6e6e6', height: TOP_BAR_HEIGHT } }),
+    ...(process.platform === 'darwin' ? { trafficLightPosition: { x: 18, y: 24 } } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -165,6 +163,10 @@ function createWindow(startPath) {
   win.once('ready-to-show', () => win.show());
   win.on('close', saveWindowState);
   win.on('closed', () => { win = null; });
+  // The maximize button turns into a restore button and back.
+  const sendMaximized = () => win.webContents.send('window:maximized', win.isMaximized());
+  win.on('maximize', sendMaximized);
+  win.on('unmaximize', sendMaximized);
 
   const contents = win.webContents;
   // Store pages, trailers on YouTube and every other outside link open in the
@@ -558,6 +560,16 @@ function registerIpc() {
   handle('data-folder:open', async () => {
     await shell.openPath(app.isPackaged ? dataDir : path.join(__dirname, '..', 'data'));
   });
+
+  // The page's own window buttons.
+  handle('window:minimize', async () => win?.minimize());
+  handle('window:toggle-maximize', async () => {
+    if (!win) return;
+    if (win.isMaximized()) win.unmaximize();
+    else win.maximize();
+  });
+  handle('window:close', async () => win?.close());
+  handle('window:is-maximized', async () => Boolean(win?.isMaximized()));
 }
 
 async function start() {

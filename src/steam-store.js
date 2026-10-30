@@ -145,25 +145,39 @@ function parseLanguages(html = '') {
 function createSteamStore({ fetchImpl = fetch } = {}) {
   const cache = new Map();
 
+  // One store page in one language, cached for a day.
+  async function storePage(appId, language) {
+    const key = `${appId}:${language}`;
+    const hit = cache.get(key);
+    if (hit && hit.expires > Date.now()) return hit.value;
+    const url = `https://store.steampowered.com/api/appdetails?appids=${appId}&cc=us&l=${language}`;
+    const res = await fetchImpl(url, { headers: { 'User-Agent': USER_AGENT } });
+    if (!res.ok) throw new Error(`Steam store request failed with status ${res.status}`);
+    const body = (await res.json())?.[appId];
+    const value = body?.success ? body.data : null;
+    if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value);
+    cache.set(key, { value, expires: Date.now() + TTL_MS });
+    return value;
+  }
+
   return {
-    /** Store details for a Steam app ID, or null when Steam has none. */
-    async details(appId) {
+    /**
+     * Store details for a Steam app ID, or null when Steam has none. With
+     * lang "ar", "About this game" and the requirements come from the Arabic
+     * store page (Steam shows its English text where a game has no Arabic).
+     */
+    async details(appId, { lang = 'en' } = {}) {
       if (!Number.isInteger(appId) || appId <= 0) return null;
-      const hit = cache.get(appId);
-      if (hit && hit.expires > Date.now()) return hit.value;
+      const d = await storePage(appId, 'english');
+      const local = lang === 'ar' && d ? await storePage(appId, 'arabic').catch(() => null) : null;
+      const text = local || d;
 
-      const url = `https://store.steampowered.com/api/appdetails?appids=${appId}&cc=us&l=english`;
-      const res = await fetchImpl(url, { headers: { 'User-Agent': USER_AGENT } });
-      if (!res.ok) throw new Error(`Steam store request failed with status ${res.status}`);
-      const body = (await res.json())?.[appId];
-      const d = body?.success ? body.data : null;
-
-      const value = d ? {
+      return d ? {
         appId,
-        about: htmlToBlocks(d.about_the_game || d.detailed_description),
+        about: htmlToBlocks(text.about_the_game || text.detailed_description),
         requirements: {
-          minimum: parseRequirements(d.pc_requirements?.minimum),
-          recommended: parseRequirements(d.pc_requirements?.recommended),
+          minimum: parseRequirements(text.pc_requirements?.minimum),
+          recommended: parseRequirements(text.pc_requirements?.recommended),
         },
         metacritic: d.metacritic?.score ? { score: d.metacritic.score, url: steamMetacriticUrl(d.metacritic.url) } : null,
         achievements: d.achievements?.total || 0,
@@ -171,12 +185,8 @@ function createSteamStore({ fetchImpl = fetch } = {}) {
         features: FEATURES.filter((f) => (d.categories || []).some((c) => c.description === f)),
         languages: parseLanguages(d.supported_languages),
         microtrailer: microtrailer(d.movies),
-        storeUrl: `https://store.steampowered.com/app/${appId}/`,
+        storeUrl: `https://store.steampowered.com/app/${appId}/${lang === 'ar' ? '?l=arabic' : ''}`,
       } : null;
-
-      if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value);
-      cache.set(appId, { value, expires: Date.now() + TTL_MS });
-      return value;
     },
   };
 }

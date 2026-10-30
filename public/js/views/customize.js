@@ -1,21 +1,22 @@
 // "Edit profile" page, modeled on Steam's profile editor: general info, avatar
 // and frame, background, theme color and showcases, with a live preview.
-import { html, api, mount, state, refreshMe, toast, hueFor, profileHref, onLeave, runCleanups, textColorOn } from '../lib.js';
+import { html, bdi, api, mount, state, refreshMe, toast, hueFor, profileHref, onLeave, runCleanups, textColorOn } from '../lib.js';
 import { avatar } from '../components.js';
 import { icon } from '../icons.js';
+import { t } from '../i18n.js';
 
 const BACKGROUND_NAMES = {
-  midnight: 'Midnight', aurora: 'Aurora', sunset: 'Sunset', ocean: 'Ocean',
-  ember: 'Ember', forest: 'Forest', nebula: 'Nebula', synthwave: 'Synthwave',
+  midnight: t('Midnight'), aurora: t('Aurora'), sunset: t('Sunset'), ocean: t('Ocean'),
+  ember: t('Ember'), forest: t('Forest'), nebula: t('Nebula'), synthwave: t('Synthwave'),
 };
-const FRAME_NAMES = { none: 'None', glow: 'Glow', gold: 'Gold', neon: 'Neon', fire: 'Fire', ice: 'Ice' };
+const FRAME_NAMES = { none: t('None'), glow: t('Glow'), gold: t('Gold'), neon: t('Neon'), fire: t('Fire'), ice: t('Ice') };
 const SHOWCASE_INFO = {
-  favorite: { name: 'Favorite game', description: 'Spotlight one game with its full artwork.' },
-  collection: { name: 'Game collection', description: 'Hand-pick up to 6 games under your own title.' },
-  toprated: { name: 'Highest rated', description: 'Your 6 highest-rated games, updated automatically.' },
-  completed: { name: 'Recently completed', description: 'Games you’ve completed most recently.' },
-  stats: { name: 'By the numbers', description: 'Games, completions, hours, average rating and more.' },
-  info: { name: 'Custom info box', description: 'Write anything: favorite genres, setup, gamer tags.' },
+  favorite: { name: t('Favorite game'), description: t('Spotlight one game with its full artwork.') },
+  collection: { name: t('Game collection'), description: t('Hand-pick up to 6 games under your own title.') },
+  toprated: { name: t('Highest rated'), description: t('Your 6 highest-rated games, updated automatically.') },
+  completed: { name: t('Recently completed'), description: t('Games you’ve completed most recently.') },
+  stats: { name: t('By the numbers'), description: t('Games, completions, hours, average rating and more.') },
+  info: { name: t('Custom info box'), description: t('Write anything: favorite genres, setup, gamer tags.') },
 };
 const AVATAR_SIZE = 256;
 
@@ -23,10 +24,10 @@ const AVATAR_SIZE = 256;
 function resizeAvatar(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onerror = () => reject(new Error('Could not read that file.'));
+    reader.onerror = () => reject(new Error(t('Could not read that file.')));
     reader.onload = () => {
       const img = new Image();
-      img.onerror = () => reject(new Error('That file is not an image we can use.'));
+      img.onerror = () => reject(new Error(t('That file is not an image we can use.')));
       img.onload = () => {
         const side = Math.min(img.width, img.height);
         const canvas = document.createElement('canvas');
@@ -81,8 +82,8 @@ export async function customizeView(app) {
       ${avatar(previewUser(), 'lg')}
       <div>
         <div class="preview-name">${draft.displayName || state.user.username}</div>
-        <div class="preview-headline">${draft.headline || 'Your headline'}</div>
-        <span class="preview-accent">Accent color</span>
+        <div class="preview-headline">${draft.headline || t('Your headline')}</div>
+        <span class="preview-accent">${t('Accent color')}</span>
       </div>
     </div>`;
 
@@ -92,7 +93,7 @@ export async function customizeView(app) {
     </button>`;
 
   const gameOptions = (selectedId) => html`
-    <option value="">Choose a game…</option>
+    <option value="">${t('Choose a game…')}</option>
     ${library.map((e) => html`<option value="${e.gameId}" ${e.gameId === selectedId ? html`selected` : ''}>${e.name}</option>`)}`;
 
   function showcaseEditor(s, i) {
@@ -101,34 +102,34 @@ export async function customizeView(app) {
     if (s.type === 'favorite') {
       body = library.length
         ? html`<select class="input" data-field="gameId" data-index="${i}">${gameOptions(s.gameId)}</select>`
-        : html`<p class="muted small">Add games to your list first.</p>`;
+        : html`<p class="muted small">${t('Add games to your list first.')}</p>`;
     } else if (s.type === 'collection') {
       body = html`
-        <input class="input" data-field="title" data-index="${i}" value="${s.title}" maxlength="40" placeholder="Collection title">
-        <p class="muted small">Pick up to ${options.maxCollection} games (${s.gameIds.length} selected).</p>
+        <input class="input" data-field="title" data-index="${i}" value="${s.title}" maxlength="40" placeholder="${t('Collection title')}">
+        <p class="muted small">${t('Pick up to {max} games ({n} selected).', { max: options.maxCollection, n: s.gameIds.length })}</p>
         <div class="picker">
           ${library.length ? library.map((e) => {
             const pos = s.gameIds.indexOf(e.gameId);
             return html`
               <button type="button" class="pick ${pos >= 0 ? 'selected' : ''}" data-pick="${e.gameId}" data-index="${i}" title="${e.name}">
-                ${e.image ? html`<img src="${e.image}" alt="" loading="lazy">` : html`<span class="pick-fallback" data-hue="${hueFor(e.name)}">${e.name}</span>`}
+                ${e.image ? html`<img src="${e.image}" alt="" loading="lazy">` : html`<span class="pick-fallback" data-hue="${hueFor(e.name)}">${bdi(e.name)}</span>`}
                 ${pos >= 0 ? html`<span class="pick-num">${pos + 1}</span>` : ''}
               </button>`;
-          }) : html`<p class="muted small">Add games to your list first.</p>`}
+          }) : html`<p class="muted small">${t('Add games to your list first.')}</p>`}
         </div>`;
     } else if (s.type === 'info') {
       body = html`
-        <input class="input" data-field="title" data-index="${i}" value="${s.title}" maxlength="40" placeholder="Title">
-        <textarea class="input" data-field="text" data-index="${i}" maxlength="600" rows="4" placeholder="Write something…">${s.text}</textarea>`;
+        <input class="input" data-field="title" data-index="${i}" value="${s.title}" maxlength="40" placeholder="${t('Title')}">
+        <textarea class="input" data-field="text" data-index="${i}" maxlength="600" rows="4" placeholder="${t('Write something…')}">${s.text}</textarea>`;
     }
     return html`
       <div class="showcase-editor">
         <div class="showcase-editor-head">
-          <strong>${info.name}</strong>
+          <strong>${bdi(info.name)}</strong>
           <div class="icon-buttons">
-            <button type="button" data-move="-1" data-index="${i}" aria-label="Move up" ${i === 0 ? html`disabled` : ''}>${icon('up')}</button>
-            <button type="button" data-move="1" data-index="${i}" aria-label="Move down" ${i === draft.showcases.length - 1 ? html`disabled` : ''}>${icon('down')}</button>
-            <button type="button" data-remove="${i}" aria-label="Remove showcase">${icon('trash')}</button>
+            <button type="button" data-move="-1" data-index="${i}" aria-label="${t('Move up')}" ${i === 0 ? html`disabled` : ''}>${icon('up')}</button>
+            <button type="button" data-move="1" data-index="${i}" aria-label="${t('Move down')}" ${i === draft.showcases.length - 1 ? html`disabled` : ''}>${icon('down')}</button>
+            <button type="button" data-remove="${i}" aria-label="${t('Remove showcase')}">${icon('trash')}</button>
           </div>
         </div>
         ${body}
@@ -138,9 +139,9 @@ export async function customizeView(app) {
   const showcasesSection = () => html`
     ${draft.showcases.length
       ? draft.showcases.map(showcaseEditor)
-      : html`<p class="muted">No showcases yet. Add one below. They appear on your profile in this order.</p>`}
+      : html`<p class="muted">${t('No showcases yet. Add one below. They appear on your profile in this order.')}</p>`}
     <div class="add-showcase">
-      <span class="muted small">Add a showcase (${draft.showcases.length}/${options.maxShowcases})</span>
+      <span class="muted small">${t('Add a showcase ({n}/{max})', { n: draft.showcases.length, max: options.maxShowcases })}</span>
       <div class="add-buttons">
         ${options.showcaseTypes.map((type) => html`
           <button type="button" class="btn btn-quiet btn-sm" data-add="${type}" ${draft.showcases.length >= options.maxShowcases ? html`disabled` : ''}>
@@ -153,22 +154,22 @@ export async function customizeView(app) {
     <div class="avatar-edit">
       ${avatar(previewUser(), 'xl')}
       <div class="avatar-actions">
-        <label class="btn btn-accent">Upload image<input type="file" id="avatar-file" accept="image/*" hidden></label>
-        ${state.user.avatarUrl ? html`<button type="button" class="btn btn-quiet" id="avatar-remove">Remove</button>` : ''}
-        <p class="muted small">Square images look best. We crop and resize it for you.</p>
+        <label class="btn btn-accent">${t('Upload image')}<input type="file" id="avatar-file" accept="image/*" hidden></label>
+        ${state.user.avatarUrl ? html`<button type="button" class="btn btn-quiet" id="avatar-remove">${t('Remove')}</button>` : ''}
+        <p class="muted small">${t('Square images look best. We crop and resize it for you.')}</p>
       </div>
     </div>
-    <h3 class="subhead">Avatar frame</h3>
+    <h3 class="subhead">${t('Avatar frame')}</h3>
     <div class="swatches">
       ${options.frames.map((f) => swatch(draft.avatarFrame === f, html`data-frame="${f}"`, avatar({ ...previewUser(), avatarFrame: f }, 'md'), FRAME_NAMES[f]))}
     </div>`;
 
   const backgroundSection = () => html`
-    <h3 class="subhead">Scenes</h3>
+    <h3 class="subhead">${t('Scenes')}</h3>
     <div class="swatches">
       ${options.backgrounds.map((b) => swatch(draft.background === b, html`data-background="${b}"`, html`<span class="bg-swatch bg-${b}"></span>`, BACKGROUND_NAMES[b]))}
     </div>
-    <h3 class="subhead">From your games</h3>
+    <h3 class="subhead">${t('From your games')}</h3>
     ${withArt.length
       ? html`<div class="swatches">${withArt.map((e) => swatch(
           draft.background === `game:${e.gameId}`,
@@ -176,61 +177,61 @@ export async function customizeView(app) {
           html`<span class="bg-swatch" data-bg="${e.backdrop || e.image}"></span>`,
           e.name,
         ))}</div>`
-      : html`<p class="muted small">Add games to your list to use their artwork as your background.</p>`}`;
+      : html`<p class="muted small">${t('Add games to your list to use their artwork as your background.')}</p>`}`;
 
   const themeSection = () => html`
     <div class="colors">
       ${options.accents.map((c) => html`
-        <button type="button" class="color ${draft.accent === c ? 'selected' : ''}" data-accent-pick="${c}" data-accent="${c}" aria-label="Color ${c}" aria-pressed="${draft.accent === c}"></button>`)}
+        <button type="button" class="color ${draft.accent === c ? 'selected' : ''}" data-accent-pick="${c}" data-accent="${c}" aria-label="${t('Color {c}', { c })}" aria-pressed="${draft.accent === c}"></button>`)}
     </div>`;
 
   mount(app, html`
     <div class="page customize" data-accent="${draft.accent}" id="customize">
       <div class="customize-head">
         <div>
-          <h1>Edit profile</h1>
-          <p class="muted">Changes show in the preview straight away. Nothing is public until you save.</p>
+          <h1>${t('Edit profile')}</h1>
+          <p class="muted">${t('Changes show in the preview straight away. Nothing is public until you save.')}</p>
         </div>
-        <a class="btn btn-quiet" href="${profileHref(state.user.username)}">View profile</a>
+        <a class="btn btn-quiet" href="${profileHref(state.user.username)}">${t('View profile')}</a>
       </div>
       <div class="preview" id="preview">${preview()}</div>
       <div class="customize-layout">
         <nav class="side-nav">
-          <a href="#general">General</a>
-          <a href="#avatar">Avatar</a>
-          <a href="#background">Background</a>
-          <a href="#theme">Theme color</a>
-          <a href="#showcases">Showcases</a>
+          <a href="#general">${t('General')}</a>
+          <a href="#avatar">${t('Avatar')}</a>
+          <a href="#background">${t('Background')}</a>
+          <a href="#theme">${t('Theme color')}</a>
+          <a href="#showcases">${t('Showcases')}</a>
         </nav>
         <div class="customize-sections">
           <section class="panel" id="general">
-            <h2>General</h2>
+            <h2>${t('General')}</h2>
             <div class="form-grid">
-              <label>Display name<input class="input" data-draft="displayName" value="${draft.displayName}" maxlength="40" required></label>
-              <label>Headline<input class="input" data-draft="headline" value="${draft.headline}" maxlength="60" placeholder="e.g. Souls-like addict"></label>
-              <label>Location<input class="input" data-draft="country" value="${draft.country}" maxlength="40" placeholder="e.g. Dubai, UAE"></label>
-              <label class="full">Bio<textarea class="input" data-draft="bio" maxlength="600" rows="4" placeholder="Tell people what you love to play">${draft.bio}</textarea></label>
+              <label>${t('Display name')}<input class="input" data-draft="displayName" value="${draft.displayName}" maxlength="40" required></label>
+              <label>${t('Headline')}<input class="input" data-draft="headline" value="${draft.headline}" maxlength="60" placeholder="${t('e.g. Souls-like addict')}" dir="auto"></label>
+              <label>${t('Location')}<input class="input" data-draft="country" value="${draft.country}" maxlength="40" placeholder="${t('e.g. Dubai, UAE')}" dir="auto"></label>
+              <label class="full">${t('Bio')}<textarea class="input" data-draft="bio" maxlength="600" rows="4" placeholder="${t('Tell people what you love to play')}" dir="auto">${draft.bio}</textarea></label>
             </div>
           </section>
-          <section class="panel" id="avatar"><h2>Avatar</h2><div id="avatar-section">${avatarSection()}</div></section>
-          <section class="panel" id="background"><h2>Profile background</h2><div id="background-section">${backgroundSection()}</div></section>
-          <section class="panel" id="theme"><h2>Theme color</h2><div id="theme-section">${themeSection()}</div></section>
-          <section class="panel" id="showcases"><h2>Showcases</h2><div id="showcases-section">${showcasesSection()}</div></section>
+          <section class="panel" id="avatar"><h2>${t('Avatar')}</h2><div id="avatar-section">${avatarSection()}</div></section>
+          <section class="panel" id="background"><h2>${t('Profile background')}</h2><div id="background-section">${backgroundSection()}</div></section>
+          <section class="panel" id="theme"><h2>${t('Theme color')}</h2><div id="theme-section">${themeSection()}</div></section>
+          <section class="panel" id="showcases"><h2>${t('Showcases')}</h2><div id="showcases-section">${showcasesSection()}</div></section>
           <section class="panel danger-zone">
-            <h2>Delete account</h2>
-            <p class="muted">This permanently removes your account, game list, profile and every comment you've written. It can't be undone.</p>
+            <h2>${t('Delete account')}</h2>
+            <p class="muted">${t("This permanently removes your account, game list, profile and every comment you've written. It can't be undone.")}</p>
             <form class="delete-form" id="delete-form">
-              <input class="input" type="password" name="password" placeholder="Your password" autocomplete="current-password" required aria-label="Your password">
-              <button class="pill-btn pill-danger" type="submit">Delete my account</button>
+              <input class="input" type="password" name="password" placeholder="${t('Your password')}" autocomplete="current-password" required aria-label="${t('Your password')}">
+              <button class="pill-btn pill-danger" type="submit">${t('Delete my account')}</button>
             </form>
           </section>
         </div>
       </div>
       <div class="save-bar" id="save-bar">
-        <span>You have unsaved changes</span>
+        <span>${t('You have unsaved changes')}</span>
         <div>
-          <button type="button" class="btn btn-quiet" id="discard">Discard</button>
-          <button type="button" class="btn btn-accent" id="save">Save changes</button>
+          <button type="button" class="btn btn-quiet" id="discard">${t('Discard')}</button>
+          <button type="button" class="btn btn-accent" id="save">${t('Save changes')}</button>
         </div>
       </div>
     </div>
@@ -283,8 +284,8 @@ export async function customizeView(app) {
     } else if (d.add) {
       const s = { type: d.add };
       if (d.add === 'favorite') s.gameId = library[0]?.gameId || '';
-      if (d.add === 'collection') Object.assign(s, { title: 'My collection', gameIds: [] });
-      if (d.add === 'info') Object.assign(s, { title: 'About me', text: '' });
+      if (d.add === 'collection') Object.assign(s, { title: t('My collection'), gameIds: [] });
+      if (d.add === 'info') Object.assign(s, { title: t('About me'), text: '' });
       draft.showcases.push(s);
       changed({ sections: ['showcases'] });
     } else if (d.remove !== undefined) {
@@ -300,7 +301,7 @@ export async function customizeView(app) {
       const pos = s.gameIds.indexOf(d.pick);
       if (pos >= 0) s.gameIds.splice(pos, 1);
       else if (s.gameIds.length < options.maxCollection) s.gameIds.push(d.pick);
-      else toast(`A collection holds up to ${options.maxCollection} games`, { error: true });
+      else toast(t('A collection holds up to {max} games', { max: options.maxCollection }), { error: true });
       changed({ sections: ['showcases'] });
     }
   });
@@ -313,7 +314,7 @@ export async function customizeView(app) {
       state.user.avatarUrl = user.avatarUrl;
       changed({ sections: ['avatar'] });
       document.dispatchEvent(new Event('user-changed'));
-      toast('Avatar updated');
+      toast(t('Avatar updated'));
     } catch (err) {
       toast(err.message, { error: true });
     }
@@ -334,7 +335,7 @@ export async function customizeView(app) {
   });
   $('delete-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    if (!window.confirm('Delete your GameShelf account and everything in it? This can\u2019t be undone.')) return;
+    if (!window.confirm(t('Delete your GameShelf account and everything in it? This can’t be undone.'))) return;
     try {
       await api('/me', { method: 'DELETE', body: { password: new FormData(e.target).get('password') } });
       saved = JSON.stringify(draft); // nothing left to warn about
@@ -356,7 +357,7 @@ export async function customizeView(app) {
       saved = JSON.stringify(draft);
       changed();
       document.dispatchEvent(new Event('user-changed'));
-      toast('Profile saved');
+      toast(t('Profile saved'));
     } catch (err) {
       toast(err.message, { error: true });
     } finally {

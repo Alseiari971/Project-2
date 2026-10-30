@@ -2,12 +2,14 @@
 // each with its silent Steam preview loop. Decide on each with one click, a
 // key or a swipe: "Want to play" adds it to your list, "Not for me" skips it
 // and keeps it out of later queues on this device.
-import { html, api, mount, state, year, gameHref, toast, refreshLibrary } from './lib.js';
+import { html, bdi, api, mount, state, year, gameHref, toast, refreshLibrary } from './lib.js';
 import { icon } from './icons.js';
+import { t, tn } from './i18n.js';
 import { titleArt } from './components.js';
 import { microtrailer } from './preview.js';
 
 const SKIPPED_KEY = 'gs-skipped';
+const isRtl = () => document.documentElement.dir === 'rtl';
 const MAX_SKIPPED = 200;
 const stillMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -32,7 +34,7 @@ export async function openDiscovery() {
   root.className = 'dq';
   root.setAttribute('role', 'dialog');
   root.setAttribute('aria-modal', 'true');
-  root.setAttribute('aria-label', 'Discovery queue');
+  root.setAttribute('aria-label', t('Discovery queue'));
   document.body.append(root);
   document.documentElement.classList.add('dq-open');
   const lastFocus = document.activeElement;
@@ -50,11 +52,11 @@ export async function openDiscovery() {
 
   const frame = (inner, bg = '') => html`
     <div class="dq-bg" data-bg="${bg}"></div>
-    <button type="button" class="round-btn dq-close" id="dq-close" aria-label="Close">${icon('x')}</button>
+    <button type="button" class="round-btn dq-close" id="dq-close" aria-label="${t('Close')}">${icon('x')}</button>
     <div class="dq-panel">${inner}</div>`;
 
   const load = async () => {
-    mount(root, frame(html`<p class="dq-loading">Picking games for you…</p>`));
+    mount(root, frame(html`<p class="dq-loading">${t('Picking games for you…')}</p>`));
     root.querySelector('#dq-close').addEventListener('click', close);
     try {
       queue = (await api(`/discover?skip=${encodeURIComponent(skipped().slice(0, 150).join(','))}`)).games;
@@ -66,7 +68,7 @@ export async function openDiscovery() {
     index = 0;
     added = 0;
     if (!queue.length) {
-      mount(root.querySelector('.dq-panel'), html`<p class="dq-loading">You've seen everything we had for now. Come back later!</p>`);
+      mount(root.querySelector('.dq-panel'), html`<p class="dq-loading">${t("You've seen everything we had for now. Come back later!")}</p>`);
       return;
     }
     show();
@@ -86,16 +88,16 @@ export async function openDiscovery() {
         </div>
       </div>
       <div class="dq-info">
-        <div class="dq-progress" aria-label="Game ${index + 1} of ${queue.length}">
+        <div class="dq-progress" aria-label="${t('Game {n} of {total}', { n: index + 1, total: queue.length })}">
           ${queue.map((_, i) => html`<span class="${i < index ? 'done' : i === index ? 'now' : ''}"></span>`)}
         </div>
-        ${g.pitch ? html`<p class="dq-pitch">${g.pitch}</p>` : ''}
+        ${g.pitch ? html`<p class="dq-pitch">${bdi(g.pitch)}</p>` : ''}
         <div class="dq-actions">
           ${state.user
-            ? html`<button type="button" class="pill-btn pill-accent pill-lg" id="dq-want">${icon('plus')} Want to play <kbd>W</kbd></button>`
-            : html`<a class="pill-btn pill-accent pill-lg" href="#/register" id="dq-join">Join to save games</a>`}
-          <button type="button" class="pill-btn pill-lg" id="dq-skip">Not for me <kbd>→</kbd></button>
-          <a class="dq-link" href="${gameHref(g.id)}" id="dq-view">View game ${icon('right')}</a>
+            ? html`<button type="button" class="pill-btn pill-accent pill-lg" id="dq-want">${icon('plus')} ${t('Want to play')} <kbd>W</kbd></button>`
+            : html`<a class="pill-btn pill-accent pill-lg" href="#/register" id="dq-join">${t('Join to save games')}</a>`}
+          <button type="button" class="pill-btn pill-lg" id="dq-skip">${t('Not for me')} <kbd>${isRtl() ? '←' : '→'}</kbd></button>
+          <a class="dq-link" href="${gameHref(g.id)}" id="dq-view">${t('View game')} ${icon('right', 'flip')}</a>
         </div>
       </div>`, g.backdrop));
     root.querySelector('#dq-close').addEventListener('click', close);
@@ -154,13 +156,13 @@ export async function openDiscovery() {
     mount(root, frame(html`
       <div class="dq-done">
         <span class="dq-done-mark">${icon('check')}</span>
-        <h2>Queue finished</h2>
+        <h2>${t('Queue finished')}</h2>
         <p class="muted">${added
-          ? `You added ${added} ${added === 1 ? 'game' : 'games'} to Want to play.`
-          : 'Nothing caught your eye this time. The next queue is different.'}</p>
+          ? t('You added {games} to Want to play.', { games: tn(added, 'game') })
+          : t('Nothing caught your eye this time. The next queue is different.')}</p>
         <div class="dq-actions">
-          <button type="button" class="pill-btn pill-accent pill-lg" id="dq-again">Another 10</button>
-          ${added ? html`<a class="pill-btn pill-lg" href="#/library?status=want" id="dq-library">See my list</a>` : ''}
+          <button type="button" class="pill-btn pill-accent pill-lg" id="dq-again">${t('Another 10')}</button>
+          ${added ? html`<a class="pill-btn pill-lg" href="#/library?status=want" id="dq-library">${t('See my list')}</a>` : ''}
         </div>
       </div>`));
     root.querySelector('#dq-close').addEventListener('click', close);
@@ -172,8 +174,10 @@ export async function openDiscovery() {
   const onKey = (e) => {
     if (e.key === 'Escape') close();
     else if (e.target.closest?.('input, textarea, select')) return;
-    else if (e.key === 'ArrowRight') skip();
-    else if (e.key.toLowerCase() === 'w' && state.user) want();
+    // "Next" points the way the page reads: right in English, left in Arabic.
+    else if (e.key === (isRtl() ? 'ArrowLeft' : 'ArrowRight')) skip();
+    // The W key, whatever letter it types in the keyboard's language.
+    else if (e.code === 'KeyW' && state.user) want();
   };
   document.addEventListener('keydown', onKey);
   load();

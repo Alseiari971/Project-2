@@ -2,12 +2,13 @@
 import { html, mount, state, refreshLibrary, STATUS_LABELS, parseDbTime } from '../lib.js';
 import { libraryTile, gameListRow, emptyState, pillGroup, viewToggle, savedView, saveView, stars, formatHours, statusBadge } from '../components.js';
 import { icon } from '../icons.js';
+import { t } from '../i18n.js';
 
 const SORTS = {
-  recent: { label: 'Recently updated', compare: (a, b) => parseDbTime(b.updatedAt) - parseDbTime(a.updatedAt) },
+  recent: { label: t('Recently updated'), compare: (a, b) => parseDbTime(b.updatedAt) - parseDbTime(a.updatedAt) },
   az: { label: 'A-Z', compare: (a, b) => a.name.localeCompare(b.name) },
-  rating: { label: 'Rating', compare: (a, b) => (b.rating || 0) - (a.rating || 0) },
-  hours: { label: 'Hours', compare: (a, b) => (b.playtime || 0) - (a.playtime || 0) },
+  rating: { label: t('Rating'), compare: (a, b) => (b.rating || 0) - (a.rating || 0) },
+  hours: { label: t('Hours'), compare: (a, b) => (b.playtime || 0) - (a.playtime || 0) },
 };
 
 export async function libraryView(app, params) {
@@ -25,9 +26,9 @@ export async function libraryView(app, params) {
 
   const listColumns = (e) => [
     statusBadge(e.status),
-    e.rating ? stars(e.rating) : html`<span class="muted small">Not rated</span>`,
+    e.rating ? stars(e.rating) : html`<span class="muted small">${t('Not rated')}</span>`,
     formatHours(e.playtime) || '',
-    (e.genres || []).slice(0, 3).join(', '),
+    (e.genres || []).slice(0, 3).map((x) => t(x)).join(t(', ')),
   ];
   const block = (entries) => (ui.view === 'grid'
     ? html`<div class="card-grid">${entries.map(libraryTile)}</div>`
@@ -39,10 +40,10 @@ export async function libraryView(app, params) {
       .filter((e) => (ui.status === 'all' || e.status === ui.status) && (!q || e.name.toLowerCase().includes(q)))
       .sort(SORTS[ui.sort].compare);
     if (!state.library.length) {
-      return emptyState('Nothing on your shelf yet', 'Add games from any game page, or bring in your whole Steam library.',
-        html`<div class="empty-actions"><a class="pill-btn pill-light" href="#/import">Import from Steam</a><a class="pill-btn" href="#/browse">Find games</a></div>`);
+      return emptyState(t('Nothing on your shelf yet'), t('Add games from any game page, or bring in your whole Steam library.'),
+        html`<div class="empty-actions"><a class="pill-btn pill-light" href="#/import">${t('Import from Steam')}</a><a class="pill-btn" href="#/browse">${t('Find games')}</a></div>`);
     }
-    if (!shown.length) return emptyState('No games match', 'Try another search or filter.');
+    if (!shown.length) return emptyState(t('No games match'), t('Try another search or filter.'));
     if (ui.status !== 'all') return block(shown);
     // "All" groups games by status, like a launcher's "Ready to play" sections.
     return html`${Object.entries(STATUS_LABELS).map(([key, label]) => {
@@ -52,7 +53,7 @@ export async function libraryView(app, params) {
   }
 
   const statusOptions = [
-    { key: 'all', label: 'All', count: state.library.length },
+    { key: 'all', label: t('All'), count: state.library.length },
     ...Object.entries(STATUS_LABELS).map(([key, label]) => ({ key, label, count: counts[key] })),
   ];
 
@@ -60,16 +61,16 @@ export async function libraryView(app, params) {
     mount(app, html`
       <div class="page library">
         <div class="page-head">
-          <h1>My games</h1>
+          <h1>${t('My games')}</h1>
           ${viewToggle(ui.view)}
         </div>
         <form class="search-bar" id="lib-search" role="search">
-          <label class="search-field">${icon('search')}<input type="search" name="q" value="${ui.query}" placeholder="Search your games" aria-label="Search your games" autocomplete="off"></label>
-          <button class="pill-btn" type="submit">Go</button>
+          <label class="search-field">${icon('search')}<input type="search" name="q" value="${ui.query}" placeholder="${t('Search your games')}" aria-label="${t('Search your games')}" autocomplete="off"></label>
+          <button class="pill-btn" type="submit">${t('Go')}</button>
         </form>
         <div class="filter-row">
           ${pillGroup(statusOptions, ui.status, { name: 'status' })}
-          ${pillGroup(Object.entries(SORTS).map(([key, s]) => ({ key, label: s.label })), ui.sort, { label: 'Sort by', name: 'sort' })}
+          ${pillGroup(Object.entries(SORTS).map(([key, s]) => ({ key, label: s.label })), ui.sort, { label: t('Sort by'), name: 'sort' })}
         </div>
         <div id="lib-results">${results()}</div>
       </div>

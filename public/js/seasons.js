@@ -7,6 +7,7 @@
 
 import { mount } from './lib.js';
 import { icon } from './icons.js';
+import { t, tn } from './i18n.js';
 
 const PREF_KEY = 'gs-season';
 const DAY = 24 * 60 * 60 * 1000;
@@ -35,63 +36,63 @@ const daysUntil = (d, month, day) => Math.round((new Date(d.getFullYear(), month
 export const SEASONS = [
   {
     id: 'eid',
-    name: 'Eid Mubarak',
+    name: t('Eid Mubarak'),
     ornament: 'season-sparkle',
     fx: 'sparkles',
     active: (d) => {
       const h = hijri(d);
       return (h.month === 10 && h.day <= 3) || (h.month === 12 && h.day >= 10 && h.day <= 13);
     },
-    note: (d) => (hijri(d).month === 10 ? 'Eid al-Fitr' : 'Eid al-Adha'),
+    note: (d) => (hijri(d).month === 10 ? t('Eid al-Fitr') : t('Eid al-Adha')),
   },
   {
     id: 'ramadan',
-    name: 'Ramadan Nights',
+    name: t('Ramadan Nights'),
     ornament: 'season-crescent',
     fx: 'stars',
     active: (d) => hijri(d).month === 9,
-    note: (d) => `Ramadan Kareem · Night ${hijri(d).day}`,
+    note: (d) => t('Ramadan Kareem · Night {n}', { n: hijri(d).day }),
   },
   {
     id: 'lunar-new-year',
-    name: 'Lunar New Year',
+    name: t('Lunar New Year'),
     ornament: 'season-lantern',
     fx: 'lanterns',
     active: (d) => {
       const c = chinese(d);
       return c.month === 1 && c.day <= 15;
     },
-    note: (d) => `Year of the ${ZODIAC[(((d.getFullYear() - 4) % 12) + 12) % 12]}`,
+    note: (d) => t('Year of the {animal}', { animal: t(ZODIAC[(((d.getFullYear() - 4) % 12) + 12) % 12]) }),
   },
   {
     id: 'fright-night',
-    name: 'Fright Night',
+    name: t('Fright Night'),
     ornament: 'season-pumpkin',
     fx: 'embers',
     active: (d) => monthDay(d) >= 1017 && monthDay(d) <= 1102,
     note: (d) => {
       const days = daysUntil(d, 10, 31);
-      if (days > 1) return `Halloween in ${days} days`;
-      if (days === 1) return 'Halloween is tomorrow';
-      if (days === 0) return 'Happy Halloween';
-      return 'Until November 2';
+      if (days > 1) return t('Halloween in {days}', { days: tn(days, 'day') });
+      if (days === 1) return t('Halloween is tomorrow');
+      if (days === 0) return t('Happy Halloween');
+      return t('Until November 2');
     },
   },
   {
     id: 'winter',
-    name: 'Winter Shelf',
+    name: t('Winter Shelf'),
     ornament: 'season-snowflake',
     fx: 'snow',
     active: (d) => monthDay(d) >= 1210 || monthDay(d) <= 106,
-    note: (d) => (monthDay(d) >= 1231 || monthDay(d) <= 101 ? 'Happy New Year' : 'Happy holidays'),
+    note: (d) => (monthDay(d) >= 1231 || monthDay(d) <= 101 ? t('Happy New Year') : t('Happy holidays')),
   },
   {
     id: 'summer',
-    name: 'Summer Heat',
+    name: t('Summer Heat'),
     ornament: 'season-sun',
     fx: 'motes',
     active: (d) => monthDay(d) >= 615 && monthDay(d) <= 831,
-    note: () => 'Long days, big games',
+    note: () => t('Long days, big games'),
   },
 ];
 

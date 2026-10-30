@@ -1,9 +1,10 @@
 // Desktop app only: Play and Stop buttons for games installed on this PC, and
 // adding a game by picking its program file. `desktop` is the bridge from
 // desktop/preload.js; it's undefined on the website.
-import { html, api, mount, toast, year } from './lib.js';
+import { html, bdi, api, mount, toast, year } from './lib.js';
 import { gameTile, art } from './components.js';
 import { icon } from './icons.js';
+import { t } from './i18n.js';
 
 export const desktop = window.gameshelfDesktop;
 
@@ -15,14 +16,14 @@ desktop?.onGameStates((next) => {
 });
 
 // Errors thrown in the app arrive wrapped; keep just the message.
-const errorText = (err) => err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+const errorText = (err) => t(err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, ''));
 
 /** The big Play button on a game page, with an arrow for the game's options. */
 export function playButton({ key, launcher }, name) {
   return html`
     <div class="play-btn">
-      <button type="button" class="play-main" data-launch="${key}" data-name="${name}" data-launcher="${launcher}"></button>
-      <button type="button" class="play-more" data-options="${key}" data-name="${name}" aria-label="Game options" title="Game options" aria-haspopup="menu" aria-expanded="false">${icon('down')}</button>
+      <button type="button" class="play-main" data-launch="${key}" data-name="${name}" data-launcher="${t(launcher)}"></button>
+      <button type="button" class="play-more" data-options="${key}" data-name="${name}" aria-label="${t('Game options')}" title="${t('Game options')}" aria-haspopup="menu" aria-expanded="false">${icon('down')}</button>
       <div class="dropdown-menu play-menu" role="menu" hidden></div>
     </div>`;
 }
@@ -30,8 +31,8 @@ export function playButton({ key, launcher }, name) {
 /** A game on the Home row, with a round Play button on its art. */
 export function installedTile({ key, launcher, game }) {
   const tile = game.id
-    ? gameTile(game, { tag: launcher })
-    : html`<div class="tile" title="${game.name}"><div class="tile-frame">${art(game)}<span class="card-tag">${launcher}</span></div></div>`;
+    ? gameTile(game, { tag: t(launcher) })
+    : html`<div class="tile" title="${game.name}"><div class="tile-frame">${art(game)}<span class="card-tag">${t(launcher)}</span></div></div>`;
   return html`
     <div class="tile-wrap">
       ${tile}
@@ -44,8 +45,8 @@ export function addGameTile() {
   return html`
     <button type="button" class="add-tile" data-add-game>
       ${icon('plus')}
-      <strong>Add a game</strong>
-      <span>Pick its .exe file</span>
+      <strong>${t('Add a game')}</strong>
+      <span>${t('Pick its .exe file')}</span>
     </button>`;
 }
 
@@ -56,13 +57,13 @@ function paint(button) {
   const shell = button.closest('.play-btn') || button;
   shell.classList.toggle('is-active', Boolean(state));
   shell.classList.toggle('is-starting', state === 'starting');
-  button.setAttribute('aria-label', `${state ? 'Stop' : 'Play'} ${button.dataset.name}`);
+  button.setAttribute('aria-label', t(state ? 'Stop {name}' : 'Play {name}', { name: button.dataset.name }));
   if (button.classList.contains('tile-play')) {
     mount(button, icon(state ? 'stop' : 'play'));
     return;
   }
-  const note = { starting: 'Starting…', running: 'Running' }[state] || button.dataset.launcher;
-  mount(button, html`${icon(state ? 'stop' : 'play')} ${state ? 'Stop' : 'Play'}<small>${note}</small>`);
+  const note = { starting: t('Starting…'), running: t('Running') }[state] || button.dataset.launcher;
+  mount(button, html`${icon(state ? 'stop' : 'play')} ${state ? t('Stop') : t('Play')}<small>${note}</small>`);
 }
 
 function paintAll() {
@@ -81,10 +82,10 @@ export function wireLaunchButtons(root, { onAdded } = {}) {
       try {
         if (states[key]) {
           await desktop.stop(key);
-          toast(`Closed ${button.dataset.name}`);
+          toast(t('Closed {name}', { name: button.dataset.name }));
         } else {
           await desktop.launch(key);
-          toast(`Starting ${button.dataset.name}…`);
+          toast(t('Starting {name}…', { name: button.dataset.name }));
         }
       } catch (err) {
         toast(errorText(err), { error: true });
@@ -104,11 +105,11 @@ export function wireLaunchButtons(root, { onAdded } = {}) {
 
 // ---- Game options (the arrow on the Play button) -------------------------------------
 
-const GPU_CHOICES = [[0, 'Let Windows decide'], [2, 'High performance'], [1, 'Power saving']];
+const GPU_CHOICES = [[0, t('Let Windows decide')], [2, t('High performance')], [1, t('Power saving')]];
 const DONE = {
-  verify: 'Steam is checking the game files',
-  uninstall: 'Follow the uninstaller to finish',
-  'graphics-settings': 'Opened Windows graphics settings',
+  verify: t('Steam is checking the game files'),
+  uninstall: t('Follow the uninstaller to finish'),
+  'graphics-settings': t('Opened Windows graphics settings'),
 };
 
 function closeOptionMenus() {
@@ -134,19 +135,19 @@ function optionItem(action, label, { value = '', checked, danger = false, extern
 function optionsMenu(o) {
   return html`
     ${o.gpu ? html`
-      <div class="menu-label">Graphics card</div>
+      <div class="menu-label">${t('Graphics card')}</div>
       ${o.gpu.known
         ? GPU_CHOICES.map(([value, label]) => optionItem('gpu', label, { value, checked: o.gpu.value === value }))
-        : html`<p class="menu-note">Play the game once so GameShelf can find its program, then pick a graphics card here.</p>`}
-      ${optionItem('graphics-settings', 'Windows graphics settings', { external: true })}
+        : html`<p class="menu-note">${t('Play the game once so GameShelf can find its program, then pick a graphics card here.')}</p>`}
+      ${optionItem('graphics-settings', t('Windows graphics settings'), { external: true })}
       <div class="menu-sep"></div>` : ''}
-    ${o.folder ? optionItem('open-folder', 'Open game folder') : ''}
+    ${o.folder ? optionItem('open-folder', t('Open game folder')) : ''}
     ${o.steam ? html`
-      ${optionItem('steam-properties', 'Launch options & properties', { external: true })}
-      ${optionItem('verify', 'Verify game files')}` : ''}
+      ${optionItem('steam-properties', t('Launch options & properties'), { external: true })}
+      ${optionItem('verify', t('Verify game files'))}` : ''}
     ${o.uninstall || o.removable ? html`<div class="menu-sep"></div>` : ''}
-    ${o.uninstall ? optionItem('uninstall', `Uninstall with ${o.launcher}`, { danger: true }) : ''}
-    ${o.removable ? optionItem('remove', 'Remove from GameShelf', { danger: true }) : ''}`;
+    ${o.uninstall ? optionItem('uninstall', t('Uninstall with {launcher}', { launcher: o.launcher }), { danger: true }) : ''}
+    ${o.removable ? optionItem('remove', t('Remove from GameShelf'), { danger: true }) : ''}`;
 }
 
 function wireOptions(button) {
@@ -182,9 +183,9 @@ function wireOptions(button) {
       await desktop.gameAction(key, action, value === '' ? undefined : Number(value));
       if (action === 'gpu') {
         const label = GPU_CHOICES.find(([v]) => v === Number(value))[1];
-        toast(`${name}: ${label.toLowerCase()}. Takes effect next time it starts.`);
+        toast(t('{name}: {choice}. Takes effect next time it starts.', { name, choice: label }));
       } else if (action === 'remove') {
-        toast(`Removed ${name} from GameShelf`);
+        toast(t('Removed {name} from GameShelf', { name }));
         // Show the page again without the Play button.
         window.dispatchEvent(new HashChangeEvent('hashchange'));
       } else if (DONE[action]) {
@@ -228,17 +229,17 @@ export async function addGame({ onAdded } = {}) {
     <div class="pal-backdrop" id="add-backdrop">
       <form class="palette add-game" role="dialog" aria-modal="true" aria-labelledby="add-title" id="add-form">
         <div class="add-head">
-          <h2 id="add-title">Add a game</h2>
+          <h2 id="add-title">${t('Add a game')}</h2>
           <p class="muted small">${file.file}</p>
         </div>
-        <label class="add-search">Which game is it?
+        <label class="add-search">${t('Which game is it?')}
           <input class="input" name="q" value="${file.name}" autocomplete="off" spellcheck="false" required maxlength="100">
         </label>
-        <div class="add-results" id="add-results" role="radiogroup" aria-label="Matching games"></div>
+        <div class="add-results" id="add-results" role="radiogroup" aria-label="${t('Matching games')}"></div>
         <p class="form-error" id="add-error" role="alert"></p>
         <div class="add-actions">
-          <button type="button" class="btn btn-quiet" id="add-cancel">Cancel</button>
-          <button type="submit" class="btn btn-light">Add game</button>
+          <button type="button" class="btn btn-quiet" id="add-cancel">${t('Cancel')}</button>
+          <button type="submit" class="btn btn-light">${t('Add game')}</button>
         </div>
       </form>
     </div>`);
@@ -260,13 +261,13 @@ export async function addGame({ onAdded } = {}) {
         <label class="add-option">
           <input type="radio" name="match" value="${i}" ${i === 0 ? 'checked' : ''}>
           ${g.image ? html`<img class="pal-thumb" src="${g.image}" alt="" referrerpolicy="no-referrer">` : html`<span class="pal-thumb"></span>`}
-          <span class="add-option-name">${g.name}</span>
+          <span class="add-option-name">${bdi(g.name)}</span>
           <span class="muted small">${year(g.released) || ''}</span>
         </label>`)}
       <label class="add-option">
         <input type="radio" name="match" value="none" ${list.length ? '' : 'checked'}>
         <span class="pal-thumb add-none">${icon('minus')}</span>
-        <span class="add-option-name">Not listed: just call it “${q || 'this game'}”</span>
+        <span class="add-option-name">${t('Not listed: just call it “{name}”', { name: q || t('this game') })}</span>
       </label>`);
   };
 
@@ -285,7 +286,7 @@ export async function addGame({ onAdded } = {}) {
     const game = choice && choice !== 'none' ? found[Number(choice)] : null;
     try {
       await desktop.addGame({ token: file.token, name: input.value, game });
-      toast(`Added ${game?.name || input.value.trim()}`);
+      toast(t('Added {name}', { name: game?.name || input.value.trim() }));
       close();
       onAdded?.();
     } catch (err) {

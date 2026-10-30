@@ -2,8 +2,9 @@
 // it that plays the game's silent Steam preview loop, with quick actions, the
 // way streaming apps preview a title. Mouse and trackpad only; touch screens
 // keep plain cards. With "reduce motion" the card opens without movement or video.
-import { html, api, mount, state, year, gameHref, toast, refreshLibrary, STATUS_LABELS } from './lib.js';
+import { html, bdi, api, mount, state, year, gameHref, toast, refreshLibrary, STATUS_LABELS } from './lib.js';
 import { icon } from './icons.js';
+import { t } from './i18n.js';
 import { desktop, playButton, wireLaunchButtons } from './desktop.js';
 
 const OPEN_DELAY_MS = 550;
@@ -47,14 +48,14 @@ function cardHtml(d) {
       <video muted loop playsinline preload="none"></video>
     </a>
     <div class="hc-body">
-      <strong class="hc-name">${d.name}</strong>
+      <strong class="hc-name">${bdi(d.name)}</strong>
       ${d.meta ? html`<span class="hc-meta">${d.meta}</span>` : ''}
       <div class="hc-actions">
-        <a class="pill-btn pill-light btn-sm" href="${gameHref(d.id)}">View game</a>
+        <a class="pill-btn pill-light btn-sm" href="${gameHref(d.id)}">${t('View game')}</a>
         ${entry
           ? html`<span class="hc-status">${icon('check')}${STATUS_LABELS[entry.status]}</span>`
           : state.user
-            ? html`<button type="button" class="pill-btn btn-sm hc-want">${icon('plus')}Want to play</button>`
+            ? html`<button type="button" class="pill-btn btn-sm hc-want">${icon('plus')}${t('Want to play')}</button>`
             : ''}
         <span class="play-slot hc-play"></span>
       </div>
@@ -98,8 +99,8 @@ function open(tile) {
       await api(`/me/library/${encodeURIComponent(d.id)}`, { method: 'PUT', body: { status: 'want' } });
       await refreshLibrary();
       document.dispatchEvent(new Event('library-changed'));
-      mount(button, html`${icon('check')}On your list`);
-      toast(`Added ${d.name} to Want to play`);
+      mount(button, html`${icon('check')}${t('On your list')}`);
+      toast(t('Added {name} to Want to play', { name: d.name }));
     } catch (err) {
       button.disabled = false;
       toast(err.message, { error: true });

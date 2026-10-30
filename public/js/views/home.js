@@ -1,10 +1,11 @@
 // The home page. It changes with the seasons (see ../seasons.js): a big
 // spotlight with moving trailer footage up top, then the season's own
 // sections between the regular rows.
-import { html, api, mount, state, year, gameHref, onLeave } from '../lib.js';
+import { html, bdi, th, api, mount, state, year, gameHref, onLeave } from '../lib.js';
 import { gameTile, libraryTile, rankTile, posterTile, row, enableRows, titleArt, formatHours } from '../components.js';
 import { desktop, installedTile, addGameTile, wireLaunchButtons, playButton } from '../desktop.js';
 import { icon } from '../icons.js';
+import { t, tn, locale } from '../i18n.js';
 import { SEASONS, currentSeason, seasonNote, seasonPreference, setSeasonPreference, applySeason } from '../seasons.js';
 import { startSeasonFx } from '../season-fx.js';
 import { artColor } from '../art-color.js';
@@ -13,13 +14,18 @@ import { openDiscovery } from '../discover.js';
 
 const DAY = 24 * 60 * 60 * 1000;
 const stillMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
-const genresLine = (g) => [year(g.released), ...g.genres.slice(0, 2)].filter(Boolean).join(' · ');
+const genresLine = (g) => [year(g.released), ...g.genres.slice(0, 2).map((x) => t(x))].filter(Boolean).join(' · ');
+// Titles from the server with a year in them are translated with the year as {year}.
+const tTitle = (title) => {
+  const yr = title.match(/\d{4}/)?.[0];
+  return yr ? t(title.replace(yr, '{year}'), { year: yr }) : t(title);
+};
 
 // ---- Spotlight -------------------------------------------------------------------
 
 function spotlight(games, season) {
   return html`
-    <section class="spotlight" id="spotlight" aria-roledescription="carousel" aria-label="Spotlight">
+    <section class="spotlight" id="spotlight" aria-roledescription="${t('carousel')}" aria-label="${t('Spotlight')}">
       <div class="sp-media" aria-hidden="true">
         ${games.map((g, i) => html`<span class="sp-art ${i === 0 ? 'active' : ''}" data-bg="${g.backdrop}"></span>`)}
         <video class="sp-video" muted loop playsinline preload="none"></video>
@@ -29,15 +35,15 @@ function spotlight(games, season) {
         <span class="sp-shade"></span>
       </div>
       <div class="sp-body" id="sp-body" aria-live="polite">${spotlightBody(games[0], season)}</div>
-      <div class="sp-rail" role="tablist" aria-label="Spotlight games">
+      <div class="sp-rail" role="tablist" aria-label="${t('Spotlight games')}">
         ${games.map((g, i) => html`
           <button type="button" class="sp-thumb ${i === 0 ? 'active' : ''}" role="tab" aria-selected="${i === 0}" data-index="${i}" title="${g.name}">
             <span class="sp-thumb-art" data-bg="${g.image || g.backdrop}"></span>
-            <span class="sp-thumb-name">${g.name}</span>
+            <span class="sp-thumb-name">${bdi(g.name)}</span>
             <span class="sp-progress"></span>
           </button>`)}
       </div>
-      <button type="button" class="sp-pause round-btn small" id="sp-pause" aria-label="Pause">${icon('pause')}</button>
+      <button type="button" class="sp-pause round-btn small" id="sp-pause" aria-label="${t('Pause')}">${icon('pause')}</button>
     </section>`;
 }
 
@@ -46,15 +52,15 @@ function spotlightBody(g, season) {
     <div class="sp-eyebrow">
       ${season
         ? html`<span class="sp-season">${icon(season.ornament)}${season.name}</span><span class="sp-note">${seasonNote(season)}</span>`
-        : html`<span class="sp-season plain">Spotlight</span>`}
+        : html`<span class="sp-season plain">${t('Spotlight')}</span>`}
     </div>
     ${titleArt({ name: g.name, logo: g.heroLogo }, 'h1')}
-    ${g.pitch ? html`<p class="sp-pitch">${g.pitch}</p>` : ''}
+    ${g.pitch ? html`<p class="sp-pitch">${bdi(g.pitch)}</p>` : ''}
     <p class="sp-meta">${genresLine(g)}</p>
     <div class="sp-actions">
-      <a class="pill-btn pill-light pill-lg" href="${gameHref(g.id)}">View game</a>
+      <a class="pill-btn pill-light pill-lg" href="${gameHref(g.id)}">${t('View game')}</a>
       <span class="play-slot" id="sp-play"></span>
-      <a class="pill-btn pill-lg sp-secondary" href="${gameHref(g.id)}?section=buy">Where to buy</a>
+      <a class="pill-btn pill-lg sp-secondary" href="${gameHref(g.id)}?section=buy">${t('Where to buy')}</a>
     </div>`;
 }
 
@@ -135,7 +141,7 @@ function wireSpotlight(root, games, season) {
     paused = value;
     el.classList.toggle('paused', paused);
     mount(pause, icon(paused ? 'play' : 'pause'));
-    pause.setAttribute('aria-label', paused ? 'Play' : 'Pause');
+    pause.setAttribute('aria-label', paused ? t('Play') : t('Pause'));
     syncVideo();
   };
   pause.addEventListener('click', () => setPaused(!paused));
@@ -164,8 +170,8 @@ function sectionHead(section, season) {
   return html`
     <div class="row-head season-head">
       <div>
-        <span class="kicker">${season ? icon(season.ornament) : ''}${section.kicker}</span>
-        <h2>${section.title}</h2>
+        <span class="kicker">${season ? icon(season.ornament) : ''}${t(section.kicker)}</span>
+        <h2>${tTitle(section.title)}</h2>
       </div>
     </div>`;
 }
@@ -182,7 +188,7 @@ function bento(section, season) {
     <a class="bento-card ${big ? 'big' : ''}" href="${gameHref(g.id)}" title="${g.name}">
       <span class="bento-art" data-bg="${g.backdrop || g.image || ''}"></span>
       <span class="bento-info">
-        <strong>${g.name}</strong>
+        <strong>${bdi(g.name)}</strong>
         ${big && g.description ? html`<span class="bento-pitch">${pitchOf(g.description)}</span>` : ''}
         <span class="bento-meta">${genresLine(g)}</span>
       </span>
@@ -197,12 +203,12 @@ function bento(section, season) {
 function countdownCard(g) {
   const date = new Date(`${g.released}T00:00:00`);
   const days = Math.max(0, Math.ceil((date - Date.now()) / DAY));
-  const when = days === 0 ? 'Out today' : days === 1 ? 'Out tomorrow' : `In ${days} days`;
+  const when = days === 0 ? t('Out today') : days === 1 ? t('Out tomorrow') : t('In {days}', { days: tn(days, 'day') });
   return html`
     <a class="cd-card" href="${gameHref(g.id)}" title="${g.name}">
       <span class="cd-art" data-bg="${g.backdrop || g.image || ''}"></span>
-      <span class="cd-date"><strong>${date.getDate()}</strong>${date.toLocaleString('en', { month: 'short' })}</span>
-      <span class="cd-info"><strong>${g.name}</strong><span>${when}</span></span>
+      <span class="cd-date"><strong>${date.getDate()}</strong>${date.toLocaleString(locale, { month: 'short' })}</span>
+      <span class="cd-info"><strong>${bdi(g.name)}</strong><span>${when}</span></span>
     </a>`;
 }
 
@@ -252,10 +258,10 @@ function discoveryCard(posters) {
   return html`
     <section class="dq-card">
       <div class="dq-card-text">
-        <span class="kicker">Discovery queue</span>
-        <h2>Ten games picked for you</h2>
-        <p>See each one in motion and decide in a click: <strong>want to play</strong> or <strong>not for me</strong>. Every queue is new.</p>
-        <button type="button" class="pill-btn pill-light pill-lg" id="dq-start">Start your queue ${icon('right')}</button>
+        <span class="kicker">${t('Discovery queue')}</span>
+        <h2>${t('Ten games picked for you')}</h2>
+        <p>${th('See each one in motion and decide in a click: {want} or {skip}. Every queue is new.', { want: html`<strong>${t('want to play')}</strong>`, skip: html`<strong>${t('not for me')}</strong>` })}</p>
+        <button type="button" class="pill-btn pill-light pill-lg" id="dq-start">${t('Start your queue')} ${icon('right', 'flip')}</button>
       </div>
       <div class="dq-card-stack" aria-hidden="true">
         ${posters.slice(0, 4).map((p, i) => html`<span class="dq-card-poster p${i}" data-bg="${p}"></span>`)}
@@ -267,10 +273,10 @@ function moodSection(moods) {
   return html`
     <section class="row mood-section">
       <div class="row-head season-head">
-        <div><span class="kicker">Pick a vibe</span><h2>What are you in the mood for?</h2></div>
+        <div><span class="kicker">${t('Pick a vibe')}</span><h2>${t('What are you in the mood for?')}</h2></div>
       </div>
-      <div class="mood-chips" role="tablist" aria-label="Moods">
-        ${moods.map((m, i) => html`<button type="button" class="mood-chip ${i === 0 ? 'active' : ''}" role="tab" aria-selected="${i === 0}" data-mood="${m.id}">${m.label}</button>`)}
+      <div class="mood-chips" role="tablist" aria-label="${t('Moods')}">
+        ${moods.map((m, i) => html`<button type="button" class="mood-chip ${i === 0 ? 'active' : ''}" role="tab" aria-selected="${i === 0}" data-mood="${m.id}">${t(m.label)}</button>`)}
       </div>
       <div id="mood-row" class="mood-row"></div>
     </section>`;
@@ -297,7 +303,7 @@ function wireMoods(root) {
     slot.classList.remove('loading');
     mount(slot, list?.length
       ? row({ head: html``, items: list.map((g) => gameTile(g)) })
-      : html`<p class="muted mood-empty">Nothing here right now. Try another mood.</p>`);
+      : html`<p class="muted mood-empty">${t('Nothing here right now. Try another mood.')}</p>`);
     enableRows(slot);
   };
   chips.forEach((c) => c.addEventListener('click', () => pick(c.dataset.mood)));
@@ -315,12 +321,12 @@ function wireMoods(root) {
 
 function standardRow(r) {
   if (r.id === 'top10') {
-    return row({ title: r.title, cls: 'row-top10', items: r.games.map((g, i) => rankTile(g, i + 1)) });
+    return row({ title: t(r.title), cls: 'row-top10', items: r.games.map((g, i) => rankTile(g, i + 1)) });
   }
   return row({
-    title: r.title,
+    title: t(r.title),
     href: r.genre ? `#/browse?genre=${encodeURIComponent(r.genre)}` : r.id === 'community' ? null : `#/browse?sort=${r.id === 'new' ? 'new' : 'popular'}`,
-    items: r.games.map((g) => gameTile(g, { tag: g.players > 1 ? `${g.players} players` : '' })),
+    items: r.games.map((g) => gameTile(g, { tag: g.players > 1 ? tn(g.players, 'player') : '' })),
   });
 }
 
@@ -339,14 +345,14 @@ function tips(backdrops) {
   ];
   return html`
     <section class="row">
-      <div class="row-head"><h2>Get more from GameShelf</h2></div>
+      <div class="row-head"><h2>${t('Get more from GameShelf')}</h2></div>
       <div class="tip-grid">
         ${cards.map((c, i) => html`
           <a class="tip-card" href="${c.link}">
             ${backdrops[i] ? html`<span class="tip-art" data-bg="${backdrops[i]}"></span>` : ''}
             <span class="tip-text">
-              <strong>${c.title}</strong>
-              <span>${c.body} <em>${c.cta} →</em></span>
+              <strong>${t(c.title)}</strong>
+              <span>${t(c.body)} <em>${t(c.cta)} ${document.documentElement.dir === 'rtl' ? '←' : '→'}</em></span>
             </span>
           </a>`)}
       </div>
@@ -358,15 +364,15 @@ function seasonPicker(season) {
   const auto = SEASONS.find((s) => s.active(new Date()));
   return html`
     <div class="season-picker">
-      <label for="season-select">Seasonal look</label>
+      <label for="season-select">${t('Seasonal look')}</label>
       <select id="season-select" class="input">
-        <option value="auto" ${pref === 'auto' ? 'selected' : ''}>Automatic${auto ? ` (${auto.name})` : ''}</option>
-        <option value="off" ${pref === 'off' ? 'selected' : ''}>Off</option>
+        <option value="auto" ${pref === 'auto' ? 'selected' : ''}>${t('Automatic')}${auto ? ` (${auto.name})` : ''}</option>
+        <option value="off" ${pref === 'off' ? 'selected' : ''}>${t('Off')}</option>
         <optgroup label="Preview a season">
           ${SEASONS.map((s) => html`<option value="${s.id}" ${pref === s.id ? 'selected' : ''}>${s.name}</option>`)}
         </optgroup>
       </select>
-      ${season ? html`<span class="muted small">Seasons change on their own through the year: Ramadan, Eid, Lunar New Year, Halloween, winter and summer.</span>` : ''}
+      ${season ? html`<span class="muted small">${t('Seasons change on their own through the year: Ramadan, Eid, Lunar New Year, Halloween, winter and summer.')}</span>` : ''}
     </div>`;
 }
 
@@ -386,7 +392,7 @@ export async function homeView(app) {
       ${home.spotlight.length ? spotlight(home.spotlight, season) : ''}
       <div id="installed-row"></div>
       ${state.library.length
-        ? row({ title: 'My games', href: '#/library', cls: 'row-small', items: state.library.slice(0, 20).map(libraryTile) })
+        ? row({ title: t('My games'), href: '#/library', cls: 'row-small', items: state.library.slice(0, 20).map(libraryTile) })
         : ''}
       ${first || ''}
       ${top10 ? standardRow(top10) : ''}
@@ -396,17 +402,19 @@ export async function homeView(app) {
       ${otherRows.map(standardRow)}
       ${tips(backdrops)}
       <section class="row">
-        <div class="row-head"><h2>Browse by genre</h2></div>
+        <div class="row-head"><h2>${t('Browse by genre')}</h2></div>
         <div class="genre-grid">
           ${home.genres.map((g) => html`
             <a class="genre-card" href="#/browse?genre=${encodeURIComponent(g.name)}">
               ${g.image ? html`<span class="genre-art" data-bg="${g.image}"></span>` : ''}
-              <span class="genre-name">${g.name}</span>
+              <span class="genre-name">${t(g.name)}</span>
             </a>`)}
         </div>
       </section>
       ${home.source === 'local' ? html`
-        <p class="catalog-note">This is a 35-game sample catalog. Connect IGDB (free, see the README) to search every game on every platform${season ? ' and see this season’s collections' : ''}.</p>` : ''}
+        <p class="catalog-note">${season
+          ? t('This is a 35-game sample catalog. Connect IGDB (free, see the README) to search every game on every platform and see this season’s collections.')
+          : t('This is a 35-game sample catalog. Connect IGDB (free, see the README) to search every game on every platform.')}</p>` : ''}
       ${seasonPicker(season)}
     </div>
   `);
@@ -438,7 +446,7 @@ async function showInstalled() {
   const installed = await desktop.installedGames().catch(() => []);
   const slot = document.getElementById('installed-row');
   if (!slot) return;
-  mount(slot, row({ title: 'Installed on this PC', items: [...installed.map(installedTile), addGameTile()] }));
+  mount(slot, row({ title: t('Installed on this PC'), items: [...installed.map(installedTile), addGameTile()] }));
   enableRows(slot);
   wireLaunchButtons(slot, { onAdded: showInstalled });
 }

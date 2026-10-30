@@ -1,7 +1,8 @@
 // Runs before GameShelf's own scripts in the desktop window. It marks the page
 // as the desktop app (for the title bar styles) and gives the App settings page
-// a narrow way to read and save the API keys, and the Play buttons a way to find
-// and start installed games. Nothing else from the computer is exposed.
+// a narrow way to read and save the API keys, the Play buttons a way to find
+// and start installed games, and the window buttons a way to minimize, maximize
+// and close the window. Nothing else from the computer is exposed.
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('gameshelfDesktop', {
@@ -25,6 +26,17 @@ contextBridge.exposeInMainWorld('gameshelfDesktop', {
   addGame: (details) => ipcRenderer.invoke('custom:add', details),
   addedGames: () => ipcRenderer.invoke('custom:list'),
   removeAddedGame: (key) => ipcRenderer.invoke('custom:remove', key),
+  // The minimize, maximize and close buttons the page draws on Windows and Linux.
+  platform: process.platform,
+  minimizeWindow: () => ipcRenderer.invoke('window:minimize'),
+  toggleMaximizeWindow: () => ipcRenderer.invoke('window:toggle-maximize'),
+  closeWindow: () => ipcRenderer.invoke('window:close'),
+  isWindowMaximized: () => ipcRenderer.invoke('window:is-maximized'),
+  onWindowMaximized: (callback) => {
+    const listener = (_event, maximized) => callback(maximized);
+    ipcRenderer.on('window:maximized', listener);
+    return () => ipcRenderer.removeListener('window:maximized', listener);
+  },
 });
 
 window.addEventListener('DOMContentLoaded', () => {

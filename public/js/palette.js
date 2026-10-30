@@ -1,7 +1,8 @@
 // Search palette: a centered pop-up that searches as you type, opened from the
 // top bar's search pill, Ctrl/Cmd+K or "/". Arrow keys move, Enter opens.
-import { html, api, mount, state, recentGames, gameHref, year } from './lib.js';
+import { html, bdi, th, api, mount, state, recentGames, gameHref, year } from './lib.js';
 import { icon } from './icons.js';
+import { t } from './i18n.js';
 
 const DEBOUNCE_MS = 220;
 const MAX_RESULTS = 8;
@@ -15,7 +16,7 @@ function item(game, meta = '') {
       ${game.image
         ? html`<img class="pal-thumb" src="${game.image}" alt="" loading="lazy" referrerpolicy="no-referrer">`
         : html`<span class="pal-thumb"></span>`}
-      <span class="pal-name">${game.name}</span>
+      <span class="pal-name">${bdi(game.name)}</span>
       ${meta ? html`<span class="pal-meta">${meta}</span>` : ''}
     </a>`;
 }
@@ -29,11 +30,11 @@ function startView() {
   const recent = recentGames();
   const mine = state.library.filter((e) => !recent.some((r) => r.id === e.gameId)).slice(0, 5);
   if (!recent.length && !mine.length) {
-    return html`<p class="pal-empty">Search more than 500,000 games by name.</p>`;
+    return html`<p class="pal-empty">${t('Search more than 500,000 games by name.')}</p>`;
   }
   return html`
-    ${section('Recently viewed', recent)}
-    ${section('Your games', mine.map((e) => ({ ...e, id: e.gameId })))}`;
+    ${section(t('Recently viewed'), recent)}
+    ${section(t('Your games'), mine.map((e) => ({ ...e, id: e.gameId })))}`;
 }
 
 export function openPalette(initial = '') {
@@ -43,11 +44,11 @@ export function openPalette(initial = '') {
   const root = document.getElementById('palette-root');
   mount(root, html`
     <div class="pal-backdrop" id="pal-backdrop">
-      <div class="palette" role="dialog" aria-modal="true" aria-label="Search games">
+      <div class="palette" role="dialog" aria-modal="true" aria-label="${t('Search games')}">
         <div class="pal-input-row">
           ${icon('search')}
-          <input id="pal-input" type="search" placeholder="Search" autocomplete="off" spellcheck="false" aria-controls="pal-results">
-          <span class="pal-hint">Use <kbd>↑</kbd> <kbd>↓</kbd> to navigate</span>
+          <input id="pal-input" type="search" placeholder="${t('Search')}" autocomplete="off" spellcheck="false" aria-controls="pal-results">
+          <span class="pal-hint">${th('Use {up} {down} to navigate', { up: html`<kbd>↑</kbd>`, down: html`<kbd>↓</kbd>` })}</span>
         </div>
         <div class="pal-results" id="pal-results" role="listbox">${startView()}</div>
       </div>
@@ -79,12 +80,12 @@ export function openPalette(initial = '') {
       if (mySeq !== seq) return; // a newer search started
       const games = data.results.slice(0, MAX_RESULTS);
       mount(results, games.length
-        ? html`${section('Games', games, (g) => (g.released ? year(g.released) : ''))}
-            <a class="pal-all" href="#/browse?q=${encodeURIComponent(q)}">See all results for “${q}”</a>`
-        : html`<p class="pal-empty">No games found for “${q}”.</p>`);
+        ? html`${section(t('Games'), games, (g) => (g.released ? year(g.released) : ''))}
+            <a class="pal-all" href="#/browse?q=${encodeURIComponent(q)}">${t('See all results for “{q}”', { q })}</a>`
+        : html`<p class="pal-empty">${t('No games found for “{q}”.', { q })}</p>`);
       highlight(0);
     } catch {
-      if (mySeq === seq) mount(results, html`<p class="pal-empty">Search isn't working right now. Try again in a moment.</p>`);
+      if (mySeq === seq) mount(results, html`<p class="pal-empty">${t("Search isn't working right now. Try again in a moment.")}</p>`);
     }
   };
 

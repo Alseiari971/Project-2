@@ -1,4 +1,5 @@
-import { html, api, mount, state, refreshMe, profileHref } from '../lib.js';
+import { html, th, api, mount, state, refreshMe, profileHref } from '../lib.js';
+import { t } from '../i18n.js';
 
 export async function authView(app, mode) {
   const isLogin = mode === 'login';
@@ -10,20 +11,20 @@ export async function authView(app, mode) {
       <div class="auth-wall" aria-hidden="true">${art.map((g) => html`<div class="auth-tile" data-bg="${g.image}"></div>`)}</div>
       <div class="auth-shade"></div>
       <form class="auth-card" id="auth-form">
-        <h1>${isLogin ? 'Welcome back' : 'Start your shelf'}</h1>
-        <p class="muted">${isLogin ? 'Pick up where you left off.' : 'Log every game you play, rate them, and show your profile off.'}</p>
-        <label>Username
+        <h1>${isLogin ? t('Welcome back') : t('Start your shelf')}</h1>
+        <p class="muted">${isLogin ? t('Pick up where you left off.') : t('Log every game you play, rate them, and show your profile off.')}</p>
+        <label>${t('Username')}
           <input class="input" name="username" required minlength="3" maxlength="20" pattern="[A-Za-z0-9_]+" autocomplete="username" autofocus>
         </label>
-        <label>Password
+        <label>${t('Password')}
           <input class="input" name="password" type="password" required minlength="8" autocomplete="${isLogin ? 'current-password' : 'new-password'}">
         </label>
         <p class="form-error" id="auth-error" role="alert"></p>
-        ${isLogin ? '' : html`<p class="muted small">By creating an account you agree to the <a href="#/legal">terms, community rules and privacy notice</a>.</p>`}
-        <button class="btn btn-light btn-lg btn-block" type="submit">${isLogin ? 'Log in' : 'Create account'}</button>
+        ${isLogin ? '' : html`<p class="muted small">${th('By creating an account you agree to the {terms}.', { terms: html`<a href="#/legal">${t('terms, community rules and privacy notice')}</a>` })}</p>`}
+        <button class="btn btn-light btn-lg btn-block" type="submit">${isLogin ? t('Log in') : t('Create account')}</button>
         <p class="muted small center">${isLogin
-          ? html`New here? <a href="#/register">Create an account</a>`
-          : html`Already have an account? <a href="#/login">Log in</a>`}</p>
+          ? html`${t('New here?')} <a href="#/register">${t('Create an account')}</a>`
+          : html`${t('Already have an account?')} <a href="#/login">${t('Log in')}</a>`}</p>
       </form>
     </div>
   `);

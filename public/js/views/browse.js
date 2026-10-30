@@ -1,8 +1,9 @@
 import { html, api, mount, applyStyles, year } from '../lib.js';
 import { gameTile, gameListRow, emptyState, pillGroup, viewToggle, savedView, saveView } from '../components.js';
 import { icon } from '../icons.js';
+import { t } from '../i18n.js';
 
-const SORTS = { popular: 'Popular', new: 'New releases', top: 'Top rated' };
+const SORTS = { popular: t('Popular'), new: t('New releases'), top: t('Top rated') };
 
 export async function browseView(app, params) {
   const query = params.get('q') || '';
@@ -20,9 +21,9 @@ export async function browseView(app, params) {
 
   const [info, data] = await Promise.all([api('/info'), fetchPage(1)]);
   const sorts = info.source !== 'local' ? SORTS : { popular: SORTS.popular, new: SORTS.new };
-  const title = query ? `Results for “${query}”` : genre ? `${genre} games` : 'Browse';
+  const title = query ? t('Results for “{q}”', { q: query }) : genre ? t('{genre} games', { genre: t(genre) }) : t('Browse');
 
-  const meta = (g) => [g.released ? year(g.released) : '', (g.genres || []).slice(0, 3).join(', ')];
+  const meta = (g) => [g.released ? year(g.released) : '', (g.genres || []).slice(0, 3).map((x) => t(x)).join(t(', '))];
   const items = (games) => (view === 'grid'
     ? html`${games.map((g) => gameTile(g))}`
     : html`${games.map((g) => gameListRow(g, meta(g)))}`);
@@ -35,17 +36,17 @@ export async function browseView(app, params) {
         ${viewToggle(view)}
       </div>
       <form class="search-bar" id="browse-search" role="search">
-        <label class="search-field">${icon('search')}<input type="search" name="q" value="${query}" placeholder="Search" aria-label="Search games" autocomplete="off"></label>
-        <button class="pill-btn" type="submit">Go</button>
+        <label class="search-field">${icon('search')}<input type="search" name="q" value="${query}" placeholder="${t('Search')}" aria-label="${t('Search games')}" autocomplete="off"></label>
+        <button class="pill-btn" type="submit">${t('Go')}</button>
       </form>
       <div class="filter-row">
-        ${pillGroup([{ key: '', label: 'All', href: qs({ genre: '' }) }, ...info.genres.map((g) => ({ key: g, label: g, href: qs({ genre: g }) }))], genre)}
-        ${query ? '' : pillGroup(Object.entries(sorts).map(([k, label]) => ({ key: k, label, href: qs({ sort: k }) })), sort, { label: 'Sort by' })}
+        ${pillGroup([{ key: '', label: t('All'), href: qs({ genre: '' }) }, ...info.genres.map((g) => ({ key: g, label: t(g), href: qs({ genre: g }) }))], genre)}
+        ${query ? '' : pillGroup(Object.entries(sorts).map(([k, label]) => ({ key: k, label, href: qs({ sort: k }) })), sort, { label: t('Sort by') })}
       </div>
       ${games.length
         ? html`<div class="${view === 'grid' ? 'card-grid' : 'list'}" id="results">${items(games)}</div>`
-        : emptyState('No games found', 'Try a different search or genre.')}
-      <div class="center">${data.hasMore ? html`<button class="pill-btn" id="more">Load more</button>` : ''}</div>
+        : emptyState(t('No games found'), t('Try a different search or genre.'))}
+      <div class="center">${data.hasMore ? html`<button class="pill-btn" id="more">${t('Load more')}</button>` : ''}</div>
     </div>
   `);
 
@@ -76,7 +77,7 @@ export async function browseView(app, params) {
   const more = document.getElementById('more');
   more?.addEventListener('click', async () => {
     more.disabled = true;
-    more.textContent = 'Loading…';
+    more.textContent = t('Loading…');
     try {
       const next = await fetchPage(++page);
       games = games.concat(next.results);
@@ -84,10 +85,10 @@ export async function browseView(app, params) {
       results.insertAdjacentHTML('beforeend', items(next.results).value);
       applyStyles(results);
       if (!next.hasMore) return more.remove();
-      more.textContent = 'Load more';
+      more.textContent = t('Load more');
     } catch {
       page--;
-      more.textContent = 'Try again';
+      more.textContent = t('Try again');
     } finally {
       more.disabled = false;
     }
