@@ -11,6 +11,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from arabic_compiler.fingerprint import FingerprintTable
 from arabic_compiler.packbuild import BuildError, build, parse_args
 from arabic_compiler.remsg import read_dump, write_dump
 from arabic_compiler.repak import ENTRY, PakError, murmur3_32, path_hashes, read_pak, write_pak
@@ -211,6 +212,19 @@ class BuildingReEngine(unittest.TestCase):
         self.assertEqual(entries[ENTRIES[0][0]][1], 'عربي ' + ENTRIES[0][1])
         # The game's own folder isn't written to.
         self.assertEqual(sorted(p.name for p in (self.tmp / 'extracted/natives/stm/message/mes_main').iterdir()), ['ch_mes_main.msg.22'])
+
+    def test_an_overlay_pack_from_the_same_message_files(self):
+        args = parse_args([str(self.extracted(with_dump=False)), '--engine', 'overlay', '--msg-tool', str(self.tool),
+                           '--id', 'test-re-overlay', '--version', '1.0.0', '--steam-app-id', '1173690',
+                           '--key', str(self.keys / 'k/pack-signing.key'), '--out', str(self.tmp / 'out'),
+                           '--provider', 'openai', '--model', 'test-model', '--api-base', self.api.base])
+        pack = build(args, log=self.logged.append)
+        read = node_read_pack(pack, self.keys / 'k/pack-signing.pub')
+        self.assertEqual(read['manifest']['engine'], 'overlay')
+        self.assertEqual(read['files'], ['fingerprints.json'])
+        table = FingerprintTable(json.loads((pack / 'payload/fingerprints.json').read_text(encoding='utf-8')))
+        # What OCR reads has no colour tags.
+        self.assertEqual(table.lookup('Leon, get down!').arabic, 'عربي Leon, get down!')
 
     def test_without_the_tool_it_stops_with_the_arabic_dumps_written(self):
         with self.assertRaisesRegex(BuildError, '--msg-tool'):

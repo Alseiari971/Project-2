@@ -561,7 +561,9 @@ def build(args, log=print) -> Path:
     for note in source.notes:
         log(note)
     kind = args.kind or source.engine or 'overlay'
-    if kind == 'reengine' and source.msg_files and not source.msg_dumps and not args.msg_prebuilt:
+    # RE Engine message files without dumps (for an RE Engine pack, or an
+    # overlay pack made from the same text) are read with REMSG_Converter.
+    if source.msg_files and not source.msg_dumps and not (kind == 'reengine' and args.msg_prebuilt):
         source = dump_messages(source, args, out, log)
     # RE Engine message files that already hold the Arabic need no translating.
     prebuilt = kind == 'reengine' and args.msg_prebuilt and not source.rows
