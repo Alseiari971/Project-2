@@ -7,6 +7,9 @@ import { desktop, installedTile, addGameTile, wireLaunchButtons, playButton } fr
 import { icon } from '../icons.js';
 import { SEASONS, currentSeason, seasonNote, seasonPreference, setSeasonPreference, applySeason } from '../seasons.js';
 import { startSeasonFx } from '../season-fx.js';
+import { artColor } from '../art-color.js';
+import { enablePreviews, microtrailer } from '../preview.js';
+import { openDiscovery } from '../discover.js';
 
 const DAY = 24 * 60 * 60 * 1000;
 const stillMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -55,12 +58,12 @@ function spotlightBody(g, season) {
     </div>`;
 }
 
-const trailers = new Map();
-function microtrailer(appId) {
-  if (!trailers.has(appId)) {
-    trailers.set(appId, api(`/steam/${appId}/microtrailer`).then((d) => d.url).catch(() => null));
-  }
-  return trailers.get(appId);
+// The page around the spotlight takes on the color of the game in it.
+function tintPage(g, isCurrent) {
+  const content = document.querySelector('.content');
+  artColor(g.backdrop).then((rgb) => {
+    if (rgb && isCurrent()) content.style.setProperty('--art', `rgb(${rgb.join(' ')})`);
+  });
 }
 
 function wireSpotlight(root, games, season) {
@@ -93,6 +96,7 @@ function wireSpotlight(root, games, season) {
       t.setAttribute('aria-selected', String(n === index));
     });
     mount(body, spotlightBody(g, season));
+    tintPage(g, () => games[index] === g);
     body.classList.remove('enter');
     void body.offsetWidth;
     body.classList.add('enter');
@@ -242,6 +246,71 @@ function seasonalSection(section, season) {
   return row({ head, cls: 'season-section', items: section.games.map((g) => gameTile(g)) });
 }
 
+// ---- Discovery queue and moods ---------------------------------------------------------
+
+function discoveryCard(posters) {
+  return html`
+    <section class="dq-card">
+      <div class="dq-card-text">
+        <span class="kicker">Discovery queue</span>
+        <h2>Ten games picked for you</h2>
+        <p>See each one in motion and decide in a click: <strong>want to play</strong> or <strong>not for me</strong>. Every queue is new.</p>
+        <button type="button" class="pill-btn pill-light pill-lg" id="dq-start">Start your queue ${icon('right')}</button>
+      </div>
+      <div class="dq-card-stack" aria-hidden="true">
+        ${posters.slice(0, 4).map((p, i) => html`<span class="dq-card-poster p${i}" data-bg="${p}"></span>`)}
+      </div>
+    </section>`;
+}
+
+function moodSection(moods) {
+  return html`
+    <section class="row mood-section">
+      <div class="row-head season-head">
+        <div><span class="kicker">Pick a vibe</span><h2>What are you in the mood for?</h2></div>
+      </div>
+      <div class="mood-chips" role="tablist" aria-label="Moods">
+        ${moods.map((m, i) => html`<button type="button" class="mood-chip ${i === 0 ? 'active' : ''}" role="tab" aria-selected="${i === 0}" data-mood="${m.id}">${m.label}</button>`)}
+      </div>
+      <div id="mood-row" class="mood-row"></div>
+    </section>`;
+}
+
+const moodCache = new Map();
+
+function wireMoods(root) {
+  const section = root.querySelector('.mood-section');
+  if (!section) return;
+  const slot = section.querySelector('#mood-row');
+  const chips = [...section.querySelectorAll('.mood-chip')];
+  let asked = null;
+  const pick = async (id) => {
+    asked = id;
+    chips.forEach((c) => {
+      c.classList.toggle('active', c.dataset.mood === id);
+      c.setAttribute('aria-selected', String(c.dataset.mood === id));
+    });
+    slot.classList.add('loading');
+    if (!moodCache.has(id)) moodCache.set(id, api(`/moods/${id}`).then((d) => d.games).catch(() => null));
+    const list = await moodCache.get(id);
+    if (asked !== id) return;
+    slot.classList.remove('loading');
+    mount(slot, list?.length
+      ? row({ head: html``, items: list.map((g) => gameTile(g)) })
+      : html`<p class="muted mood-empty">Nothing here right now. Try another mood.</p>`);
+    enableRows(slot);
+  };
+  chips.forEach((c) => c.addEventListener('click', () => pick(c.dataset.mood)));
+  // The first mood loads once the section scrolls near the screen.
+  const watcher = new IntersectionObserver(([entry]) => {
+    if (!entry.isIntersecting) return;
+    watcher.disconnect();
+    pick(chips[0].dataset.mood);
+  }, { rootMargin: '400px' });
+  watcher.observe(section);
+  onLeave(() => watcher.disconnect());
+}
+
 // ---- Regular rows, tips and the season picker ----------------------------------------
 
 function standardRow(r) {
@@ -310,6 +379,7 @@ export async function homeView(app) {
   const [first, ...more] = sections;
   const [top10, ...otherRows] = home.rows;
   const backdrops = home.sections.flatMap((s) => s.games).map((g) => g.backdrop).filter(Boolean).slice(0, 4);
+  const posters = (top10?.games || []).map((g) => g.poster || g.image).filter(Boolean);
 
   mount(app, html`
     <div class="page home">
@@ -320,6 +390,8 @@ export async function homeView(app) {
         : ''}
       ${first || ''}
       ${top10 ? standardRow(top10) : ''}
+      ${discoveryCard(posters)}
+      ${home.moods?.length ? moodSection(home.moods) : ''}
       ${more}
       ${otherRows.map(standardRow)}
       ${tips(backdrops)}
@@ -339,7 +411,17 @@ export async function homeView(app) {
     </div>
   `);
   enableRows(app);
+  enablePreviews(app);
+  // The page tint (see tintPage) only belongs on the home page.
+  const content = document.querySelector('.content');
+  content.classList.add('tinted');
+  onLeave(() => {
+    content.classList.remove('tinted');
+    content.style.removeProperty('--art');
+  });
   if (home.spotlight.length) wireSpotlight(app, home.spotlight, season);
+  wireMoods(app);
+  app.querySelector('#dq-start').addEventListener('click', openDiscovery);
   showInstalled();
   app.querySelector('#season-select').addEventListener('change', (e) => {
     setSeasonPreference(e.target.value);

@@ -377,3 +377,47 @@ test('seasonal home: the season picks its sections, and a failing section is lef
     server.close();
   }
 });
+
+test('moods and the discovery queue', async () => {
+  const local = createLocalProvider();
+  const games = {
+    ...local,
+    async collection(query) {
+      const { results } = await local.search({ pageSize: 12 });
+      return query.sort === 'top' ? results : results.slice(0, 3);
+    },
+  };
+  const app = createApp({ db: openDatabase(':memory:'), games });
+  const server = app.listen(0);
+  await new Promise((resolve) => server.once('listening', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  let cookie = '';
+  const call = async (path, { method = 'GET', body } = {}) => {
+    const res = await fetch(base + path, {
+      method,
+      headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...(cookie ? { Cookie: cookie } : {}) },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    cookie = res.headers.get('set-cookie')?.split(';')[0] || cookie;
+    return { status: res.status, body: await res.json() };
+  };
+  try {
+    const home = await call('/api/home');
+    assert.ok(home.body.moods.some((m) => m.id === 'scary'));
+    assert.equal((await call('/api/moods/scary')).body.games.length, 12);
+    assert.equal((await call('/api/moods/nope')).status, 404);
+
+    const queue = await call('/api/discover');
+    assert.equal(queue.body.games.length, 10);
+    assert.ok(queue.body.games.every((g) => g.backdrop));
+    // Games on your list and games you skipped stay out of the queue.
+    await call('/api/auth/register', { method: 'POST', body: { username: 'queue', password: 'password123' } });
+    await call('/api/me/library/elden-ring', { method: 'PUT', body: { status: 'want' } });
+    for (let i = 0; i < 5; i++) {
+      const ids = (await call('/api/discover?skip=hades,celeste')).body.games.map((g) => g.id);
+      assert.ok(!ids.includes('elden-ring') && !ids.includes('hades') && !ids.includes('celeste'));
+    }
+  } finally {
+    server.close();
+  }
+});

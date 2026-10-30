@@ -16,7 +16,7 @@ const { SteamError } = require('./steam');
 const { transaction } = require('./db');
 const { normalizeTitle } = require('./text');
 const { steamArt } = require('./games/steam-art');
-const { SEASON_IDS, seasonPlan } = require('./seasons');
+const { SEASON_IDS, seasonPlan, MOODS, findMood } = require('./seasons');
 
 const STATUSES = ['playing', 'completed', 'played', 'want', 'dropped'];
 const USERNAME_RE = /^[a-zA-Z0-9_]{3,20}$/;
@@ -60,6 +60,10 @@ const libraryEntry = (row) => ({
   playtime: row.playtime_minutes ?? null,
   updatedAt: row.updated_at,
 });
+
+// A game for a big banner: Steam's transparent title art (shown instead of the
+// name when it loads) and a short pitch.
+const heroCard = (g) => ({ ...g, heroLogo: g.steamAppId ? steamArt(g.steamAppId).logo : null, pitch: pitchFrom(g.description) });
 
 // A short line about a game for the spotlight: its description's first
 // sentence or two, cut at a word near 180 characters.
@@ -127,6 +131,7 @@ function createApi({ db, games, prices, steam, steamStore }) {
       LIMIT 24
     `),
     playerCount: db.prepare('SELECT COUNT(*) AS n FROM library WHERE game_id = ?'),
+    libraryIds: db.prepare('SELECT game_id FROM library WHERE user_id = ?'),
     communityFavorites: db.prepare(`
       SELECT game_id, game_name, game_image, game_backdrop, game_genres, COUNT(*) AS players
       FROM library
@@ -202,13 +207,7 @@ function createApi({ db, games, prices, steam, steamStore }) {
 
     // The spotlight needs wide art. The season's own picks come first, then big
     // recent releases and trending games.
-    const spotlight = take([...seasonal, ...listFor('new'), ...listFor('trending')].filter((g) => g.backdrop), 6)
-      .map((g) => ({
-        ...g,
-        // Steam's transparent title art, shown instead of the name when it loads.
-        heroLogo: g.steamAppId ? steamArt(g.steamAppId).logo : null,
-        pitch: pitchFrom(g.description),
-      }));
+    const spotlight = take([...seasonal, ...listFor('new'), ...listFor('trending')].filter((g) => g.backdrop), 6).map(heroCard);
     const top10 = take(listFor('trending'), 10);
     const SECTION_SIZES = { bento: 5, countdown: 12 };
     const sections = plan.sections.map((s, i) => ({
@@ -245,7 +244,42 @@ function createApi({ db, games, prices, steam, steamStore }) {
       if (game) used.add(game.id);
       return { name, image: game ? game.backdrop || game.image : null };
     });
-    res.json({ source: games.name, season: plan.id, spotlight, sections, rows: visibleRows, genres });
+    // Moods need a game database that can filter by theme and mode (IGDB).
+    const moods = games.collection ? MOODS.map(({ id, label }) => ({ id, label })) : [];
+    res.json({ source: games.name, season: plan.id, spotlight, sections, rows: visibleRows, genres, moods });
+  }));
+
+  // One row of games for a mood picked on the home page.
+  api.get('/moods/:id', asyncRoute(async (req, res) => {
+    const mood = findMood(req.params.id);
+    if (!mood || !games.collection) return res.status(404).json({ error: 'Unknown mood.' });
+    const list = await games.collection({ ...mood.query, pageSize: 24 });
+    await games.addSteamArt(list);
+    res.json({ games: list });
+  }));
+
+  // The discovery queue: ten well-liked games to decide on one by one. Games
+  // already on the visitor's list, and up to 200 they said no to, are left out.
+  api.get('/discover', asyncRoute(async (req, res) => {
+    const skip = new Set(String(req.query.skip || '').split(',').filter((id) => GAME_ID_RE.test(id)).slice(0, 200));
+    if (req.user) for (const row of q.libraryIds.all(req.user.id)) skip.add(row.game_id);
+    const page = () => 1 + Math.floor(Math.random() * 3);
+    const lists = await Promise.all([
+      games.search({ sort: 'top', page: page(), pageSize: 30 }),
+      games.search({ sort: 'popular', page: page(), pageSize: 30 }),
+      games.search({ sort: 'new', pageSize: 30 }),
+    ].map((p) => p.catch(() => ({ results: [] }))));
+    const seen = new Set();
+    const pool = lists.flatMap((l) => l.results)
+      .filter((g) => g.backdrop && !skip.has(g.id) && !seen.has(g.id) && seen.add(g.id));
+    // Shuffled, so every queue is different.
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    const queue = pool.slice(0, 10);
+    await games.addSteamArt(queue);
+    res.json({ games: queue.map(heroCard) });
   }));
 
   // Steam's short silent preview loop for the home page spotlight.

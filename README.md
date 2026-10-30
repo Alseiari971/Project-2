@@ -15,6 +15,10 @@ Look up any game in the world, see where to buy it, and keep a public list of th
   - *Lunar New Year* (its first 15 days): lanterns, family, fighting and legend games
   - *Summer Heat* (Jun 15 to Aug 31): drifting light, open worlds and summer co-op
 
+  The page itself takes on the colors of the game in the spotlight, shifting with each one.
+- **Hover previews:** rest the mouse on any game card on the home page and it opens a bigger card playing the game's preview loop, with View game, Want to play and (in the Windows app) Play.
+- **Moods:** "What are you in the mood for?" chips (Scary, Chill, With friends, A great story, Competitive, Quick fun, Brain teasers, Open world) each fill a row instantly. Needs IGDB.
+- **Discovery queue:** ten well-liked games, full screen, one at a time with their preview loop. Decide with a click, a key (W to want, → to skip) or a swipe on touch screens. Skipped games stay out of later queues on that device.
   Ramadan, Eid and Lunar New Year follow the Islamic (Umm al-Qura) and Chinese calendars built into the browser, so their dates are always right. Every season also has a release countdown for upcoming games. The "Seasonal look" menu at the bottom of the home page can turn seasons off or preview any of them. The spotlight pauses on hover and has a pause button; with "reduce motion" turned on it holds still and plays no video. Seasonal sections need IGDB; the sample catalog shows the spotlight only.
 - **Steam-style profiles:** add games to your list as *Playing*, *Completed*, *Played*, *Want to play* or *Dropped* with a half-star rating, then customize your profile:
   - an avatar (upload your own) with an animated frame
@@ -112,6 +116,7 @@ public/css/          the stylesheet
 public/fonts/        the Manrope font (SIL Open Font License)
 public/js/main.js    navigation and page routing
 public/js/palette.js the search pop-up
+public/js/preview.js hover previews; discover.js the discovery queue; art-color.js the page tint
 public/js/seasons.js when each season runs, and its look (season-fx.js draws its decoration)
 public/js/views/     one file per page (home, browse, game, library, profile, edit profile, import, community, log in, about & legal, app settings)
 scripts/             developer tools (search-debug)
@@ -137,6 +142,8 @@ The website talks to the server only through this JSON API, so a phone app can r
 | --- | --- | --- |
 | GET | `/api/home?season=` | The home screen: spotlight, the season's sections and rows (`season`: fright-night, winter, ramadan, eid, lunar-new-year, summer) |
 | GET | `/api/steam/:appId/microtrailer` | Steam's silent 6-second preview loop for a game |
+| GET | `/api/moods/:id` | A row of games for a mood (scary, chill, friends, story, competitive, quick, brainy, open-world) |
+| GET | `/api/discover?skip=` | Ten games for the discovery queue, leaving out your list and the IDs in `skip` |
 | GET | `/api/games?search=&genre=&sort=&page=` | Search or browse games (`sort`: popular, new, top) |
 | GET | `/api/games/:id` | Game details, store links, who's played it |
 | GET | `/api/games/:id/prices` | Current PC deals (cheapest first) and the all-time low |

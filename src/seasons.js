@@ -93,4 +93,18 @@ function seasonPlan(id, now = new Date()) {
   };
 }
 
-module.exports = { SEASON_IDS, seasonPlan };
+// "What are you in the mood for?" on the home page: each mood fills one row.
+const MOODS = [
+  { id: 'scary', label: 'Scary', query: { all: [{ themes: ['horror', 'thriller'] }], sort: 'top' } },
+  { id: 'chill', label: 'Chill', query: { all: [{ genres: ['simulator', 'puzzle'], themes: ['sandbox', 'kids'] }], not: { themes: ['horror', 'warfare', 'erotic'] }, sort: 'top' } },
+  { id: 'friends', label: 'With friends', query: { all: [{ modes: ['co-operative', 'split screen'] }], not: NOT_FOR_EVERYONE, sort: 'top' } },
+  { id: 'story', label: 'A great story', query: { all: [{ genres: ['role-playing', 'adventure', 'visual novel'] }, { themes: ['drama', 'mystery', 'fantasy', 'science fiction'] }], sort: 'top' } },
+  { id: 'competitive', label: 'Competitive', query: { all: [{ modes: ['multiplayer', 'battle royale'] }, { genres: ['shooter', 'moba', 'fighting', 'sport', 'racing', 'real time strategy'] }], sort: 'popular' } },
+  { id: 'quick', label: 'Quick fun', query: { all: [{ genres: ['arcade', 'platform', 'racing', 'fighting', 'pinball'] }], not: NOT_FOR_EVERYONE, sort: 'top' } },
+  { id: 'brainy', label: 'Brain teasers', query: { all: [{ genres: ['puzzle', 'turn-based strategy', 'tactical', 'point-and-click'] }], sort: 'top' } },
+  { id: 'open-world', label: 'Open world', query: { all: [{ themes: ['open world'] }], sort: 'top' } },
+];
+
+const findMood = (id) => MOODS.find((m) => m.id === id) || null;
+
+module.exports = { SEASON_IDS, seasonPlan, MOODS, findMood };

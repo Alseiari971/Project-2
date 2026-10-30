@@ -60,6 +60,12 @@ export function wireStarInput(el, onPick) {
   el.addEventListener('mouseleave', () => show(Number(el.dataset.value)));
 }
 
+/** What a hover preview (preview.js) needs to know about a game card. */
+function previewData(game) {
+  const meta = [game.released ? year(game.released) : '', ...(game.genres || []).slice(0, 2)].filter(Boolean).join(' · ');
+  return html`data-preview="${game.id || game.gameId}" data-steam="${game.steamAppId || ''}" data-meta="${meta}" data-wide="${game.backdrop || game.image || ''}"`;
+}
+
 /**
  * Wide game card, launcher style: just the artwork. Art without the game's
  * name gets the title bottom-left; `tag` sits top-left and `corner` bottom-right.
@@ -69,7 +75,7 @@ export function gameTile(game, { tag = '', corner = '' } = {}) {
   // Placeholders without an image already show the name, so they need no overlay.
   const overlay = Boolean(game.image) && !hasTitleArt(game);
   return html`
-    <a class="tile" href="${gameHref(id)}" title="${game.name}">
+    <a class="tile" href="${gameHref(id)}" title="${game.name}" ${previewData(game)}>
       <div class="tile-frame ${overlay ? 'needs-title' : ''}">
         ${art(game)}
         ${tag ? html`<span class="card-tag">${tag}</span>` : ''}
@@ -148,7 +154,7 @@ function composedPoster(game) {
 /** A tall poster with the game's name under it, for poster rows. */
 export function posterTile(game) {
   return html`
-    <a class="poster-tile" href="${gameHref(game.id)}" title="${game.name}">
+    <a class="poster-tile" href="${gameHref(game.id)}" title="${game.name}" ${previewData(game)}>
       <div class="poster" data-name="${game.name}" data-image="${game.image || ''}" data-year="${game.released || ''}">
         ${game.poster
           ? html`<img class="poster-art" src="${game.poster}" alt="" loading="lazy" referrerpolicy="no-referrer">`
@@ -161,7 +167,7 @@ export function posterTile(game) {
 /** Tall poster with a big rank number, for the Top 10 row. */
 export function rankTile(game, rank) {
   return html`
-    <a class="rank-tile" href="${gameHref(game.id)}" title="${game.name}">
+    <a class="rank-tile" href="${gameHref(game.id)}" title="${game.name}" ${previewData(game)}>
       <span class="rank" aria-hidden="true">${rank}</span>
       <div class="poster" data-name="${game.name}" data-image="${game.image || ''}" data-year="${game.released || ''}">
         ${game.poster

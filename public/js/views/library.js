@@ -10,13 +10,15 @@ const SORTS = {
   hours: { label: 'Hours', compare: (a, b) => (b.playtime || 0) - (a.playtime || 0) },
 };
 
-export async function libraryView(app) {
+export async function libraryView(app, params) {
   if (!state.user) {
     location.hash = '#/login';
     return;
   }
   await refreshLibrary();
-  const ui = { status: 'all', sort: 'recent', query: '', view: savedView() };
+  // A link can open the list on one status, e.g. #/library?status=want.
+  const linked = params?.get('status');
+  const ui = { status: STATUS_LABELS[linked] ? linked : 'all', sort: 'recent', query: '', view: savedView() };
 
   const counts = Object.fromEntries(Object.keys(STATUS_LABELS).map((k) => [k, 0]));
   for (const e of state.library) counts[e.status]++;
