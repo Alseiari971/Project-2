@@ -515,33 +515,179 @@ a.tag:hover { background: #3a3c43; }
 .poster-title { position: relative; font-weight: 800; font-size: 15px; line-height: 1.15; letter-spacing: -0.02em; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .poster-year { position: relative; color: var(--dim); font-size: 12px; font-weight: 700; }
 
-/* ---- Home ---- */
-.feature { margin-bottom: 32px; }
-.feature-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 16px; }
-.feature-head h1 { font-size: clamp(24px, 2.2vw, 30px); min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.feature-arrows { display: flex; gap: 8px; }
-.feature-track {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: calc(50% - 64px);
-  gap: 16px;
-  overflow-x: auto;
-  scroll-snap-type: x mandatory;
-  scrollbar-width: none;
+/* ---- Seasons ---- */
+/* The home page dresses up for the time of year (public/js/seasons.js). Each
+   season sets an accent, a lighter second color, the text color on the accent,
+   a dark tint for the spotlight and a haze color, as RGB triples where they
+   go into gradients. Without a season these fall back to GameShelf's own. */
+:root {
+  --s-accent: var(--accent);
+  --s-accent-2: #f2f3f5;
+  --s-ink: var(--on-accent);
+  --s-tint: 11, 12, 14;
+  --s-haze: 0, 0, 0;
 }
-.feature-track::-webkit-scrollbar { display: none; }
-.feature-card { position: relative; aspect-ratio: 16 / 9; border-radius: var(--radius); overflow: hidden; background: var(--panel); scroll-snap-align: start; }
-.feature-bg { position: absolute; inset: 0; background-size: cover; background-position: center; transition: transform 0.6s var(--ease); }
-.feature-card:hover .feature-bg { transform: scale(1.03); }
-.feature-shade { position: absolute; inset: 0; background: linear-gradient(0deg, rgba(0, 0, 0, 0.65), transparent 40%); }
-.feature-tag { position: absolute; top: 16px; right: 16px; }
-.feature-info { position: absolute; left: 24px; right: 24px; bottom: 24px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-.feature-cta { opacity: 0; transform: translateY(4px); transition: opacity 0.2s, transform 0.2s; }
-.feature-card:hover .feature-cta, .feature-card:focus-visible .feature-cta { opacity: 1; transform: none; }
-.feature-info .title-art { font-size: clamp(24px, 2.6vw, 38px); font-weight: 800; letter-spacing: -0.03em; line-height: 1.05; text-shadow: 0 4px 24px rgba(0, 0, 0, 0.5); }
-.feature-info .logo-art { max-height: clamp(56px, 7vw, 104px); max-width: 70%; object-fit: contain; object-position: left bottom; filter: drop-shadow(0 6px 24px rgba(0, 0, 0, 0.5)); }
+:root[data-season="fright-night"] { --s-accent: #ff7a1a; --s-accent-2: #ffc078; --s-ink: #1a0800; --s-tint: 22, 9, 4; --s-haze: 112, 44, 150; }
+:root[data-season="winter"] { --s-accent: #8fdcff; --s-accent-2: #e2f6ff; --s-ink: #00131c; --s-tint: 6, 15, 24; --s-haze: 110, 175, 230; }
+:root[data-season="ramadan"] { --s-accent: #f2c66d; --s-accent-2: #ffe7b0; --s-ink: #1a1200; --s-tint: 7, 11, 32; --s-haze: 46, 66, 160; }
+:root[data-season="eid"] { --s-accent: #ffd36b; --s-accent-2: #8ff0c9; --s-ink: #1a1200; --s-tint: 4, 20, 16; --s-haze: 30, 150, 105; }
+:root[data-season="lunar-new-year"] { --s-accent: #ff4d3d; --s-accent-2: #ffc94a; --s-ink: #1a0300; --s-tint: 28, 6, 6; --s-haze: 210, 40, 30; }
+:root[data-season="summer"] { --s-accent: #ffb020; --s-accent-2: #ffd08a; --s-ink: #1a0f00; --s-tint: 24, 15, 4; --s-haze: 255, 150, 50; }
+
+/* The season's ornament beside the logo. */
+.logo-ornament { display: inline-grid; margin-left: 6px; vertical-align: -1px; color: var(--s-accent); --season-carve: var(--chrome); }
+.logo-ornament .icon { width: 16px; height: 16px; }
+
+/* ---- Home: spotlight ---- */
+/* Full width, cinematic: the game's art (and Steam's silent preview loop once
+   it loads) behind the season's tint, with the text bottom left and the other
+   spotlight games as thumbnails bottom right. */
+.spotlight {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 24px 40px;
+  min-height: clamp(540px, 76vh, 800px);
+  margin: -32px calc(var(--gutter) * -1) 40px;
+  padding: 120px var(--gutter) 40px;
+  background: rgb(var(--s-tint));
+}
+.sp-media { position: absolute; inset: 0; z-index: -1; }
+.sp-art, .sp-video { position: absolute; inset: 0; width: 100%; height: 100%; }
+.sp-art { background-size: cover; background-position: center 25%; opacity: 0; transform: scale(1.06); transition: opacity 1s var(--ease), transform 10s linear; }
+.sp-art.active { opacity: 1; transform: scale(1); }
+.sp-video { object-fit: cover; opacity: 0; transition: opacity 0.9s var(--ease); }
+.spotlight.has-video .sp-video { opacity: 1; }
+.sp-fx { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; mix-blend-mode: screen; }
+.sp-shade {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, rgba(var(--s-tint), 0.94) 0%, rgba(var(--s-tint), 0.6) 34%, rgba(var(--s-tint), 0) 64%),
+    linear-gradient(0deg, var(--bg) 0%, rgba(var(--s-tint), 0.4) 24%, transparent 52%),
+    linear-gradient(180deg, rgba(0, 0, 0, 0.5), transparent 20%);
+}
+/* A low glow in the season's color, drifting slowly. */
+.sp-fog {
+  display: none;
+  position: absolute;
+  inset: auto -15% -20%;
+  height: 60%;
+  background:
+    radial-gradient(ellipse 40% 60% at 25% 70%, rgba(var(--s-haze), 0.38), transparent 70%),
+    radial-gradient(ellipse 35% 50% at 75% 80%, rgba(var(--s-haze), 0.3), transparent 70%);
+  filter: blur(24px);
+  animation: haze-drift 22s ease-in-out infinite alternate;
+}
+:root[data-season] .sp-fog { display: block; }
+@keyframes haze-drift { to { transform: translateX(6%) translateY(-4%); } }
+/* Ramadan's moon. */
+.sp-emblem { display: none; }
+:root[data-season="ramadan"] .sp-emblem {
+  display: block;
+  position: absolute;
+  top: clamp(72px, 12vh, 120px);
+  right: 9%;
+  width: clamp(72px, 7vw, 120px);
+  color: #f7e1a6;
+  filter: drop-shadow(0 0 24px rgba(247, 225, 166, 0.55)) drop-shadow(0 0 64px rgba(247, 225, 166, 0.3));
+}
+.sp-emblem .icon { width: 100%; height: auto; }
+
+.sp-body { display: grid; gap: 16px; justify-items: start; max-width: 660px; }
+.sp-body.enter > * { animation: sp-in 0.7s var(--ease) both; }
+.sp-body.enter > :nth-child(2) { animation-delay: 0.05s; }
+.sp-body.enter > :nth-child(3) { animation-delay: 0.1s; }
+.sp-body.enter > :nth-child(n + 4) { animation-delay: 0.15s; }
+@keyframes sp-in { from { opacity: 0; transform: translateY(12px); } }
+.sp-eyebrow { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.sp-season { display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px 6px 10px; border-radius: 999px; background: var(--s-accent); color: var(--s-ink); font-size: 12px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; --season-carve: var(--s-accent); }
+.sp-season .icon { width: 16px; height: 16px; }
+.sp-season.plain { padding-left: 14px; background: rgba(255, 255, 255, 0.14); color: var(--text); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+.sp-note { color: var(--s-accent-2); font-size: 14px; font-weight: 700; text-shadow: 0 2px 12px rgba(0, 0, 0, 0.6); }
+.sp-body .title-art { font-size: clamp(38px, 4.8vw, 76px); font-weight: 800; line-height: 1; letter-spacing: -0.045em; text-wrap: balance; text-shadow: 0 6px 32px rgba(0, 0, 0, 0.5); }
+/* The soft light halo keeps dark logos readable on the dark shade. */
+.sp-body .logo-art { max-height: clamp(84px, 11vw, 170px); max-width: min(520px, 100%); object-fit: contain; object-position: left bottom; filter: drop-shadow(0 0 1px rgba(255, 255, 255, 0.5)) drop-shadow(0 0 22px rgba(255, 255, 255, 0.22)) drop-shadow(0 8px 32px rgba(0, 0, 0, 0.5)); }
+.sp-pitch { max-width: 560px; color: #eceef2; font-size: 16px; font-weight: 600; line-height: 1.55; text-shadow: 0 2px 16px rgba(0, 0, 0, 0.7); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.sp-meta { color: #cdd0d6; font-size: 14px; font-weight: 700; text-shadow: 0 2px 12px rgba(0, 0, 0, 0.6); }
+.sp-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 8px; }
+.sp-secondary { background: rgba(255, 255, 255, 0.14); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+.sp-secondary:hover { background: rgba(255, 255, 255, 0.24); }
+
+.sp-rail { display: grid; grid-auto-flow: column; justify-content: start; gap: 10px; }
+.sp-thumb { position: relative; width: clamp(112px, 8.6vw, 156px); aspect-ratio: 16 / 10; padding: 0; border: 0; border-radius: 10px; overflow: hidden; background: var(--panel); cursor: pointer; opacity: 0.6; box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45); transition: opacity 0.2s, transform 0.2s var(--ease); }
+.sp-thumb:hover { opacity: 0.9; transform: translateY(-2px); }
+.sp-thumb.active { opacity: 1; outline: 2px solid var(--s-accent); outline-offset: 3px; }
+.sp-thumb-art { position: absolute; inset: 0; background-size: cover; background-position: center; }
+.sp-thumb-name { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* The progress bar is the timer (see home.js). */
+.sp-progress { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: var(--s-accent); transform: scaleX(0); transform-origin: left; }
+.sp-thumb.active .sp-progress { animation: sp-fill 9s linear forwards; }
+.spotlight:hover .sp-progress, .spotlight.paused .sp-progress { animation-play-state: paused; }
+@keyframes sp-fill { to { transform: scaleX(1); } }
+/* Narrower windows: the thumbnails go under the text instead of beside it. */
+@media (max-width: 1440px) {
+  .spotlight { grid-template-columns: 1fr; }
+}
+.sp-pause { position: absolute; top: 24px; right: var(--gutter); background: rgba(0, 0, 0, 0.35); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+.sp-pause:hover { background: rgba(0, 0, 0, 0.55); }
+
+/* ---- Home: seasonal sections ---- */
+.season-head { align-items: flex-end; }
+.season-head .kicker { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; color: var(--s-accent); font-size: 12px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; --season-carve: var(--bg); }
+.season-head .kicker .icon { width: 14px; height: 14px; }
+.season-head h2 { font-size: clamp(22px, 2vw, 28px); letter-spacing: -0.03em; }
+.season-section { margin-bottom: 48px; }
+
+/* One big game and four smaller ones. */
+.bento { display: grid; grid-template-columns: 2fr 1fr 1fr; grid-template-rows: repeat(2, minmax(0, 1fr)); gap: 12px; height: clamp(400px, 34vw, 540px); padding: 0 var(--gutter); }
+.bento-card { position: relative; isolation: isolate; display: flex; align-items: flex-end; padding: 16px; border-radius: var(--radius); overflow: hidden; background: var(--panel); }
+.bento-card.big { grid-row: span 2; padding: 28px; }
+.bento-art { position: absolute; inset: 0; z-index: -2; background-size: cover; background-position: center; transition: transform 0.6s var(--ease); }
+.bento-card::after { content: ""; position: absolute; inset: 0; z-index: -1; background: linear-gradient(0deg, rgba(0, 0, 0, 0.88), rgba(0, 0, 0, 0.05) 60%); }
+.bento-card:hover .bento-art { transform: scale(1.04); }
+.bento-card:hover, .bento-card:focus-visible { outline: 2px solid var(--s-accent); outline-offset: -2px; }
+.bento-info { display: grid; gap: 6px; min-width: 0; }
+.bento-info strong { font-size: 16px; font-weight: 800; line-height: 1.2; letter-spacing: -0.01em; }
+.bento-card.big .bento-info strong { font-size: clamp(26px, 2.6vw, 38px); line-height: 1.05; letter-spacing: -0.035em; }
+.bento-pitch { max-width: 520px; color: #dfe1e5; font-size: 15px; font-weight: 600; line-height: 1.5; }
+.bento-meta { color: #b9bcc3; font-size: 13px; font-weight: 700; }
+
+/* Release dates with a countdown. */
+.row-countdown .row-track { grid-auto-columns: clamp(260px, 21vw, 340px); }
+.cd-card { position: relative; isolation: isolate; display: flex; align-items: flex-end; gap: 12px; aspect-ratio: 16 / 9; padding: 14px; border-radius: var(--radius); overflow: hidden; background: var(--panel); }
+.cd-art { position: absolute; inset: 0; z-index: -2; background-size: cover; background-position: center; transition: transform 0.5s var(--ease); }
+.cd-card::after { content: ""; position: absolute; inset: 0; z-index: -1; background: linear-gradient(0deg, rgba(0, 0, 0, 0.85), transparent 65%); }
+.cd-card:hover .cd-art { transform: scale(1.04); }
+.cd-date { flex: none; display: grid; justify-items: center; width: 54px; padding: 6px 0 7px; border-radius: 10px; background: var(--s-accent); color: var(--s-ink); font-size: 11px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; line-height: 1.1; }
+.cd-date strong { font-size: 22px; letter-spacing: -0.02em; }
+.cd-info { display: grid; gap: 2px; min-width: 0; }
+.cd-info strong { font-size: 15px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cd-info span { color: var(--s-accent-2); font-size: 13px; font-weight: 700; }
+
+/* Tall posters with names. */
+.row-posters .row-track { grid-auto-columns: clamp(150px, 11vw, 190px); }
+.poster-tile { display: grid; gap: 8px; min-width: 0; }
+.poster-tile .poster { flex: none; }
+.poster-tile:hover .poster { transform: translateY(-4px); }
+.poster-caption { font-size: 14px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Winter: the year in review. */
+.recap { position: relative; isolation: isolate; margin: 0 var(--gutter); padding: clamp(24px, 3vw, 40px); border-radius: var(--radius); overflow: hidden; background: linear-gradient(110deg, rgb(var(--s-tint)), var(--panel)); border: 1px solid var(--border); }
+.recap-art { position: absolute; inset: 0; z-index: -1; background-size: cover; background-position: center; opacity: 0.3; -webkit-mask-image: linear-gradient(90deg, transparent 20%, #000); mask-image: linear-gradient(90deg, transparent 20%, #000); }
+.recap-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 24px; }
+.recap-stat { display: grid; gap: 4px; min-width: 0; }
+.recap-stat strong { font-size: clamp(28px, 3vw, 44px); font-weight: 800; letter-spacing: -0.035em; line-height: 1.05; color: var(--s-accent-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.recap-stat span { color: var(--dim); font-size: 14px; font-weight: 700; }
+
+.season-picker { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--border); }
+.season-picker label { font-size: 14px; font-weight: 800; }
+.season-picker select { width: auto; min-width: 260px; }
+
 .title-art.has-logo { line-height: 0; }
-.feature-meta { color: #e6e7ea; font-size: 14px; font-weight: 700; text-shadow: 0 2px 12px rgba(0, 0, 0, 0.6); }
 
 .tip-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; padding: 0 var(--gutter); }
 .tip-card { position: relative; min-height: 200px; padding: 24px; border-radius: var(--radius); overflow: hidden; background: var(--panel); display: flex; align-items: flex-start; transition: background 0.2s; }
@@ -733,8 +879,7 @@ a.score-card:hover { border-color: var(--border-strong); }
 .sk-page { padding: 32px var(--gutter) 48px; }
 .sk-title { width: 260px; height: 32px; margin-bottom: 24px; }
 .sk-heading { width: 180px; height: 20px; margin-bottom: 12px; }
-.sk-feature { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 32px; }
-.sk-feature .sk { aspect-ratio: 16 / 9; border-radius: var(--radius); }
+.sk-spotlight { height: clamp(540px, 76vh, 800px); border-radius: 0; margin-bottom: 40px; }
 .sk-row { margin-bottom: 32px; }
 .sk-track { display: flex; gap: 16px; overflow: hidden; }
 .sk-tile { flex: 0 0 var(--tile-w); }
@@ -1260,7 +1405,9 @@ label { display: grid; gap: 8px; font-size: 13px; font-weight: 700; color: var(-
   .gp-cover.tall { width: 160px; }
   .profile-layout { grid-template-columns: 1fr; }
   .profile-side { position: static; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
-  .feature-track { grid-auto-columns: calc(70% - 16px); }
+  .bento { grid-template-columns: 1.4fr 1fr; grid-template-rows: repeat(3, minmax(0, 1fr)); height: clamp(520px, 60vw, 640px); }
+  .bento-card.big { grid-row: span 3; }
+  .bento-card:nth-child(n + 5) { display: none; }
 }
 
 /* ---- Phones: no sidebar, app-style bottom tab bar ---- */
@@ -1292,7 +1439,17 @@ label { display: grid; gap: 8px; font-size: 13px; font-weight: 700; color: var(-
   .save-bar > span { display: none; }
 
   .page { padding-top: 24px; }
-  .feature-track { grid-auto-columns: 88%; }
+  .spotlight { min-height: 600px; padding: 140px var(--gutter) 24px; margin-top: -32px; }
+  .sp-shade { background: linear-gradient(0deg, var(--bg) 0%, rgba(var(--s-tint), 0.75) 45%, rgba(var(--s-tint), 0.1) 100%); }
+  .sp-pitch { -webkit-line-clamp: 2; font-size: 15px; }
+  .sp-secondary { display: none; }
+  .sp-rail { overflow-x: auto; scrollbar-width: none; }
+  .sp-thumb { width: 96px; }
+  .bento { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: auto; height: auto; }
+  .bento-card { aspect-ratio: 16 / 10; }
+  .bento-card.big { grid-column: span 2; grid-row: auto; aspect-ratio: 4 / 3; }
+  .bento-card:nth-child(n + 5) { display: flex; }
+  .bento-pitch { display: none; }
   .row-arrow { display: none; }
   .row-top10 .row-track { grid-auto-columns: 46vw; }
   .rank { font-size: 104px; -webkit-text-stroke-width: 2px; }
@@ -1302,7 +1459,6 @@ label { display: grid; gap: 8px; font-size: 13px; font-weight: 700; color: var(-
   .list-row { grid-template-columns: 56px minmax(0, 1fr); grid-auto-flow: row; }
   .list-col { display: none; }
   .list-thumb { width: 56px; height: 32px; }
-  .sk-feature { grid-template-columns: 1fr; }
   .gp-head { align-items: flex-start; gap: 16px; padding-top: 0; }
   .gp-cover { width: 120px; align-self: flex-start; }
   .gp-cover.tall { width: 84px; }

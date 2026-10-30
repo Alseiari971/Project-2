@@ -6,7 +6,16 @@ Look up any game in the world, see where to buy it, and keep a public list of th
 - **We don't sell anything:** each game page has "Where to buy" links to the real stores (Steam, Epic, GOG, PlayStation Store, Xbox, Nintendo eShop, itch.io, App Store, Google Play).
 - **Live prices:** the best current PC price, every store's price and the all-time low, from [CheapShark](https://www.cheapshark.com) (free, no key needed, US dollars).
 - **Steam import:** paste your Steam profile link to bring in your games and hours played.
-- **Game launcher look:** a sidebar with your games, a search pop-up (Ctrl+K or `/`), a featured carousel, a Top 10 poster row, a Library page with grid and list views, and a bottom tab bar on phones.
+- **Game launcher look:** a sidebar with your games, a search pop-up (Ctrl+K or `/`), a Top 10 poster row, a Library page with grid and list views, and a bottom tab bar on phones.
+- **A home page that changes with the seasons:** a full-width spotlight plays each game's silent 6-second Steam preview loop behind its logo, rotating through six games. The season sets the colors, a moving decoration and its own sections:
+  - *Fright Night* (Halloween, Oct 17 to Nov 2): embers, survival horror, co-op horror, new horror
+  - *Winter Shelf* (Dec 10 to Jan 6): snow, the best of the year, your year on GameShelf, cozy and couch co-op games
+  - *Ramadan Nights* (the month of Ramadan): a crescent moon and stars, co-op for after iftar, party games for the majlis, long stories for late nights
+  - *Eid Mubarak* (Eid al-Fitr and Eid al-Adha): sparkles, gift-worthy and family games
+  - *Lunar New Year* (its first 15 days): lanterns, family, fighting and legend games
+  - *Summer Heat* (Jun 15 to Aug 31): drifting light, open worlds and summer co-op
+
+  Ramadan, Eid and Lunar New Year follow the Islamic (Umm al-Qura) and Chinese calendars built into the browser, so their dates are always right. Every season also has a release countdown for upcoming games. The "Seasonal look" menu at the bottom of the home page can turn seasons off or preview any of them. The spotlight pauses on hover and has a pause button; with "reduce motion" turned on it holds still and plays no video. Seasonal sections need IGDB; the sample catalog shows the spotlight only.
 - **Steam-style profiles:** add games to your list as *Playing*, *Completed*, *Played*, *Want to play* or *Dropped* with a half-star rating, then customize your profile:
   - an avatar (upload your own) with an animated frame
   - a background, either a preset scene or art from any game on your list
@@ -89,7 +98,8 @@ src/api.js           JSON API (games, accounts, lists, profiles, comments)
 src/profile.js       profile customization, levels and badges
 src/steam.js         reading a Steam library
 src/prices.js        live prices from CheapShark
-src/steam-store.js   About, requirements, Metacritic and achievements from Steam store pages
+src/steam-store.js   About, requirements, Metacritic, achievements and preview loops from Steam store pages
+src/seasons.js       which games each season's home page sections show
 src/auth.js          passwords, login sessions
 src/db.js            SQLite database built into Node (saved to data/gameshelf.db, upgraded automatically)
 src/games/igdb.js    the IGDB game database (every game, every platform)
@@ -102,6 +112,7 @@ public/css/          the stylesheet
 public/fonts/        the Manrope font (SIL Open Font License)
 public/js/main.js    navigation and page routing
 public/js/palette.js the search pop-up
+public/js/seasons.js when each season runs, and its look (season-fx.js draws its decoration)
 public/js/views/     one file per page (home, browse, game, library, profile, edit profile, import, community, log in, about & legal, app settings)
 scripts/             developer tools (search-debug)
 test/                automated tests: npm test
@@ -124,7 +135,8 @@ The website talks to the server only through this JSON API, so a phone app can r
 
 | Method | Path | What it does |
 | --- | --- | --- |
-| GET | `/api/home` | Featured games and rows for the home screen |
+| GET | `/api/home?season=` | The home screen: spotlight, the season's sections and rows (`season`: fright-night, winter, ramadan, eid, lunar-new-year, summer) |
+| GET | `/api/steam/:appId/microtrailer` | Steam's silent 6-second preview loop for a game |
 | GET | `/api/games?search=&genre=&sort=&page=` | Search or browse games (`sort`: popular, new, top) |
 | GET | `/api/games/:id` | Game details, store links, who's played it |
 | GET | `/api/games/:id/prices` | Current PC deals (cheapest first) and the all-time low |

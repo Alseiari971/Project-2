@@ -191,7 +191,7 @@ function createIgdbProvider(clientId, clientSecret, { fetchImpl = fetch, minInte
   }
 
   // Lookup tables: game types, the Steam source, website types, popularity
-  // types, genres and themes. Loaded once a day.
+  // types, genres, themes and game modes. Loaded once a day.
   function lookups() {
     if (lookupsPromise && lookupsExpire > Date.now()) return lookupsPromise;
     lookupsExpire = Date.now() + LOOKUP_TTL_MS;
@@ -203,7 +203,8 @@ function createIgdbProvider(clientId, clientSecret, { fetchImpl = fetch, minInte
       safe('popularity_types', 'id,name'),
       safe('genres', 'id,name'),
       safe('themes', 'id,name'),
-    ]).then(([gameTypes, sources, websiteTypes, popularityTypes, genres, themes]) => {
+      safe('game_modes', 'id,name'),
+    ]).then(([gameTypes, sources, websiteTypes, popularityTypes, genres, themes, gameModes]) => {
       const byLabel = (rows, label, words) => rows.filter((r) => words.some((w) => String(r[label]).toLowerCase() === w)).map((r) => r.id);
       const playable = byLabel(gameTypes, 'type', PLAYABLE_GAME_TYPES);
       const steam = sources.find((s) => String(s.name).toLowerCase() === 'steam')?.id;
@@ -218,6 +219,7 @@ function createIgdbProvider(clientId, clientSecret, { fetchImpl = fetch, minInte
         popularityType: visits,
         genres,
         themes,
+        gameModes,
       };
     });
     return lookupsPromise;
@@ -352,6 +354,49 @@ function createIgdbProvider(clientId, clientSecret, { fetchImpl = fetch, minInte
       const rows = await query('games',
         `fields ${SUMMARY_FIELDS}; where ${browseWhere}${genreWhere}${bySort.where}; sort ${bySort.order}; limit ${pageSize}; offset ${offset};`);
       return { count: rows.length, hasMore: rows.length === pageSize, results: dedupeByName(rows.filter(listable)).map((g) => toSummary(g, l)) };
+    },
+
+    /**
+     * Games for a seasonal home page section (see src/seasons.js): every group
+     * in `all` must match (any genre, theme or mode named in it), and no theme
+     * or genre named in `not`. Empty when IGDB has none of a group's names.
+     */
+    async collection({ all = [], not = {}, sort = 'popular', year = new Date().getFullYear(), pageSize = 24 }) {
+      const l = await lookups();
+      // "role-playing" matches "Role-playing (RPG)"; "co-operative" matches exactly.
+      const named = (rows, words = []) => rows
+        .filter((r) => words.some((w) => String(r.name).toLowerCase().startsWith(w)))
+        .map((r) => r.id);
+      const clauses = [];
+      for (const group of all) {
+        const parts = [
+          ['genres', named(l.genres, group.genres)],
+          ['themes', named(l.themes, group.themes)],
+          ['game_modes', named(l.gameModes, group.modes)],
+        ].filter(([, ids]) => ids.length).map(([field, ids]) => `${field} = (${ids.join(',')})`);
+        if (!parts.length) return [];
+        clauses.push(`(${parts.join(' | ')})`);
+      }
+
+      const now = Math.floor(Date.now() / 1000);
+      const day = 24 * 60 * 60;
+      const yearStart = Date.UTC(year, 0, 1) / 1000;
+      const yearEnd = Math.min(now, Date.UTC(year + 1, 0, 1) / 1000);
+      const bySort = {
+        popular: { where: 'total_rating_count >= 5', order: 'total_rating_count desc' },
+        top: { where: 'total_rating >= 80 & total_rating_count >= 20', order: 'total_rating_count desc' },
+        new: { where: `first_release_date >= ${now - 365 * day} & first_release_date <= ${now}`, order: 'hypes desc' },
+        year: { where: `first_release_date >= ${yearStart} & first_release_date < ${yearEnd} & total_rating >= 75 & total_rating_count >= 3`, order: 'total_rating_count desc' },
+        upcoming: { where: `first_release_date > ${now} & first_release_date <= ${now + 90 * day} & hypes >= 1`, order: 'hypes desc' },
+      }[sort] || { where: 'total_rating_count >= 5', order: 'total_rating_count desc' };
+      const where = [`game_type = (${l.gameTypes.join(',')})`, NOT_AN_EDITION, ...clauses, bySort.where].join(' & ');
+      // Extra rows make up for the ones `not` removes.
+      const rows = await query('games', `fields ${SUMMARY_FIELDS}; where ${where}; sort ${bySort.order}; limit ${pageSize * 2};`);
+
+      const excluded = [...(not.themes || []), ...(not.genres || [])];
+      const keep = (g) => ![...(g.themes || []), ...(g.genres || [])]
+        .some((t) => excluded.some((w) => String(t.name).toLowerCase().startsWith(w)));
+      return dedupeByName(rows.filter(listable).filter(keep)).slice(0, pageSize).map((g) => toSummary(g, l));
     },
 
     // Art comes with every IGDB result already (including Steam's when the game is on Steam).

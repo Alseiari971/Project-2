@@ -145,6 +145,19 @@ function composedPoster(game) {
     </div>`;
 }
 
+/** A tall poster with the game's name under it, for poster rows. */
+export function posterTile(game) {
+  return html`
+    <a class="poster-tile" href="${gameHref(game.id)}" title="${game.name}">
+      <div class="poster" data-name="${game.name}" data-image="${game.image || ''}" data-year="${game.released || ''}">
+        ${game.poster
+          ? html`<img class="poster-art" src="${game.poster}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+          : composedPoster(game)}
+      </div>
+      <span class="poster-caption">${game.name}</span>
+    </a>`;
+}
+
 /** Tall poster with a big rank number, for the Top 10 row. */
 export function rankTile(game, rank) {
   return html`
@@ -180,13 +193,13 @@ export function libraryTile(entry) {
 }
 
 /** Horizontally scrolling row with arrow buttons, like a streaming app. */
-export function row({ title, href, items, id = '', cls = '' }) {
+export function row({ title, href, items, id = '', cls = '', head = null }) {
   return html`
     <section class="row ${cls}" ${raw(id ? `id="${id}"` : '')}>
-      <div class="row-head">
+      ${head || html`<div class="row-head">
         <h2>${title}</h2>
         ${href ? html`<a class="row-more" href="${href}">See all ${icon('right')}</a>` : ''}
-      </div>
+      </div>`}
       <div class="row-viewport">
         <button class="row-arrow prev" type="button" aria-label="Scroll left">${icon('left')}</button>
         <div class="row-track">${items}</div>
@@ -241,8 +254,8 @@ const skeletonTiles = (n) => html`${Array.from({ length: n }, () => html`<div cl
 
 export function skeleton(kind) {
   if (kind === 'home') {
-    return html`<div class="skeleton sk-page"><div class="sk sk-title"></div><div class="sk-feature"><div class="sk"></div><div class="sk"></div></div>
-      ${[1, 2].map(() => html`<div class="sk-row"><div class="sk sk-heading"></div><div class="sk-track">${skeletonTiles(5)}</div></div>`)}</div>`;
+    return html`<div class="skeleton"><div class="sk sk-spotlight"></div><div class="sk-page">
+      ${[1, 2].map(() => html`<div class="sk-row"><div class="sk sk-heading"></div><div class="sk-track">${skeletonTiles(5)}</div></div>`)}</div></div>`;
   }
   if (kind === 'game') {
     return html`<div class="skeleton"><div class="sk sk-hero short"></div><div class="sk-page"><div class="sk sk-heading"></div><div class="sk sk-line wide"></div><div class="sk sk-line wide"></div></div></div>`;

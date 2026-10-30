@@ -12,6 +12,7 @@ import { communityView } from './views/community.js';
 import { authView } from './views/auth.js';
 import { importView } from './views/import.js';
 import { legalView } from './views/legal.js';
+import { applySeason } from './seasons.js';
 import { appSettingsView } from './views/app-settings.js';
 
 const app = document.getElementById('app');
@@ -184,6 +185,7 @@ document.addEventListener('library-changed', renderSidebar);
 
 (async function init() {
   renderTopbar();
+  applySeason();
   try {
     await refreshMe();
     await refreshLibrary();

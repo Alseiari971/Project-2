@@ -10,6 +10,7 @@ const PATHS = {
   check: '<path d="m5 12 5 5 9-10"/>',
   play: '<path d="M8 5v14l11-7z" fill="currentColor" stroke="none"/>',
   minus: '<path d="M6 12h12"/>',
+  pause: '<rect x="6" y="5" width="4" height="14" rx="1" fill="currentColor" stroke="none"/><rect x="14" y="5" width="4" height="14" rx="1" fill="currentColor" stroke="none"/>',
   stop: '<rect x="6.5" y="6.5" width="11" height="11" rx="2" fill="currentColor" stroke="none"/>',
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/>',
   left: '<path d="m15 18-6-6 6-6"/>',
@@ -37,6 +38,13 @@ const PATHS = {
   'solid-library': '<rect x="3" y="3" width="8" height="8" rx="2" fill="currentColor" stroke="none"/><rect x="13" y="3" width="8" height="8" rx="2" fill="currentColor" stroke="none"/><rect x="3" y="13" width="8" height="8" rx="2" fill="currentColor" stroke="none"/><rect x="13" y="13" width="8" height="8" rx="2" fill="currentColor" stroke="none"/>',
   'solid-users': '<circle cx="9" cy="7.5" r="4" fill="currentColor" stroke="none"/><path d="M1.5 21c0-4.3 3.2-7 7.5-7s7.5 2.7 7.5 7z" fill="currentColor" stroke="none"/><circle cx="17.5" cy="8.5" r="3" fill="currentColor" stroke="none"/><path d="M18 21h4.5c0-3.4-2-5.6-5-6.1 1.6 1.4 2.5 3.4 2.5 6.1z" fill="currentColor" stroke="none"/>',
   'solid-import': '<path d="M10.5 3h3v8.3l3-3 2.1 2.1L12 17l-6.6-6.6 2.1-2.1 3 3z" fill="currentColor" stroke="none"/><rect x="3" y="18.5" width="18" height="2.5" rx="1.2" fill="currentColor" stroke="none"/>',
+  // Season ornaments (see seasons.js).
+  'season-pumpkin': '<path d="M12 6.2c-1-.9-2.4-1.3-3.8-1.1C4.9 5.6 3 8.8 3 12.5S5.3 20 9 20c1.2 0 2.2-.4 3-1 .8.6 1.8 1 3 1 3.7 0 6-3.8 6-7.5s-1.9-6.9-5.2-7.4c-1.4-.2-2.8.2-3.8 1.1z" fill="currentColor" stroke="none"/><path d="M12 6.5c0-1.8.7-3.2 2.2-4" stroke-width="2.2"/><path d="m8.6 11.2 1.6 1.4-1.6 1.4zm6.8 0-1.6 1.4 1.6 1.4zM9 16.2l1.5-.9 1.5.9 1.5-.9 1.5.9" fill="var(--season-carve, #000)" stroke="var(--season-carve, #000)" stroke-width="1.3"/>',
+  'season-snowflake': '<path d="M12 2v20M3.3 7l17.4 10M3.3 17 20.7 7M9.5 3.8 12 6.2l2.5-2.4M9.5 20.2 12 17.8l2.5 2.4M3.6 10.4l3.3.9-.9 3.3M20.4 13.6l-3.3-.9.9-3.3M3.6 13.6l3.3-.9-.9-3.3M20.4 10.4l-3.3.9.9 3.3" stroke-width="1.8"/>',
+  'season-crescent': '<path d="M15.5 3.2A8.8 8.8 0 1 0 20.8 16 7 7 0 1 1 15.5 3.2z" fill="currentColor" stroke="none"/><path d="m18.4 6.2.6 1.6 1.7.1-1.3 1.1.4 1.7-1.4-.9-1.4.9.4-1.7-1.3-1.1 1.7-.1z" fill="currentColor" stroke="none"/>',
+  'season-lantern': '<path d="M12 2v2.5" stroke-width="1.8"/><rect x="9" y="4" width="6" height="2" rx=".6" fill="currentColor" stroke="none"/><path d="M12 6.2c3.6 0 6 2.5 6 5.8s-2.4 5.8-6 5.8-6-2.5-6-5.8 2.4-5.8 6-5.8z" fill="currentColor" stroke="none"/><rect x="9" y="17.6" width="6" height="2" rx=".6" fill="currentColor" stroke="none"/><path d="M12 19.8V22" stroke-width="1.8"/>',
+  'season-sun': '<circle cx="12" cy="12" r="4.6" fill="currentColor" stroke="none"/><path d="M12 1.8v2.6M12 19.6v2.6M1.8 12h2.6M19.6 12h2.6M4.8 4.8l1.8 1.8M17.4 17.4l1.8 1.8M4.8 19.2l1.8-1.8M17.4 6.6l1.8-1.8" stroke-width="2"/>',
+  'season-sparkle': '<path d="M12 1.5c.7 5 2.2 7.8 8.5 8.5-6.3.7-7.8 3.5-8.5 8.5-.7-5-2.2-7.8-8.5-8.5 6.3-.7 7.8-3.5 8.5-8.5z" fill="currentColor" stroke="none"/><path d="M19 15.5c.3 2 .9 3.1 3 3.4-2.1.3-2.7 1.4-3 3.4-.3-2-.9-3.1-3-3.4 2.1-.3 2.7-1.4 3-3.4z" fill="currentColor" stroke="none"/>',
   'solid-tag': '<path d="M3 3h8.6L21 12.4 12.4 21 3 11.6zM7.5 9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z" fill="currentColor" stroke="none" fill-rule="evenodd"/>',
 };
 

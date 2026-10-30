@@ -16,6 +16,7 @@ const { SteamError } = require('./steam');
 const { transaction } = require('./db');
 const { normalizeTitle } = require('./text');
 const { steamArt } = require('./games/steam-art');
+const { SEASON_IDS, seasonPlan } = require('./seasons');
 
 const STATUSES = ['playing', 'completed', 'played', 'want', 'dropped'];
 const USERNAME_RE = /^[a-zA-Z0-9_]{3,20}$/;
@@ -59,6 +60,18 @@ const libraryEntry = (row) => ({
   playtime: row.playtime_minutes ?? null,
   updatedAt: row.updated_at,
 });
+
+// A short line about a game for the spotlight: its description's first
+// sentence or two, cut at a word near 180 characters.
+function pitchFrom(text) {
+  if (!text) return null;
+  const clean = String(text).replace(/\s+/g, ' ').trim();
+  const sentences = clean.match(/[^.!?]+[.!?]+/g) || [clean];
+  let pitch = sentences[0];
+  if (sentences[1] && pitch.length + sentences[1].length <= 180) pitch += sentences[1];
+  if (pitch.length > 180) pitch = `${pitch.slice(0, 180).replace(/\s+\S*$/, '')}…`;
+  return pitch.trim();
+}
 
 function createApi({ db, games, prices, steam, steamStore }) {
   const api = express.Router();
@@ -144,21 +157,35 @@ function createApi({ db, games, prices, steam, steamStore }) {
   });
 
   // Everything the home screen needs in one request: a featured carousel and rows.
-  api.get('/home', asyncRoute(async (_req, res) => {
+  api.get('/home', asyncRoute(async (req, res) => {
+    // The page works out the season from the visitor's own calendar.
+    const plan = seasonPlan(SEASON_IDS.includes(req.query.season) ? req.query.season : 'default');
     const rowDefs = [
       { id: 'trending', title: 'Trending now', sort: 'popular' },
       { id: 'new', title: 'New & notable', sort: 'new' },
       ...(games.name !== 'local' ? [{ id: 'top', title: 'Critically acclaimed', sort: 'top' }] : []),
-      ...['RPG', 'Action', 'Indie', 'Shooter', 'Strategy', 'Adventure'].map((genre) => ({
+      ...['RPG', 'Action', 'Indie'].map((genre) => ({
         id: `genre-${genre.toLowerCase()}`, title: genre, genre, sort: 'popular',
       })),
     ];
-    const results = await Promise.all(rowDefs.map((r) => games.search({ genre: r.genre, sort: r.sort, pageSize: 30 })));
+    // Seasonal sections need a game database that can filter by theme (IGDB);
+    // a seasonal section that fails is left out rather than failing the page.
+    const collect = (query) => (query && games.collection
+      ? games.collection(query).catch((err) => {
+        console.error('Could not load a seasonal section:', err.message);
+        return [];
+      })
+      : []);
+    const [results, seasonal, sectionLists] = await Promise.all([
+      Promise.all(rowDefs.map((r) => games.search({ genre: r.genre, sort: r.sort, pageSize: 30 }))),
+      collect(plan.spotlight),
+      Promise.all(plan.sections.map((s) => collect(s.query))),
+    ]);
     const listFor = (id) => results[rowDefs.findIndex((r) => r.id === id)]?.results || [];
 
-    // Every game appears once on the page: the carousel, then the Top 10, then
-    // each row skips games already shown higher up. Names are compared too,
-    // since databases sometimes list one game more than once.
+    // Every game appears once on the page: the spotlight, then the Top 10,
+    // then the seasonal sections and the other rows skip games already shown.
+    // Names are compared too, since databases sometimes list one game twice.
     const shown = new Set();
     const key = (g) => normalizeTitle(g.name);
     const take = (list, max) => {
@@ -173,9 +200,26 @@ function createApi({ db, games, prices, steam, steamStore }) {
       return picked;
     };
 
-    // Big recent releases make the best banners; fall back to trending games.
-    const featured = take([...listFor('new'), ...listFor('trending')].filter((g) => g.backdrop), 6);
-    const rows = [{ id: 'top10', title: 'Top 10 this week', genre: null, games: take(listFor('trending'), 10) }];
+    // The spotlight needs wide art. The season's own picks come first, then big
+    // recent releases and trending games.
+    const spotlight = take([...seasonal, ...listFor('new'), ...listFor('trending')].filter((g) => g.backdrop), 6)
+      .map((g) => ({
+        ...g,
+        // Steam's transparent title art, shown instead of the name when it loads.
+        heroLogo: g.steamAppId ? steamArt(g.steamAppId).logo : null,
+        pitch: pitchFrom(g.description),
+      }));
+    const top10 = take(listFor('trending'), 10);
+    const SECTION_SIZES = { bento: 5, countdown: 12 };
+    const sections = plan.sections.map((s, i) => ({
+      id: s.id,
+      title: s.title,
+      kicker: s.kicker,
+      layout: s.layout,
+      games: take(sectionLists[i], SECTION_SIZES[s.layout] || 20),
+    }));
+
+    const rows = [{ id: 'top10', title: 'Top 10 this week', genre: null, games: top10 }];
     // The rest of the trending list would repeat the Top 10's job, so it isn't a row.
     for (const r of rowDefs.filter((d) => d.id !== 'trending')) {
       rows.push({ id: r.id, title: r.title, genre: r.genre || null, games: take(listFor(r.id), 20) });
@@ -186,13 +230,12 @@ function createApi({ db, games, prices, steam, steamStore }) {
     if (community.filter((g) => g.players > 1).length >= 4) {
       rows.splice(2, 0, { id: 'community', title: 'Popular on GameShelf', genre: null, games: community });
     }
-    // A row needs a few games to be worth showing, and four genre rows is plenty.
-    let genreRows = 0;
-    const visibleRows = rows.filter((r) => r.games.length >= 6 && (!r.genre || ++genreRows <= 4));
+    // A row needs a few games to be worth showing.
+    const visibleRows = rows.filter((r) => r.games.length >= 6);
 
     // Official Steam store art for every game on the page. The same objects
-    // appear in several rows, so de-duplicate first.
-    await games.addSteamArt([...new Set(results.flatMap((r) => r.results))]);
+    // appear in several lists, so de-duplicate first.
+    await games.addSteamArt([...new Set([...results.flatMap((r) => r.results), ...seasonal, ...sectionLists.flat()])]);
 
     // Each genre card borrows art from a game we already loaded, so this costs no extra requests.
     const loaded = results.flatMap((r) => r.results);
@@ -202,7 +245,16 @@ function createApi({ db, games, prices, steam, steamStore }) {
       if (game) used.add(game.id);
       return { name, image: game ? game.backdrop || game.image : null };
     });
-    res.json({ source: games.name, featured, rows: visibleRows, genres });
+    res.json({ source: games.name, season: plan.id, spotlight, sections, rows: visibleRows, genres });
+  }));
+
+  // Steam's short silent preview loop for the home page spotlight.
+  api.get('/steam/:appId/microtrailer', asyncRoute(async (req, res) => {
+    const appId = Number(req.params.appId);
+    if (!Number.isInteger(appId) || appId <= 0 || appId > 1e8) return res.status(404).json({ error: 'Not found.' });
+    const details = steamStore ? await steamStore.details(appId).catch(() => null) : null;
+    res.set('Cache-Control', 'public, max-age=86400');
+    res.json({ url: details?.microtrailer || null });
   }));
 
   api.get('/games', asyncRoute(async (req, res) => {

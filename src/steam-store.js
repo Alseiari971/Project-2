@@ -170,6 +170,7 @@ function createSteamStore({ fetchImpl = fetch } = {}) {
         recommendations: d.recommendations?.total || 0,
         features: FEATURES.filter((f) => (d.categories || []).some((c) => c.description === f)),
         languages: parseLanguages(d.supported_languages),
+        microtrailer: microtrailer(d.movies),
         storeUrl: `https://store.steampowered.com/app/${appId}/`,
       } : null;
 
@@ -178,6 +179,25 @@ function createSteamStore({ fetchImpl = fetch } = {}) {
       return value;
     },
   };
+}
+
+/**
+ * Steam's 6-second, silent, looping preview of a game's first trailer, made
+ * for small spaces like the home page's spotlight. Steam keeps it next to the
+ * trailer's streaming files, so its address comes from theirs.
+ */
+function microtrailer(movies) {
+  const movie = (movies || []).find((m) => m.highlight) || movies?.[0];
+  const stream = movie && (movie.hls_h264 || movie.dash_h264 || movie.dash_av1);
+  try {
+    const u = new URL(stream);
+    if (u.protocol !== 'https:' || !/(^|\.)steamstatic\.com$/.test(u.hostname)) return null;
+    u.pathname = u.pathname.replace(/[^/]+$/, 'microtrailer.webm');
+    u.search = '';
+    return u.href;
+  } catch {
+    return null;
+  }
 }
 
 function steamMetacriticUrl(url) {
@@ -189,4 +209,4 @@ function steamMetacriticUrl(url) {
   }
 }
 
-module.exports = { createSteamStore, htmlToBlocks, parseRequirements, parseLanguages };
+module.exports = { createSteamStore, htmlToBlocks, parseRequirements, parseLanguages, microtrailer };

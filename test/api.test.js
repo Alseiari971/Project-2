@@ -131,14 +131,18 @@ test('RAWG provider maps games and store links', async () => {
   assert.equal(await rawg.getGame('missing'), null);
 });
 
-test('home screen has a featured carousel and rows', async () => {
+test('home screen has a spotlight and rows', async () => {
   const { status, body } = await client()('/api/home');
   assert.equal(status, 200);
-  assert.ok(body.featured.length > 0);
-  assert.ok(body.featured.every((g) => g.backdrop));
+  assert.equal(body.season, 'default');
+  assert.ok(body.spotlight.length > 0);
+  assert.ok(body.spotlight.every((g) => g.backdrop));
+  // Steam games carry their transparent title art and a short pitch.
+  const elden = body.spotlight.find((g) => g.id === 'elden-ring') || body.spotlight.find((g) => g.steamAppId);
+  assert.match(elden.heroLogo, /\/logo\.png$/);
   assert.ok(body.rows.some((r) => r.id === 'top10'));
-  // Every game appears once across the carousel and the rows.
-  const ids = [...body.featured, ...body.rows.flatMap((r) => r.games)].map((g) => g.id);
+  // Every game appears once across the spotlight and the rows.
+  const ids = [...body.spotlight, ...body.rows.flatMap((r) => r.games)].map((g) => g.id);
   assert.equal(new Set(ids).size, ids.length);
   assert.ok(body.genres.find((g) => g.name === 'RPG').image);
 
@@ -338,4 +342,38 @@ test('deleting an account removes the user, their list and their comments', asyn
   assert.equal((await client()('/api/users/staying')).body.comments.length, 0);
   assert.equal((await del('/api/me')).body.user, null);
   assert.equal((await client()('/api/games/hades')).body.community.count, before);
+});
+
+test('seasonal home: the season picks its sections, and a failing section is left out', async () => {
+  const local = createLocalProvider();
+  const asked = [];
+  const games = {
+    ...local,
+    async collection(query) {
+      asked.push(query);
+      if (query.sort === 'upcoming') throw new Error('IGDB is down');
+      const { results } = await local.search({ pageSize: 40 });
+      return results;
+    },
+  };
+  const app = createApp({ db: openDatabase(':memory:'), games });
+  const server = app.listen(0);
+  await new Promise((resolve) => server.once('listening', resolve));
+  const get = async (path) => (await fetch(`http://127.0.0.1:${server.address().port}${path}`)).json();
+  try {
+    const home = await get('/api/home?season=fright-night');
+    assert.equal(home.season, 'fright-night');
+    assert.deepEqual(home.sections.map((s) => [s.id, s.layout]),
+      [['survival-horror', 'bento'], ['scream-together', 'row'], ['fresh-nightmares', 'posters'], ['upcoming', 'countdown']]);
+    assert.ok(asked.some((q) => q.all?.[0]?.themes?.includes('horror')));
+    assert.equal(home.sections[0].games.length, 5);
+    assert.deepEqual(home.sections.find((s) => s.id === 'upcoming').games, []);
+    // Nothing repeats between the spotlight, the sections and the rows.
+    const ids = [...home.spotlight, ...home.sections.flatMap((s) => s.games), ...home.rows.flatMap((r) => r.games)].map((g) => g.id);
+    assert.equal(new Set(ids).size, ids.length);
+
+    assert.equal((await get('/api/home?season=not-a-season')).season, 'default');
+  } finally {
+    server.close();
+  }
 });

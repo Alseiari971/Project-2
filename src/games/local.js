@@ -17,6 +17,7 @@ function toSummary(game) {
     poster: null,
     artHasTitle: false,
     ...(game.steamAppId ? steamArt(game.steamAppId) : {}),
+    steamAppId: game.steamAppId || null,
     genres: game.genres,
     platforms: game.platforms,
     description: game.description,

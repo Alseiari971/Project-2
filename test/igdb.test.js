@@ -249,3 +249,20 @@ test('adult games and test builds are hidden from lists', async () => {
   const igdb = createIgdbProvider('client', 'secret', { fetchImpl, minIntervalMs: 0 });
   assert.deepEqual((await igdb.search({ sort: 'top' })).results.map((g) => g.name), ['Hollow Knight']);
 });
+
+test('seasonal collections ask IGDB by theme and mode names, and leave out unwanted themes', async () => {
+  const fake = fakeIgdb();
+  const igdb = provider(fake);
+  const kids = await igdb.collection({ all: [{ themes: ['kids'], genres: ['platform'] }], not: { themes: ['action'] }, sort: 'top' });
+  const call = fake.calls.find((c) => c.endpoint === 'games');
+  assert.match(call.body, /\(genres = \(8\) \| themes = \(35\)\)/);
+  assert.match(call.body, /total_rating >= 80/);
+  // Both fake games have the Action theme, so `not` removes them.
+  assert.deepEqual(kids, []);
+  // A theme IGDB doesn't have means an empty section, without asking for games.
+  const before = fake.calls.length;
+  assert.deepEqual(await igdb.collection({ all: [{ themes: ['horror'] }] }), []);
+  assert.equal(fake.calls.filter((c, i) => i >= before && c.endpoint === 'games').length, 0);
+  const all = await igdb.collection({ sort: 'popular' });
+  assert.deepEqual(all.map((g) => g.id), ['the-legend-of-zelda-tears-of-the-kingdom', 'elden-ring']);
+});
