@@ -132,6 +132,25 @@ test('the pack goes in as the next patch number, and comes out leaving the game 
   assert.deepEqual(await listing(root), before);
 });
 
+test('a newer version of the pack replaces the older one at the same patch number', async () => {
+  const root = await reGame();
+  const l10n = localization();
+  await l10n.enable({ root, packDir: await rePack(), publicKey });
+  const newer = await fs.mkdtemp(path.join(os.tmpdir(), 'gs-repack-'));
+  await fs.mkdir(path.join(newer, 'payload'));
+  const content = Buffer.concat([ARABIC_PAK, Buffer.from(' v2')]);
+  await fs.writeFile(path.join(newer, 'payload/re_chunk_000.pak.patch_XXX.pak'), content);
+  await writePack(newer, {
+    id: 'test-re', version: '1.0.1', engine: 'reengine', game: { steamAppId: 883710 }, privateKey,
+    files: [{ source: 'payload/re_chunk_000.pak.patch_XXX.pak', target: 're_chunk_000.pak.patch_XXX.pak' }],
+  });
+  const result = await l10n.enable({ root, packDir: newer, publicKey });
+  assert.equal(result.already, false);
+  assert.deepEqual(await fs.readFile(path.join(root, 're_chunk_000.pak.patch_004.pak')), content);
+  assert.ok(!(await fs.readdir(root)).includes('re_chunk_000.pak.patch_005.pak'));
+  assert.equal((await l10n.status(root)).pack.version, '1.0.1');
+});
+
 test('a game with no patch files yet gets patch_001; one with patches from 000 gets the next', async () => {
   const fresh = await reGame({}, []);
   await localization().enable({ root: fresh, packDir: await rePack(), publicKey });

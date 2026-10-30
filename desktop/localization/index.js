@@ -142,9 +142,18 @@ function stagePlan(check, pack) {
 async function enableArabic({ root, packDir, stager, publicKey, allowUnsigned = false, steamAppId, isRunning }) {
   if (await isRunning?.()) throw new LocalizationError('Close the game first.', 'running');
   const pack = await readPack(packDir, { publicKey, allowUnsigned });
-  const ours = await stager.status(root);
+  let ours = await stager.status(root);
   if (ours?.status === 'enabled' && ours.pack.id === pack.manifest.id && ours.pack.version === pack.manifest.version) {
     return { already: true, tier: null };
+  }
+  if (ours?.status === 'enabled' && ours.pack.id === pack.manifest.id) {
+    // Another version of the same pack is in: take it out first. If anything of
+    // it has to stay (changed since, or a newer RE Engine patch follows it), say so.
+    const old = await stager.disable(root);
+    if (old.kept.length) {
+      throw new LocalizationError(`GameShelf couldn't take out version ${ours.pack.version} to put in ${pack.manifest.version}. Turn Arabic off for this game, then on again.`, 'busy');
+    }
+    ours = null;
   }
 
   const check = await preflight(root, { steamAppId, ownMods: Boolean(ours) });
