@@ -42,7 +42,8 @@ from pathlib import Path, PurePosixPath
 from . import locres as locres_format
 from . import remsg
 from .fingerprint import build_table
-from .repak import write_pak
+from . import reefont
+from .repak import GamePak, path_hashes, write_pak
 from .rtl import DEFAULT_MAX_LINE, ArabicCompiler, glyphs_needed
 from .sources import SourceError, msg_dump_source, read_source
 from .translate import Cache, Provider, TranslationError, Translator
@@ -129,9 +130,13 @@ def parse_args(argv=None):
     c.add_argument('--packer-path', help='unreal: path to repak or UnrealPak')
     c.add_argument('--pak-version', default='V11', help='unreal (repak): the game\'s pak version (default V11)')
     c.add_argument('--mount-point', default='../../../', help='unreal: pak mount point (default ../../../)')
-    c.add_argument('--pak-list', help='unreal: the game\'s pak file list (from repak list, UnrealPak -List or FModel), to find its fonts')
+    c.add_argument('--pak-list', help='unreal: the game\'s pak file list (from repak list, UnrealPak -List or FModel), to find its fonts; '
+                                      'reengine: a list of the game\'s file names (such as REE.PAK.Tool\'s), whose .oft fonts get the Arabic font')
     c.add_argument('--extracted', help='unreal: a folder of the game\'s files you extracted from your own copy, to find its fonts')
-    c.add_argument('--font-targets', help='unreal: the font files to replace, comma-separated, e.g. MyGame/Content/UI/Fonts/Roboto.ufont')
+    c.add_argument('--font-targets', help='unreal: the font files to replace, comma-separated, e.g. MyGame/Content/UI/Fonts/Roboto.ufont; '
+                                          'reengine: .oft fonts, e.g. natives/stm/escape/ui/ui0000/font/helveticaneueltw1g-cn.oft.1')
+    c.add_argument('--font-converter-cmd', help='reengine: an installed tool that makes .oft fonts, with {input} and {output}, '
+                                                'e.g. "REE.Fonts.Cryptor.exe {input} {output}" (GameShelf makes them itself otherwise)')
     c.add_argument('--no-fonts', action='store_true', help='unreal, reengine: leave the game\'s fonts as they are')
     c.add_argument('--godot', type=int, choices=[3, 4], default=4, help='godot: the game\'s Godot version (default 4)')
     c.add_argument('--msg-tool', help='reengine: REMSG_Converter (its src/main.py, or the .exe), to read and write .msg files')
@@ -435,6 +440,39 @@ def shape_re_text(text: str, compiler) -> str:
     return cues + '<PAGE>'.join(compiler(page) for page in text[len(cues):].split('<PAGE>'))
 
 
+RE_FONT = re.compile(r'^(natives/\S+\.oft(?:\.\d+)?(?:\.(?:stm|x64))?)\s*$', re.I | re.M)
+RE_BOLD_FONT = re.compile(r'bold|bd\.|heavy|black|-b\.', re.I)
+
+
+def re_font_targets(args, source, log) -> list:
+    """The game's .oft font names to put the Arabic font under: from --font-targets and --pak-list,
+    kept to the ones the game's paks hold (only their file tables are read)."""
+    names = [t.strip().replace('\\', '/') for t in (args.font_targets or '').split(',') if t.strip()]
+    if args.pak_list:
+        names += RE_FONT.findall(Path(args.pak_list).read_text(encoding='utf-8', errors='replace'))
+    names = [n for n in dict.fromkeys(names) if n.lower().startswith('natives/') and '..' not in n.split('/')]
+    if not names or not source.game_paks:
+        return names
+    present = set()
+    for path in source.game_paks:
+        with GamePak(path) as pak:
+            present |= set(pak.entries)
+    found = [n for n in names if path_hashes(n) in present]
+    log(f'{len(found)} of the {len(names)} font names given are in the game\'s paks.')
+    return found
+
+
+def make_oft(font: Path, args, out: Path) -> bytes:
+    """Our font in the game's .oft container: made here, or by --font-converter-cmd."""
+    if not args.font_converter_cmd:
+        return reefont.encode_oft(font.read_bytes())
+    made = out / 'oft' / (font.stem + '.oft.1')
+    made.parent.mkdir(parents=True, exist_ok=True)
+    made.unlink(missing_ok=True)
+    reefont.convert_with(args.font_converter_cmd, font, made)
+    return made.read_bytes()
+
+
 def build_reengine(source, rows, args, out: Path, payload: Path, log):
     """The game's message files with the Arabic in them, packed into one RE Engine .pak."""
     stage = out / 'stage' / 're'
@@ -472,9 +510,26 @@ def build_reengine(source, rows, args, out: Path, payload: Path, log):
         raise BuildError(f'The Arabic is in the dumps in {out / "msg-edited"}. Give --msg-tool (REMSG_Converter\'s src/main.py, '
                          'or its .exe) to turn them into .msg files, then run again.')
     extra = [(Path(path), in_pak) for path, in_pak in source.msg_files] if args.msg_prebuilt else []
-    # The Arabic font in place of the game's own font files, when they're plain
-    # font files (taken from the game's paks; scrambled fonts can't be replaced).
-    if source.game_paks and not args.no_fonts and compiler:
+    # The Arabic font, made into the game's .oft font container, under the names
+    # of the game's own fonts (from --font-targets or a file list). Only our
+    # font is packed; the game's fonts are never read.
+    oft_targets = re_font_targets(args, source, log) if not args.no_fonts and compiler else []
+    if oft_targets:
+        regular, bold, _ = font_files(args)
+        made = {}
+        for name in oft_targets:
+            face = bold if RE_BOLD_FONT.search(Path(name).name) else regular
+            if face not in made:
+                try:
+                    made[face] = make_oft(face, args, out)
+                except reefont.FontError as err:
+                    raise BuildError(str(err)) from None
+            target = stage / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(made[face])
+        log(f'Put the {regular.stem} font, as .oft, in place of the game\'s {len(oft_targets)} fonts: '
+            + ', '.join(sorted({Path(n).name.split('.')[0] for n in oft_targets})))
+    elif source.game_paks and not args.no_fonts and compiler:
         try:
             fonts = remsg.find_fonts(source.game_paks, log)
         except remsg.MsgError as err:
@@ -487,8 +542,8 @@ def build_reengine(source, rows, args, out: Path, payload: Path, log):
                 shutil.copyfile(regular, target)
             log(f'Put the {regular.stem} font in place of the game\'s {len(fonts)} font files.')
         else:
-            log('The game\'s fonts aren\'t plain font files, so they can\'t be given Arabic letters here: Arabic will show as '
-                'boxes until an Arabic font made for this game is added with --natives.')
+            log('The game\'s fonts aren\'t plain font files. Give --pak-list (a list of the game\'s file names) or --font-targets '
+                'so the Arabic font goes in as the game\'s .oft fonts; otherwise Arabic shows as boxes.')
     if args.natives:
         found = [(p, remsg.pak_path(p)) for p in sorted(Path(args.natives).rglob('*')) if p.is_file()]
         if any(in_pak is None for _, in_pak in found):
@@ -498,7 +553,7 @@ def build_reengine(source, rows, args, out: Path, payload: Path, log):
         target = stage / in_pak
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(path, target)
-    files = sorted((remsg.pak_entry(p.relative_to(stage).as_posix()), p.read_bytes()) for p in stage.rglob('*') if p.is_file())
+    files = [(remsg.pak_entry(p.relative_to(stage).as_posix()), p.read_bytes()) for p in sorted(stage.rglob('*')) if p.is_file()]
     if files:
         files.append((remsg.PATCH_MARKER, remsg.PATCH_MARKER_TEXT))
     if not files:

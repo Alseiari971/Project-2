@@ -149,6 +149,23 @@ class GamePaks(unittest.TestCase):
             extract_messages([path], self.tmp / 'out', lambda *_: None)
 
 
+class OftFonts(unittest.TestCase):
+    def test_our_font_is_wrapped_as_the_engine_expects(self):
+        from arabic_compiler.reefont import FontError, _key, encode_oft
+        # For a length that's a multiple of 64 the key is the format's constant, low byte first.
+        self.assertEqual(_key(64), bytes.fromhex('455f358ab5396eae'))
+        font = b'\x00\x01\x00\x00' + bytes(range(256)) * 3 + b'\x07'
+        wrapped = encode_oft(font)
+        key = _key(len(font))
+        self.assertEqual(wrapped[:4], b'FBFO')
+        self.assertEqual(len(wrapped), 4 + len(font))
+        self.assertEqual(bytes(b ^ key[i % 8] for i, b in enumerate(wrapped[4:])), font)
+        # Only plain fonts go in: never an .oft (such as the game's own) or anything else.
+        for not_a_font in (wrapped, b'PK\x03\x04' + b'\0' * 100):
+            with self.assertRaisesRegex(FontError, 'Only a plain'):
+                encode_oft(not_a_font)
+
+
 class CutsceneText(unittest.TestCase):
     def test_timing_cues_stay_first_and_pages_stay_in_order(self):
         from arabic_compiler.packbuild import shape_re_text
@@ -389,6 +406,41 @@ class BuildingReEngine(unittest.TestCase):
         pack = build(parse_args(common + ['--no-fonts']), log=self.logged.append)
         files = read_pak((pack / 'payload/re_chunk_000.pak.patch_XXX.pak').read_bytes())
         self.assertNotIn(path_hashes('natives/stm/gui/font/main.oft'), files)
+
+    def test_the_arabic_font_goes_in_as_the_games_oft_fonts_from_a_file_list(self):
+        from arabic_compiler.packbuild import DEFAULT_BOLD_FONT, DEFAULT_FONT
+        from arabic_compiler.reefont import encode_oft
+        game = self.tmp / 'RE3 Demo'
+        game.mkdir()
+        font_dir = 'natives/stm/escape/ui/ui0000/font/'
+        # The game's own fonts are marked encrypted: reading one would fail the build.
+        (game / 're_chunk_000.pak').write_bytes(game_pak([
+            (MSG_PATH, game_msg(ENTRIES), 1),
+            (font_dir + 'helveticaneueltw1g-cn.oft.1', b'FBFO' + b'\x11' * 3000, 1 << 16),
+            (font_dir + 'courbd.oft.1', b'FBFO' + b'\x22' * 3000, 1 << 16),
+        ]))
+        listing = self.tmp / 'RE3_RC_STM_Demo.list'
+        listing.write_text('natives/stm/streaming/x.tex.10\n' + ''.join(
+            font_dir + name + '\n' for name in ('helveticaneueltw1g-cn.oft.1', 'helveticaneueltw1g-cn.oft.1.stm',
+                                                 'courbd.oft.1', 'fotk-ydgothic130.oft.1')), encoding='utf-8')
+        common = [str(game), '--engine', 'reengine', '--msg-tool', str(self.tool),
+                  '--id', 'test-re', '--version', '1.0.0', '--steam-app-id', '1173690',
+                  '--key', str(self.keys / 'k/pack-signing.key'), '--out', str(self.tmp / 'out'),
+                  '--provider', 'openai', '--model', 'test-model', '--api-base', self.api.base]
+        pack = build(parse_args(common + ['--pak-list', str(listing)]), log=self.logged.append)
+        files = read_pak((pack / 'payload/re_chunk_000.pak.patch_XXX.pak').read_bytes())
+        self.assertEqual(files[path_hashes(font_dir + 'helveticaneueltw1g-cn.oft.1')], encode_oft(DEFAULT_FONT.read_bytes()))
+        self.assertEqual(files[path_hashes(font_dir + 'courbd.oft.1')], encode_oft(DEFAULT_BOLD_FONT.read_bytes()))  # bold
+        self.assertNotIn(path_hashes(font_dir + 'fotk-ydgothic130.oft.1'), files)  # not in this game's paks
+        self.assertTrue(any('2 of the 4 font names given are in the game\'s paks' in line for line in self.logged))
+
+        # Or with an installed converter.
+        converter = self.tmp / 'converter.py'
+        converter.write_text('import sys; open(sys.argv[2], "wb").write(b"FBFO" + b"made by the tool " + open(sys.argv[1], "rb").read()[:4])\n')
+        pack = build(parse_args(common + ['--font-targets', font_dir + 'courbd.oft.1',
+                                          '--font-converter-cmd', f'"{sys.executable}" "{converter}" {{input}} {{output}}']), log=self.logged.append)
+        files = read_pak((pack / 'payload/re_chunk_000.pak.patch_XXX.pak').read_bytes())
+        self.assertTrue(files[path_hashes(font_dir + 'courbd.oft.1')].startswith(b'FBFOmade by the tool'))
 
     def test_an_overlay_pack_from_the_same_message_files(self):
         args = parse_args([str(self.extracted(with_dump=False)), '--engine', 'overlay', '--msg-tool', str(self.tool),
