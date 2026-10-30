@@ -149,6 +149,21 @@ class GamePaks(unittest.TestCase):
             extract_messages([path], self.tmp / 'out', lambda *_: None)
 
 
+class CutsceneText(unittest.TestCase):
+    def test_timing_cues_stay_first_and_pages_stay_in_order(self):
+        from arabic_compiler.packbuild import shape_re_text
+        from arabic_compiler.rtl import ArabicCompiler
+        compiler = ArabicCompiler()
+        cues = '<TIME 4.4, 8.44><TIME 12.3, 17.7><TIME 19.45, 25.5>'
+        pages = ['أيها القائد.\nهذه الشابة الجميلة بحاجة إلى مساعدتنا.', 'اسمي جيل.', 'شكرًا <COLOR FF0000>لكِ</COLOR> يا جيل.']
+        shaped = shape_re_text(cues + '<PAGE>'.join(pages), compiler)
+        self.assertTrue(shaped.startswith(cues))
+        out_pages = shaped[len(cues):].split('<PAGE>')
+        self.assertEqual(out_pages, [compiler(p) for p in pages])  # each page on its own, in the same order
+        self.assertIn('<COLOR FF0000>', out_pages[2])
+        self.assertNotIn('TIME', shaped[len(cues):])
+
+
 class MessageDumps(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())

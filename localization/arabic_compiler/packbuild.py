@@ -423,6 +423,18 @@ def dump_messages(source, args, out: Path, log):
     return msg_dump_source(dumps)
 
 
+# RE Engine message text: timing cues for cutscene subtitles come first
+# (<TIME start, end>, one per page), then pages split by <PAGE>, shown one
+# after another.
+RE_CUES = re.compile(r'^(?:<TIME [^<>]*>)*')
+
+
+def shape_re_text(text: str, compiler) -> str:
+    """Joins and orders each page on its own, keeping the cues first and the pages in order."""
+    cues = RE_CUES.match(text).group(0)
+    return cues + '<PAGE>'.join(compiler(page) for page in text[len(cues):].split('<PAGE>'))
+
+
 def build_reengine(source, rows, args, out: Path, payload: Path, log):
     """The game's message files with the Arabic in them, packed into one RE Engine .pak."""
     stage = out / 'stage' / 're'
@@ -438,7 +450,7 @@ def build_reengine(source, rows, args, out: Path, payload: Path, log):
     waiting = []
     untouched = 0
     for dump in source.msg_dumps:
-        texts = {guid: (compiler(arabic[f'{dump.in_pak}#{guid}']) if compiler else arabic[f'{dump.in_pak}#{guid}'])
+        texts = {guid: (shape_re_text(arabic[f'{dump.in_pak}#{guid}'], compiler) if compiler else arabic[f'{dump.in_pak}#{guid}'])
                  for guid in dump.english if f'{dump.in_pak}#{guid}' in arabic}
         if not texts:
             # No Arabic in this file: the game keeps its own, and the patch doesn't carry a copy.
