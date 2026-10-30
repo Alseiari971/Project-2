@@ -189,8 +189,9 @@ def translate_rows(rows, args, out: Path, log):
 
 
 def write_review(rows, failed, path: Path, keyed=False):
-    """translations.csv. For games that look their text up by key, a "lookup" column keeps that for the rebuild."""
-    with path.open('w', encoding='utf-8', newline='') as f:
+    """translations.csv. For games that look their text up by key, a "lookup" column keeps that for the rebuild.
+    Written with a byte order mark, so Excel opens the Arabic as Arabic."""
+    with path.open('w', encoding='utf-8-sig', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(['key', 'source', 'arabic', 'problem'] + (['lookup'] if keyed else []))
         for r in rows:

@@ -328,10 +328,10 @@ class BuildingReEngine(unittest.TestCase):
     def test_a_checked_translations_csv_is_used_when_rebuilding(self):
         out = self.run_build(self.extracted(), '--review')
         reviewed = out / 'translations.csv'
-        with reviewed.open(encoding='utf-8') as f:
+        with reviewed.open(encoding='utf-8-sig') as f:
             rows = list(csv.DictReader(f))
         rows[0]['arabic'] = 'يجب أن نصل إلى القلعة قبل حلول الليل.'
-        with reviewed.open('w', encoding='utf-8', newline='') as f:
+        with reviewed.open('w', encoding='utf-8-sig', newline='') as f:
             writer = csv.DictWriter(f, fieldnames=list(rows[0]))
             writer.writeheader()
             writer.writerows(rows)

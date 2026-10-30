@@ -243,11 +243,12 @@ class BuildingNative(unittest.TestCase):
     def test_a_godot_3_pack_is_shaped_and_keeps_its_keys_through_review(self):
         out = self.run_build(self.godot_table(), '--review')
         reviewed = out / 'translations.csv'
-        with reviewed.open(encoding='utf-8') as f:
+        self.assertTrue(reviewed.read_bytes().startswith(b'\xef\xbb\xbf'))  # opens in Excel as UTF-8
+        with reviewed.open(encoding='utf-8-sig') as f:
             rows = list(csv.DictReader(f))
         self.assertEqual({r['lookup'] for r in rows}, {'key'})
         rows[0]['arabic'] = 'الفصل الأول'
-        with reviewed.open('w', encoding='utf-8', newline='') as f:
+        with reviewed.open('w', encoding='utf-8-sig', newline='') as f:
             writer = csv.DictWriter(f, fieldnames=list(rows[0]))
             writer.writeheader()
             writer.writerows(rows)
