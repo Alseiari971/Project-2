@@ -7,6 +7,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
+    "app": "electron desktop/main.js",
+    "dist": "electron-builder --win",
     "test": "node --test",
     "search-debug": "node scripts/search-debug.js"
   },
@@ -16,5 +18,46 @@
   "license": "MIT",
   "dependencies": {
     "express": "^5.3.0"
+  },
+  "devDependencies": {
+    "electron": "44.7.2",
+    "electron-builder": "26.17.0"
+  },
+  "build": {
+    "appId": "app.gameshelf.desktop",
+    "productName": "GameShelf",
+    "copyright": "GameShelf",
+    "extraMetadata": {
+      "main": "desktop/main.js"
+    },
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "package.json",
+      "server.js",
+      "src/**/*",
+      "public/**/*",
+      "data/games.json",
+      "desktop/**/*"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "desktop/icon.png"
+    },
+    "nsis": {
+      "artifactName": "GameShelf-Setup-${version}.${ext}",
+      "shortcutName": "GameShelf"
+    },
+    "mac": {
+      "icon": "desktop/icon.png",
+      "category": "public.app-category.entertainment"
+    },
+    "linux": {
+      "icon": "desktop/icon.png",
+      "category": "Game"
+    }
   }
 }

@@ -28,6 +28,22 @@ Then open http://localhost:3000.
 
 Out of the box the site uses a small built-in catalog of about 35 popular games, so you can try it right away.
 
+## Windows app
+
+GameShelf also comes as a desktop app. It runs everything on your computer, so it works without hosting the website anywhere.
+
+- **Try it from the code:** `npm install`, then `npm run app`. It uses the same `.env` keys and database as `npm start`.
+- **Make the installer:** on a Windows PC, run `npm run dist`. You get `dist/GameShelf-Setup-0.1.0.exe`. Double-click it to install; it adds GameShelf to the Start menu and the desktop.
+
+The installed app opens on a welcome page where you paste your IGDB keys (and optionally a Steam key). You can change them later with the settings button next to your avatar. The keys, your accounts and your lists are saved in `%APPDATA%\GameShelf` on that PC.
+
+Good to know:
+
+- The installer isn't code-signed, so the first time Windows may show "Windows protected your PC". Click **More info**, then **Run anyway**. Signing needs a paid code-signing certificate.
+- If `npm run dist` stops with "Cannot create symbolic link", turn on **Developer Mode** in Windows Settings (System, For developers) or run the terminal as administrator, then try again.
+- Store links and trailers open in your normal web browser. The window's top bar works as the title bar: drag it to move the window. Mouse back/forward buttons, Alt+Left/Right, F5, F11 and Ctrl +/- zoom work as you'd expect.
+- Accounts made in the app live on that computer only. To let people see each other's profiles, the website has to be hosted online; the app can then be pointed at it.
+
 ### Connect the full game database (IGDB)
 
 Out of the box GameShelf shows a 35-game sample. Connect IGDB, the game database run by Twitch, to get every game on every platform with official cover art. It's free:
@@ -77,11 +93,12 @@ src/games/rawg.js    the RAWG game database (older alternative)
 src/games/local.js   built-in sample catalog (data/games.json)
 src/games/stores.js  "where to buy" store links
 src/games/genres.js  genres you can browse by
+desktop/             the Windows app (Electron): window, settings file, app icon
 public/css/          the stylesheet
 public/fonts/        the Manrope font (SIL Open Font License)
 public/js/main.js    navigation and page routing
 public/js/palette.js the search pop-up
-public/js/views/     one file per page (home, browse, game, library, profile, edit profile, import, community, log in, about & legal)
+public/js/views/     one file per page (home, browse, game, library, profile, edit profile, import, community, log in, about & legal, app settings)
 scripts/             developer tools (search-debug)
 test/                automated tests: npm test
 ```

@@ -12,9 +12,12 @@ import { communityView } from './views/community.js';
 import { authView } from './views/auth.js';
 import { importView } from './views/import.js';
 import { legalView } from './views/legal.js';
+import { appSettingsView } from './views/app-settings.js';
 
 const app = document.getElementById('app');
 const SIDEBAR_GAMES = 12;
+// Set by the desktop app (desktop/preload.js); undefined on the website.
+const desktop = window.gameshelfDesktop;
 
 let current = { section: 'home', gameId: null };
 
@@ -31,7 +34,10 @@ function renderTopbar() {
 }
 
 function renderAccount() {
-  mount(document.getElementById('nav-right'), state.user
+  const settings = desktop
+    ? html`<a class="ghost-btn" href="#/app-settings" aria-label="App settings" title="App settings">${icon('sliders')}</a>`
+    : '';
+  mount(document.getElementById('nav-right'), html`${settings}${state.user
     ? html`
       <div class="menu">
         <button class="menu-button" type="button" id="menu-button" aria-haspopup="true" aria-expanded="false" aria-label="Account menu">
@@ -46,7 +52,7 @@ function renderAccount() {
           <button type="button" id="logout">Log out</button>
         </div>
       </div>`
-    : html`<a class="nav-login" href="#/login">Log in</a><a class="pill-btn pill-light" href="#/register">Join free</a>`);
+    : html`<a class="nav-login" href="#/login">Log in</a><a class="pill-btn pill-light" href="#/register">Join free</a>`}`);
 
   const button = document.getElementById('menu-button');
   const list = document.getElementById('menu-list');
@@ -154,6 +160,10 @@ async function route() {
       case 'customize': await customizeView(app); break;
       case 'import': await importView(app); break;
       case 'legal': await legalView(app); break;
+      case 'app-settings':
+        if (!desktop) throw Object.assign(new Error(''), { status: 404 });
+        await appSettingsView(app, params);
+        break;
       case 'community': await communityView(app, params); break;
       case 'login': await authView(app, 'login'); break;
       case 'register': await authView(app, 'register'); break;
