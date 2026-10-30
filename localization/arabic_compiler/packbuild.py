@@ -190,12 +190,19 @@ def translate_rows(rows, args, out: Path, log):
 
 def write_review(rows, failed, path: Path, keyed=False):
     """translations.csv. For games that look their text up by key, a "lookup" column keeps that for the rebuild.
-    Written with a byte order mark, so Excel opens the Arabic as Arabic."""
-    with path.open('w', encoding='utf-8-sig', newline='') as f:
+    Written with a byte order mark, so Excel opens the Arabic as Arabic, and in one step, so an
+    edited copy is never left half written. Raises PermissionError while it's open in Excel."""
+    temp = path.with_name(path.name + '.tmp')
+    with temp.open('w', encoding='utf-8-sig', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(['key', 'source', 'arabic', 'problem'] + (['lookup'] if keyed else []))
         for r in rows:
             writer.writerow([r.key or '', r.source, r.arabic or '', failed.get(r.source, '')] + (['key'] if keyed else []))
+    try:
+        os.replace(temp, path)
+    except OSError:
+        temp.unlink(missing_ok=True)
+        raise
 
 
 def _copy_tree(source: Path, payload: Path, log):
@@ -587,8 +594,15 @@ def build(args, log=print) -> Path:
             failed = translate_rows(rows, args, out, log)
         except TranslationError as err:
             raise BuildError(str(err)) from None
-        write_review(rows, failed, out / 'translations.csv', keyed=source.keyed)
-        log(f'Wrote {out / "translations.csv"}: read it, fix what needs fixing, and run again with --translations to rebuild.')
+        review = out / 'translations.csv'
+        try:
+            write_review(rows, failed, review, keyed=source.keyed)
+            log(f'Wrote {review}: read it, fix what needs fixing, and run again with --translations to rebuild.')
+        except PermissionError:
+            # Windows won't let a file open in Excel be replaced.
+            if args.review:
+                raise BuildError(f'{review} is open in another program (Excel?). Close it and run again.') from None
+            log(f'{review} is open in another program (Excel?), so it was left as it is. The pack is made all the same.')
         if failed:
             log(f'{len(failed)} lines couldn\'t be translated cleanly; they\'re left out (see the "problem" column).')
     if args.review:

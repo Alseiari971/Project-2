@@ -435,6 +435,21 @@ class Building(unittest.TestCase):
             os.environ['PATH'] = path
         self.assertTrue((self.tmp / 'out/stage/pak/MyGame/Content/Localization/Game/en/Game.locres').exists())
 
+    def test_a_translations_csv_open_in_excel_doesnt_stop_the_build(self):
+        from unittest import mock
+        out = self.run_build(self.csv_source(), '--review')
+        reviewed = out / 'translations.csv'
+        before = reviewed.read_bytes()
+        # Windows refuses to replace a file Excel has open.
+        with mock.patch('arabic_compiler.packbuild.os.replace', side_effect=PermissionError(13, 'Permission denied')):
+            pack = self.run_build(self.csv_source(), '--translations', str(reviewed))
+            self.assertTrue((pack / 'pack.json').exists())
+            self.assertTrue(any('open in another program' in line for line in self.logged))
+            self.assertEqual(reviewed.read_bytes(), before)  # left exactly as it was
+            self.assertFalse(reviewed.with_name('translations.csv.tmp').exists())
+            with self.assertRaisesRegex(BuildError, 'Close it and run again'):
+                self.run_build(self.csv_source(), '--review')
+
     def test_without_a_provider_it_says_what_to_do(self):
         args = parse_args([str(self.csv_source()), '--id', 'x', '--version', '1', '--game-id', 'g', '--key', 'k', '--out', str(self.tmp / 'o')])
         with self.assertRaisesRegex(BuildError, '--provider and --model'):
