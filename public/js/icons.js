@@ -10,6 +10,7 @@ const PATHS = {
   check: '<path d="m5 12 5 5 9-10"/>',
   play: '<path d="M8 5v14l11-7z" fill="currentColor" stroke="none"/>',
   minus: '<path d="M6 12h12"/>',
+  stop: '<rect x="6.5" y="6.5" width="11" height="11" rx="2" fill="currentColor" stroke="none"/>',
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/>',
   left: '<path d="m15 18-6-6 6-6"/>',
   right: '<path d="m9 18 6-6-6-6"/>',

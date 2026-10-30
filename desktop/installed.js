@@ -7,7 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFile } = require('node:child_process');
 
-const LAUNCHER_NAMES = { steam: 'Steam', epic: 'Epic Games', gog: 'GOG' };
+const LAUNCHER_NAMES = { steam: 'Steam', epic: 'Epic Games', gog: 'GOG', custom: 'This PC' };
 
 // Steam installs these alongside games; they aren't games.
 const STEAM_TOOLS = /^(Steamworks Common|Steam Linux Runtime|Proton\b|SteamVR)/i;
@@ -21,8 +21,11 @@ function parseLibraryFolders(text) {
   return [...text.matchAll(quotedPair)].filter((m) => m[1] === 'path').map((m) => unescapeVdf(m[2]));
 }
 
-/** One steamapps/appmanifest_<appid>.acf file, or null when it isn't a ready-to-play game. */
-function parseAppManifest(text) {
+/**
+ * One steamapps/appmanifest_<appid>.acf file, or null when it isn't a ready-to-play game.
+ * `dir` is the game's folder, which tells whether it's running (see processes.js).
+ */
+function parseAppManifest(text, library) {
   const values = {};
   for (const [, key, value] of text.matchAll(quotedPair)) {
     if (!(key in values)) values[key] = unescapeVdf(value);
@@ -30,7 +33,14 @@ function parseAppManifest(text) {
   const appId = Number(values.appid);
   if (!appId || !values.name || STEAM_TOOLS.test(values.name)) return null;
   if (!(Number(values.StateFlags) & STEAM_FULLY_INSTALLED)) return null;
-  return { key: `steam:${appId}`, launcher: 'steam', name: values.name, steamAppId: appId, url: `steam://rungameid/${appId}` };
+  return {
+    key: `steam:${appId}`,
+    launcher: 'steam',
+    name: values.name,
+    steamAppId: appId,
+    url: `steam://rungameid/${appId}`,
+    dir: library && values.installdir ? path.join(library, 'steamapps', 'common', values.installdir) : null,
+  };
 }
 
 /** One Epic Games Launcher manifest (a .item JSON file), or null for add-ons and unfinished installs. */
@@ -50,6 +60,7 @@ function parseEpicManifest(text) {
     launcher: 'epic',
     name: m.DisplayName,
     url: `com.epicgames.launcher://apps/${id}?action=launch&silent=true`,
+    dir: m.InstallLocation || null,
   };
 }
 
@@ -70,6 +81,7 @@ function parseGogRegistry(text) {
       name: values.gamename,
       exe: values.exe,
       cwd: values.workingdir || values.path || path.dirname(values.exe),
+      dir: values.path || path.dirname(values.exe),
     });
   }
   return games;
@@ -106,7 +118,7 @@ async function scanSteam(roots) {
     const dir = path.join(library, 'steamapps');
     const files = await fs.readdir(dir).catch(() => []);
     for (const file of files.filter((f) => /^appmanifest_\d+\.acf$/.test(f))) {
-      const game = parseAppManifest(await readText(path.join(dir, file)));
+      const game = parseAppManifest(await readText(path.join(dir, file)), library);
       if (game) games.set(game.key, game);
     }
   }

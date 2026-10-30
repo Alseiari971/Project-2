@@ -4,10 +4,13 @@
 const path = require('node:path');
 const fs = require('node:fs');
 const http = require('node:http');
+const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
 const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require('electron');
 const { SETTINGS_KEYS, readSettings, writeSettings } = require('./settings');
 const { LAUNCHER_NAMES, scanInstalledGames } = require('./installed');
+const { processesOf, listProcesses, stopProcesses } = require('./processes');
+const { createCustomGames, suggestName } = require('./custom-games');
 const { normalizeTitle } = require('../src/text');
 
 app.setName('GameShelf');
@@ -210,17 +213,23 @@ const SCAN_TTL_MS = 15 * 1000;
 let scan = { at: 0, games: Promise.resolve([]) };
 // Each installed game's GameShelf page (or null), looked up once per game database.
 const matches = new Map();
+const customGames = createCustomGames(path.join(dataDir, 'custom-games.json'));
 
 // Rescans at most every few seconds, so games installed while the app is open show up.
-function installedGames() {
+function scannedGames() {
   if (Date.now() - scan.at > SCAN_TTL_MS) {
     scan = { at: Date.now(), games: scanInstalledGames().catch(() => []) };
   }
   return scan.games;
 }
 
+/** Games found in launchers, then games added by hand. */
+async function installedGames() {
+  return [...(await scannedGames()), ...customGames.all()];
+}
+
 async function findGamePages(installed) {
-  const unknown = installed.filter((g) => !matches.has(g.key));
+  const unknown = installed.filter((g) => g.launcher !== 'custom' && !matches.has(g.key));
   // Steam games match exactly by their Steam ID, in one go.
   const steam = unknown.filter((g) => g.steamAppId);
   if (steam.length) {
@@ -242,13 +251,69 @@ async function findGamePages(installed) {
   }
 }
 
+// Games added by hand carry the GameShelf game picked when adding them.
+const pageOf = (g) => (g.launcher === 'custom' ? g.game : matches.get(g.key));
 const describe = (g) => ({ key: g.key, launcher: LAUNCHER_NAMES[g.launcher] });
 
 function launch(game) {
   // Launcher links (steam://, com.epicgames.launcher://) go through the launcher.
-  // GOG games start from their own program file, as GOG's shortcuts do.
+  // GOG games and games added by hand start from their own program file.
   if (game.url) return shell.openExternal(game.url);
-  spawn(game.exe, [], { cwd: game.cwd, detached: true, stdio: 'ignore', windowsHide: false }).unref();
+  const child = spawn(game.exe, [], { cwd: game.cwd, detached: true, stdio: 'ignore', windowsHide: false });
+  child.on('error', (err) => console.error(`Could not start ${game.name}:`, err.message));
+  child.unref();
+}
+
+// ---- Running games ------------------------------------------------------------------
+
+// While a game is starting or running, the process list is checked every few
+// seconds; otherwise only when a page asks.
+const POLL_MS = 3000;
+const START_TIMEOUT_MS = 2 * 60 * 1000;
+const starting = new Map(); // key -> when Play was pressed
+let running = new Map(); // key -> process IDs
+let checking = null;
+let lastCheck = 0;
+let pollTimer = null;
+
+function gameStates() {
+  const states = {};
+  for (const key of starting.keys()) states[key] = 'starting';
+  for (const key of running.keys()) states[key] = 'running';
+  return states;
+}
+
+function sendStates() {
+  if (win && !win.isDestroyed()) win.webContents.send('installed:states', gameStates());
+}
+
+function checkRunning() {
+  checking ??= (async () => {
+    try {
+      const [installed, processes] = await Promise.all([installedGames(), listProcesses()]);
+      const before = JSON.stringify(gameStates());
+      const now = new Map();
+      for (const game of installed) {
+        const pids = processesOf(game, processes).map((p) => p.pid);
+        if (pids.length) now.set(game.key, pids);
+      }
+      running = now;
+      for (const [key, since] of starting) {
+        if (running.has(key) || Date.now() - since > START_TIMEOUT_MS) starting.delete(key);
+      }
+      if (JSON.stringify(gameStates()) !== before) sendStates();
+    } finally {
+      lastCheck = Date.now();
+      checking = null;
+      schedulePoll();
+    }
+  })();
+  return checking;
+}
+
+function schedulePoll() {
+  clearTimeout(pollTimer);
+  if (starting.size || running.size) pollTimer = setTimeout(checkRunning, POLL_MS);
 }
 
 // ---- Bridge for the page (see preload.js) -----------------------------------------
@@ -272,43 +337,93 @@ async function checkGameData() {
   }
 }
 
+// Program files picked in the file dialog, waiting for the page to name them.
+// The page only ever holds a token, never a path it could change.
+const picked = new Map();
+
 function registerIpc() {
-  ipcMain.handle('settings:get', async (event) => {
+  const handle = (channel, fn) => ipcMain.handle(channel, (event, ...args) => {
     if (!fromApp(event)) throw new Error('Not allowed.');
-    return { values: readSettings(settingsFile), source: games.name, dataDir: app.isPackaged ? dataDir : null };
+    return fn(...args);
   });
-  ipcMain.handle('settings:save', async (event, input) => {
-    if (!fromApp(event)) throw new Error('Not allowed.');
+
+  handle('settings:get', async () => ({ values: readSettings(settingsFile), source: games.name, dataDir: app.isPackaged ? dataDir : null }));
+  handle('settings:save', async (input) => {
     fs.mkdirSync(path.dirname(settingsFile), { recursive: true });
     applySettings(writeSettings(settingsFile, input));
     buildApp();
     return { source: games.name, problem: await checkGameData() };
   });
-  // Installed games that have a GameShelf page, for the home screen.
-  ipcMain.handle('installed:list', async (event) => {
-    if (!fromApp(event)) throw new Error('Not allowed.');
+
+  // Installed games that have a GameShelf page, for the home screen. Games
+  // added by hand show even without one.
+  handle('installed:list', async () => {
     const installed = await installedGames();
     await findGamePages(installed);
-    return installed.filter((g) => matches.get(g.key)).map((g) => ({ ...describe(g), game: matches.get(g.key) }));
+    return installed
+      .filter((g) => pageOf(g) || g.launcher === 'custom')
+      .map((g) => ({ ...describe(g), game: pageOf(g) || { id: null, name: g.name } }));
   });
-  // Whether the game on a game page is installed: by Steam ID, or else by exact name.
-  ipcMain.handle('installed:find', async (event, { steamAppId, name } = {}) => {
-    if (!fromApp(event)) throw new Error('Not allowed.');
+  // Whether the game on a game page is installed: a game added by hand for this
+  // page, the same Steam ID, or else the exact name.
+  handle('installed:find', async ({ id, steamAppId, name } = {}) => {
     const installed = await installedGames();
     const target = normalizeTitle(name || '');
-    const game = (steamAppId && installed.find((g) => g.steamAppId === Number(steamAppId))) ||
+    const game = (id && installed.find((g) => g.launcher === 'custom' && g.game?.id === id)) ||
+      (steamAppId && installed.find((g) => g.steamAppId === Number(steamAppId))) ||
       (target && installed.find((g) => normalizeTitle(g.name) === target));
     return game ? describe(game) : null;
   });
-  // Only games found by the scan can be started; the page passes just the key.
-  ipcMain.handle('installed:launch', async (event, key) => {
-    if (!fromApp(event)) throw new Error('Not allowed.');
+  // Only games found by the scan or added by hand can be started; the page passes just the key.
+  handle('installed:launch', async (key) => {
     const game = (await installedGames()).find((g) => g.key === key);
     if (!game) throw new Error('That game is no longer installed.');
+    if (running.has(key)) return;
     await launch(game);
+    starting.set(key, Date.now());
+    sendStates();
+    schedulePoll();
   });
-  ipcMain.handle('data-folder:open', async (event) => {
-    if (!fromApp(event)) throw new Error('Not allowed.');
+  handle('installed:stop', async (key) => {
+    starting.delete(key);
+    await checkRunning();
+    const pids = running.get(key) || [];
+    sendStates();
+    await stopProcesses(pids);
+    await checkRunning();
+  });
+  // Current states; checks the process list unless it was checked a moment ago.
+  handle('installed:states', async () => {
+    if (Date.now() - lastCheck > POLL_MS) await checkRunning();
+    return gameStates();
+  });
+
+  handle('custom:pick', async () => {
+    const result = await dialog.showOpenDialog(win, {
+      title: 'Choose the game’s program',
+      buttonLabel: 'Choose',
+      properties: ['openFile'],
+      filters: process.platform === 'win32' ? [{ name: 'Programs', extensions: ['exe'] }] : [],
+    });
+    const exe = result.filePaths[0];
+    if (result.canceled || !exe) return null;
+    const token = crypto.randomUUID();
+    picked.set(token, exe);
+    return { token, file: path.basename(exe), name: suggestName(exe) };
+  });
+  handle('custom:add', async ({ token, name, game } = {}) => {
+    const exe = picked.get(token);
+    if (!exe) throw new Error('Choose the game’s program again.');
+    const entry = customGames.add({ exe, name, game });
+    picked.delete(token);
+    return describe({ ...entry, launcher: 'custom' });
+  });
+  handle('custom:list', async () => customGames.all().map((g) => ({ key: g.key, name: g.name, file: g.exe })));
+  handle('custom:remove', async (key) => {
+    customGames.remove(key);
+  });
+
+  handle('data-folder:open', async () => {
     await shell.openPath(app.isPackaged ? dataDir : path.join(__dirname, '..', 'data'));
   });
 }
@@ -323,7 +438,7 @@ async function start() {
     if (value) process.env[key] = value;
   }
   buildApp();
-  installedGames();
+  scannedGames();
   await startServer();
   registerIpc();
   if (process.platform !== 'darwin') Menu.setApplicationMenu(null);

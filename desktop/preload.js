@@ -11,6 +11,18 @@ contextBridge.exposeInMainWorld('gameshelfDesktop', {
   installedGames: () => ipcRenderer.invoke('installed:list'),
   findInstalled: (game) => ipcRenderer.invoke('installed:find', game),
   launch: (key) => ipcRenderer.invoke('installed:launch', key),
+  stop: (key) => ipcRenderer.invoke('installed:stop', key),
+  gameStates: () => ipcRenderer.invoke('installed:states'),
+  // Calls back with { key: 'starting' | 'running' } whenever a game starts or stops.
+  onGameStates: (callback) => {
+    const listener = (_event, states) => callback(states);
+    ipcRenderer.on('installed:states', listener);
+    return () => ipcRenderer.removeListener('installed:states', listener);
+  },
+  pickGameFile: () => ipcRenderer.invoke('custom:pick'),
+  addGame: (details) => ipcRenderer.invoke('custom:add', details),
+  addedGames: () => ipcRenderer.invoke('custom:list'),
+  removeAddedGame: (key) => ipcRenderer.invoke('custom:remove', key),
 });
 
 window.addEventListener('DOMContentLoaded', () => {

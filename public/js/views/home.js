@@ -1,5 +1,6 @@
 import { html, api, mount, state, year, gameHref } from '../lib.js';
-import { gameTile, libraryTile, rankTile, row, enableRows, installedTile, wireLaunchButtons } from '../components.js';
+import { gameTile, libraryTile, rankTile, row, enableRows } from '../components.js';
+import { desktop, installedTile, addGameTile, wireLaunchButtons } from '../desktop.js';
 import { icon } from '../icons.js';
 
 const NEW_DAYS = 60;
@@ -121,14 +122,15 @@ export async function homeView(app) {
   showInstalled();
 }
 
-// Desktop app: games installed through Steam, Epic or GOG, ready to start.
-// Finding and matching them can take a moment, so the row appears when ready.
+// Desktop app: games installed through Steam, Epic or GOG, or added by hand,
+// ready to start. Finding and matching them can take a moment, so the row
+// appears when ready.
 async function showInstalled() {
-  if (!window.gameshelfDesktop) return;
-  const installed = await window.gameshelfDesktop.installedGames().catch(() => []);
+  if (!desktop) return;
+  const installed = await desktop.installedGames().catch(() => []);
   const slot = document.getElementById('installed-row');
-  if (!slot || !installed.length) return;
-  mount(slot, row({ title: 'Installed on this PC', items: installed.map(installedTile) }));
+  if (!slot) return;
+  mount(slot, row({ title: 'Installed on this PC', items: [...installed.map(installedTile), addGameTile()] }));
   enableRows(slot);
-  wireLaunchButtons(slot);
+  wireLaunchButtons(slot, { onAdded: showInstalled });
 }

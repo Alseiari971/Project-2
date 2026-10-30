@@ -1182,12 +1182,45 @@ label { display: grid; gap: 8px; font-size: 13px; font-weight: 700; color: var(-
 .app-settings .form-error:empty { min-height: 0; }
 
 /* ---- Installed games (desktop app) ---- */
-.tile-wrap { position: relative; min-width: 0; }
-.tile-play { position: absolute; right: 8px; bottom: 8px; z-index: 4; width: 36px; height: 36px; display: grid; place-items: center; border: 0; border-radius: 50%; background: var(--accent); color: var(--on-accent); cursor: pointer; box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5); transition: transform 0.15s var(--ease); }
-.tile-play:hover { transform: scale(1.1); }
-.tile-play:disabled { opacity: 0.6; cursor: default; transform: none; }
-.tile-play .icon { width: 16px; height: 16px; margin-left: 2px; }
+/* Play glows in the accent color; while the game starts or runs it turns into a white Stop button. */
+:root { --play-glow: 0 10px 32px -8px color-mix(in srgb, var(--accent) 80%, transparent), 0 0 28px -6px color-mix(in srgb, var(--accent) 45%, transparent); }
 .play-slot { display: contents; }
+.play-btn { background: var(--accent); color: var(--on-accent); box-shadow: var(--play-glow); transition: background 0.2s, color 0.2s, box-shadow 0.3s, transform 0.15s; }
+.play-btn:hover { background: color-mix(in srgb, var(--accent) 85%, #fff); box-shadow: 0 12px 40px -6px color-mix(in srgb, var(--accent) 95%, transparent), 0 0 36px -4px color-mix(in srgb, var(--accent) 55%, transparent); }
+.play-btn .icon { width: 18px; height: 18px; }
+.play-btn.is-active, .tile-play.is-active { background: #fff; color: #000; box-shadow: 0 10px 32px -8px rgba(255, 255, 255, 0.6), 0 0 28px -6px rgba(255, 255, 255, 0.3); }
+.play-btn.is-active:hover { background: #e6e6e6; }
+.play-btn.is-starting, .tile-play.is-starting { animation: play-pulse 1.6s ease-in-out infinite; }
+@keyframes play-pulse { 50% { box-shadow: 0 12px 44px -6px rgba(255, 255, 255, 0.85), 0 0 40px -2px rgba(255, 255, 255, 0.45); } }
+.tile-wrap { position: relative; min-width: 0; }
+.tile-play { position: absolute; right: 8px; bottom: 8px; z-index: 4; width: 38px; height: 38px; display: grid; place-items: center; border: 0; border-radius: 50%; background: var(--accent); color: var(--on-accent); cursor: pointer; box-shadow: var(--play-glow); transition: transform 0.15s var(--ease), background 0.2s, color 0.2s; }
+.tile-play:hover { transform: scale(1.1); }
+.tile-play .icon { width: 16px; height: 16px; }
+.tile-play:not(.is-active) .icon { margin-left: 2px; }
+.add-tile { aspect-ratio: 16 / 9; display: grid; place-content: center; justify-items: center; gap: 4px; padding: 16px; border: 2px dashed var(--border-strong); border-radius: 12px; background: transparent; color: var(--dim); font: inherit; cursor: pointer; transition: border-color 0.2s, color 0.2s, background 0.2s; }
+.add-tile:hover { border-color: var(--accent); color: var(--text); background: var(--panel); }
+.add-tile .icon { width: 26px; height: 26px; margin-bottom: 4px; }
+.add-tile strong { color: var(--text); font-size: 15px; }
+.add-tile span { font-size: 13px; }
+/* The "Add a game" pop-up reuses the search pop-up's frame. */
+.add-game { display: grid; gap: 16px; padding: 24px; }
+.add-head h2 { font-size: 21px; margin-bottom: 4px; }
+.add-head p { word-break: break-all; }
+.add-search { display: grid; gap: 8px; font-weight: 700; font-size: 14px; }
+.add-results { display: grid; gap: 4px; max-height: 44vh; overflow-y: auto; }
+.add-option { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-radius: var(--radius-sm); cursor: pointer; }
+.add-option:hover { background: var(--pill); }
+.add-option:has(input:checked) { background: var(--pill); box-shadow: inset 0 0 0 1px var(--accent); }
+.add-option input { accent-color: var(--accent); }
+.add-option-name { flex: 1; min-width: 0; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.add-none { display: grid; place-items: center; color: var(--dim); }
+.add-none .icon { width: 16px; height: 16px; }
+.add-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.add-game .form-error:empty { display: none; }
+.added-list { display: grid; margin-bottom: 16px; }
+.added-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.added-row > div { display: grid; gap: 2px; min-width: 0; }
+.added-row .small { word-break: break-all; }
 
 /* ---- Desktop app window ---- */
 /* The top bar is the window's title bar: drag it to move the window. */

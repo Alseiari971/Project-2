@@ -41,7 +41,7 @@ Good to know:
 
 - The installer isn't code-signed, so the first time Windows may show "Windows protected your PC". Click **More info**, then **Run anyway**. Signing needs a paid code-signing certificate.
 - If `npm run dist` stops with "Cannot create symbolic link", turn on **Developer Mode** in Windows Settings (System, For developers) or run the terminal as administrator, then try again.
-- **Play installed games:** the app finds games installed through Steam, the Epic Games Launcher and GOG Galaxy. They show up in an "Installed on this PC" row on Home, and their game pages get a **Play** button that starts the game through its launcher. Other launchers (Xbox app, EA app, Ubisoft Connect, Battle.net) aren't detected yet.
+- **Play installed games:** the app finds games installed through Steam, the Epic Games Launcher and GOG Galaxy. They show up in an "Installed on this PC" row on Home, and their game pages get a **Play** button that starts the game through its launcher. While a game runs, Play turns into a white **Stop** button (this also notices games started from Steam or a shortcut). Stop asks the game to close and forces it after 5 seconds. Other launchers (Xbox app, EA app, Ubisoft Connect, Battle.net) aren't detected yet, but any game can be added by hand: click **Add a game** at the end of the Home row and pick its `.exe` file. Added games are listed, and can be removed, in App settings.
 - Store links and trailers open in your normal web browser. The window's top bar works as the title bar: drag it to move the window. Mouse back/forward buttons, Alt+Left/Right, F5, F11 and Ctrl +/- zoom work as you'd expect.
 - Accounts made in the app live on that computer only. To let people see each other's profiles, the website has to be hosted online; the app can then be pointed at it.
 
@@ -94,7 +94,7 @@ src/games/rawg.js    the RAWG game database (older alternative)
 src/games/local.js   built-in sample catalog (data/games.json)
 src/games/stores.js  "where to buy" store links
 src/games/genres.js  genres you can browse by
-desktop/             the Windows app (Electron): window, settings file, installed-game detection, app icon
+desktop/             the Windows app (Electron): window, settings file, installed and running games, games added by hand, app icon
 public/css/          the stylesheet
 public/fonts/        the Manrope font (SIL Open Font License)
 public/js/main.js    navigation and page routing

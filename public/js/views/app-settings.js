@@ -1,6 +1,7 @@
 // Desktop app only: the API keys the built-in server uses. The desktop app
 // passes them through window.gameshelfDesktop (see desktop/preload.js).
 import { html, mount, toast } from '../lib.js';
+import { addGame } from '../desktop.js';
 
 const link = (href, text) => html`<a href="${href}" target="_blank" rel="noopener noreferrer">${text}</a>`;
 const SOURCES = {
@@ -43,6 +44,12 @@ export async function appSettingsView(app, params) {
       </form>
 
       <section class="panel">
+        <h2>Games you added</h2>
+        <div id="added-games"></div>
+        <button class="btn btn-quiet" type="button" id="add-game">Add a game</button>
+      </section>
+
+      <section class="panel">
         <h2>Your data</h2>
         <p class="muted">Accounts, game lists and profiles you make in the app are saved on this computer only. Your keys stay here too and are only sent to IGDB and Steam.</p>
         ${dataDir ? html`<p class="muted small">Folder: <code>${dataDir}</code></p>` : ''}
@@ -52,6 +59,25 @@ export async function appSettingsView(app, params) {
   `);
 
   document.getElementById('open-data').addEventListener('click', () => desktop.openDataFolder());
+
+  const showAdded = async () => {
+    const added = await desktop.addedGames();
+    const el = document.getElementById('added-games');
+    if (!el) return;
+    mount(el, added.length
+      ? html`<div class="added-list">${added.map((g) => html`
+          <div class="added-row">
+            <div><strong>${g.name}</strong><span class="muted small">${g.file}</span></div>
+            <button class="btn btn-sm btn-quiet" type="button" data-remove="${g.key}">Remove</button>
+          </div>`)}</div>`
+      : html`<p class="muted">Games that GameShelf doesn't find in Steam, Epic or GOG can be added by picking their .exe file. They get a Play button like the rest.</p>`);
+    el.querySelectorAll('[data-remove]').forEach((b) => b.addEventListener('click', async () => {
+      await desktop.removeAddedGame(b.dataset.remove);
+      showAdded();
+    }));
+  };
+  document.getElementById('add-game').addEventListener('click', () => addGame({ onAdded: showAdded }));
+  showAdded();
   document.getElementById('settings-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const button = e.submitter;

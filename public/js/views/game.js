@@ -1,5 +1,6 @@
 import { html, api, mount, state, year, formatDate, STATUS_LABELS, toast, hueFor, onLeave, rememberGame, refreshLibrary, gameHref } from '../lib.js';
-import { gameTile, row, enableRows, userChip, statusBadge, starInput, wireStarInput, starValue, formatHours, wireLaunchButtons } from '../components.js';
+import { gameTile, row, enableRows, userChip, statusBadge, starInput, wireStarInput, starValue, formatHours } from '../components.js';
+import { desktop, playButton, wireLaunchButtons } from '../desktop.js';
 import { icon } from '../icons.js';
 
 function listActions(game) {
@@ -411,14 +412,11 @@ export async function gameView(app, id, params) {
   if (params.get('section') === 'buy') document.getElementById('buy').scrollIntoView({ block: 'start' });
 
   // Desktop app: a game installed on this PC gets a Play button in place of Buy.
-  window.gameshelfDesktop?.findInstalled({ steamAppId: game.steamAppId, name: game.name })
+  desktop?.findInstalled({ id: game.id, steamAppId: game.steamAppId, name: game.name })
     .then((found) => {
       const slot = document.getElementById('play-slot');
       if (!found || !slot) return;
-      mount(slot, html`
-        <button type="button" class="pill-btn pill-accent pill-lg" data-launch="${found.key}" data-name="${game.name}">
-          ${icon('play')} Play<small>${found.launcher}</small>
-        </button>`);
+      mount(slot, playButton(found, game.name));
       wireLaunchButtons(slot);
       document.getElementById('buy-btn')?.remove();
     })

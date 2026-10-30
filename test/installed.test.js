@@ -35,8 +35,14 @@ test('reads Steam library folders, including Windows paths', () => {
 });
 
 test('only fully installed Steam games count, not tools or half-downloaded ones', () => {
-  assert.deepStrictEqual(parseAppManifest(manifest(730, 'Counter-Strike 2')),
-    { key: 'steam:730', launcher: 'steam', name: 'Counter-Strike 2', steamAppId: 730, url: 'steam://rungameid/730' });
+  assert.deepStrictEqual(parseAppManifest(manifest(730, 'Counter-Strike 2'), '/games'), {
+    key: 'steam:730',
+    launcher: 'steam',
+    name: 'Counter-Strike 2',
+    steamAppId: 730,
+    url: 'steam://rungameid/730',
+    dir: path.join('/games', 'steamapps', 'common', 'Counter-Strike 2'),
+  });
   assert.strictEqual(parseAppManifest(manifest(1091500, 'Cyberpunk 2077', 1026 & ~4)), null);
   assert.strictEqual(parseAppManifest(manifest(228980, 'Steamworks Common Redistributables')), null);
 });
@@ -63,6 +69,7 @@ test('Epic manifests become launcher links; add-ons and unfinished installs are 
     launcher: 'epic',
     name: 'Fortnite',
     url: 'com.epicgames.launcher://apps/fn%3A4fe75bbc5a674f4f9b356b5c90567da5%3AFortnite?action=launch&silent=true',
+    dir: null,
   });
   assert.strictEqual(parseEpicManifest(JSON.stringify({ ...base, AppName: 'Pack', DisplayName: 'Pack', MainGameAppName: 'Fortnite' })), null);
   assert.strictEqual(parseEpicManifest(JSON.stringify({ ...base, AppName: 'X', DisplayName: 'X', bIsIncompleteInstall: true })), null);
@@ -92,6 +99,7 @@ test('GOG registry entries become games; DLC entries are skipped', async () => {
     name: 'The Witcher 3: Wild Hunt',
     exe: 'C:\\GOG Games\\The Witcher 3\\bin\\x64\\witcher3.exe',
     cwd: 'C:\\GOG Games\\The Witcher 3\\bin\\x64',
+    dir: path.dirname('C:\\GOG Games\\The Witcher 3\\bin\\x64\\witcher3.exe'),
   }]);
 
   const games = await scanInstalledGames({ steamRoots: [], epicManifestDir: '/no/such/dir', query: async () => out, windows: true });
