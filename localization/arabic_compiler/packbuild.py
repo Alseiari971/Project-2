@@ -428,6 +428,8 @@ def build_reengine(source, rows, args, out: Path, payload: Path, log):
     stage = out / 'stage' / 're'
     shutil.rmtree(stage, ignore_errors=True)
     stage.mkdir(parents=True)
+    # Only this build's edited dumps, so none from an earlier build is mistaken for this one's.
+    shutil.rmtree(out / 'msg-edited', ignore_errors=True)
     # Older RE Engine games can't join Arabic letters or lay them right to left;
     # newer ones with an Arabic option can (--no-shape).
     compiler = ArabicCompiler(max_line=args.max_line) if args.shape is not False else None
