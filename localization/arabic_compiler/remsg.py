@@ -39,7 +39,7 @@ from .repak import GamePak, PakError, path_hashes
 
 LANGUAGE_IDS = {'English': 1, 'Arabic': 21}
 MSG_FILE = re.compile(r'\.msg\.\d+$', re.I)
-UNNAMED = re.compile(r'^unnamed/([0-9a-f]{8})-([0-9a-f]{8})\.msg\.\d+$')
+UNNAMED = re.compile(r'^(?:unnamed|fonts)/([0-9a-f]{8})-([0-9a-f]{8})\.(?:msg\.\d+|font)$')
 MSG_MAGIC = b'GMSG'
 MAX_MSG_SIZE = 32 * 1024 * 1024
 # A file every Arabic patch made by the pack builder holds (the game never
@@ -87,6 +87,41 @@ def pak_entry(in_pak: str):
     """What a file is called in a pak: its path, or the two hashes of one taken out of the game's paks."""
     found = UNNAMED.match(in_pak)
     return (int(found.group(1), 16), int(found.group(2), 16)) if found else in_pak
+
+
+# How plain font files start: TrueType, OpenType, collections, web fonts.
+FONT_MAGICS = (b'\x00\x01\x00\x00', b'OTTO', b'true', b'ttcf', b'wOFF', b'wOF2')
+MAX_FONT_SIZE = 64 * 1024 * 1024
+
+
+def find_fonts(paks: list, log) -> list:
+    """The game's plain font files (by their hashes), newest version of each. Scrambled fonts can't be told apart and aren't found."""
+    newest = {}
+    opened = []
+    try:
+        for path in paks:
+            pak = GamePak(path)
+            opened.append(pak)
+            if path_hashes(PATCH_MARKER) in pak.entries:
+                continue
+            for hashes, (_, _, size, _) in pak.entries.items():
+                if 1024 <= size <= MAX_FONT_SIZE:
+                    newest[hashes] = pak
+        fonts = []
+        for hashes, pak in newest.items():
+            try:
+                head = pak.read(hashes, limit=4)
+            except (PakError, zlib.error):
+                continue
+            if head in FONT_MAGICS:
+                fonts.append(hashes)
+    except PakError as err:
+        raise MsgError(str(err)) from None
+    finally:
+        for pak in opened:
+            pak.close()
+    log(f'Found {len(fonts)} plain font files in the game\'s paks.')
+    return fonts
 
 
 def extract_messages(paks: list, out: Path, log) -> list:

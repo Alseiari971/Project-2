@@ -132,7 +132,7 @@ def parse_args(argv=None):
     c.add_argument('--pak-list', help='unreal: the game\'s pak file list (from repak list, UnrealPak -List or FModel), to find its fonts')
     c.add_argument('--extracted', help='unreal: a folder of the game\'s files you extracted from your own copy, to find its fonts')
     c.add_argument('--font-targets', help='unreal: the font files to replace, comma-separated, e.g. MyGame/Content/UI/Fonts/Roboto.ufont')
-    c.add_argument('--no-fonts', action='store_true', help='unreal: leave the game\'s fonts as they are')
+    c.add_argument('--no-fonts', action='store_true', help='unreal, reengine: leave the game\'s fonts as they are')
     c.add_argument('--godot', type=int, choices=[3, 4], default=4, help='godot: the game\'s Godot version (default 4)')
     c.add_argument('--msg-tool', help='reengine: REMSG_Converter (its src/main.py, or the .exe), to read and write .msg files')
     c.add_argument('--msg-path', help='reengine: where a single dump\'s message file sits in the game, e.g. natives/stm/message/x.msg.22')
@@ -472,6 +472,23 @@ def build_reengine(source, rows, args, out: Path, payload: Path, log):
         raise BuildError(f'The Arabic is in the dumps in {out / "msg-edited"}. Give --msg-tool (REMSG_Converter\'s src/main.py, '
                          'or its .exe) to turn them into .msg files, then run again.')
     extra = [(Path(path), in_pak) for path, in_pak in source.msg_files] if args.msg_prebuilt else []
+    # The Arabic font in place of the game's own font files, when they're plain
+    # font files (taken from the game's paks; scrambled fonts can't be replaced).
+    if source.game_paks and not args.no_fonts and compiler:
+        try:
+            fonts = remsg.find_fonts(source.game_paks, log)
+        except remsg.MsgError as err:
+            raise BuildError(str(err)) from None
+        if fonts:
+            regular, _, _ = font_files(args)
+            for lower, upper in fonts:
+                target = stage / f'fonts/{lower:08x}-{upper:08x}.font'
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(regular, target)
+            log(f'Put the {regular.stem} font in place of the game\'s {len(fonts)} font files.')
+        else:
+            log('The game\'s fonts aren\'t plain font files, so they can\'t be given Arabic letters here: Arabic will show as '
+                'boxes until an Arabic font made for this game is added with --natives.')
     if args.natives:
         found = [(p, remsg.pak_path(p)) for p in sorted(Path(args.natives).rglob('*')) if p.is_file()]
         if any(in_pak is None for _, in_pak in found):
@@ -602,7 +619,9 @@ def build(args, log=print) -> Path:
     # RE Engine message files without dumps (for an RE Engine pack, or an
     # overlay pack made from the same text) are read with REMSG_Converter.
     if source.msg_files and not source.msg_dumps and not (kind == 'reengine' and args.msg_prebuilt):
+        game_paks = source.game_paks
         source = dump_messages(source, args, out, log)
+        source.game_paks = game_paks  # still needed, for the game's fonts
     # RE Engine message files that already hold the Arabic need no translating.
     prebuilt = kind == 'reengine' and args.msg_prebuilt and not source.rows
     rows = source.rows[:args.limit] if args.limit else source.rows

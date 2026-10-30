@@ -364,6 +364,32 @@ class BuildingReEngine(unittest.TestCase):
             sources = [r['source'] for r in csv.DictReader(f)]
         self.assertEqual(sources, [ENTRIES[0][1], ENTRIES[1][1]])  # the game's English, not the Arabic
 
+    def test_the_games_plain_fonts_get_the_arabic_font_in_their_place(self):
+        from arabic_compiler.packbuild import DEFAULT_FONT
+        game = self.tmp / 'RE3 Demo'
+        game.mkdir()
+        ttf = b'\x00\x01\x00\x00' + b'\0' * 2000
+        (game / 're_chunk_000.pak').write_bytes(game_pak([
+            (MSG_PATH, game_msg(ENTRIES), 1),
+            ('natives/stm/gui/font/main.oft', ttf, 1),          # a plain TrueType font, compressed
+            ('natives/stm/gui/font/sub.oft', b'OTTO' + b'\0' * 2000, 0),
+            ('natives/stm/gui/font/scrambled.oft', b'\x8f\x13' + b'\0' * 2000, 0),  # can't be told from any other file
+        ]))
+        common = [str(game), '--engine', 'reengine', '--msg-tool', str(self.tool),
+                  '--id', 'test-re', '--version', '1.0.0', '--steam-app-id', '1173690',
+                  '--key', str(self.keys / 'k/pack-signing.key'), '--out', str(self.tmp / 'out'),
+                  '--provider', 'openai', '--model', 'test-model', '--api-base', self.api.base]
+        pack = build(parse_args(common), log=self.logged.append)
+        files = read_pak((pack / 'payload/re_chunk_000.pak.patch_XXX.pak').read_bytes())
+        for path in ('natives/stm/gui/font/main.oft', 'natives/stm/gui/font/sub.oft'):
+            self.assertEqual(files[path_hashes(path)], DEFAULT_FONT.read_bytes())
+        self.assertNotIn(path_hashes('natives/stm/gui/font/scrambled.oft'), files)
+        self.assertTrue(any('in place of the game\'s 2 font files' in line for line in self.logged))
+
+        pack = build(parse_args(common + ['--no-fonts']), log=self.logged.append)
+        files = read_pak((pack / 'payload/re_chunk_000.pak.patch_XXX.pak').read_bytes())
+        self.assertNotIn(path_hashes('natives/stm/gui/font/main.oft'), files)
+
     def test_an_overlay_pack_from_the_same_message_files(self):
         args = parse_args([str(self.extracted(with_dump=False)), '--engine', 'overlay', '--msg-tool', str(self.tool),
                            '--id', 'test-re-overlay', '--version', '1.0.0', '--steam-app-id', '1173690',
