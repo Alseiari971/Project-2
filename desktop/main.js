@@ -386,6 +386,7 @@ function updatePresence(installed) {
     image: page?.poster || page?.image || null,
     badge: config.discordBadgeImage,
     url,
+    getUrl: config.downloadPage,
   });
 }
 

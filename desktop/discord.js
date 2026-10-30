@@ -49,8 +49,12 @@ function createDecoder(onMessage) {
 const clip = (text, max) => String(text).slice(0, max);
 const isHttps = (url) => typeof url === 'string' && url.startsWith('https://') && url.length <= 512;
 
-/** What Discord shows: the game, the launcher, time played, its cover with a GameShelf badge, and a link. */
-function buildActivity({ name, launcher, startedAt, image, badge, url }, { showDetails = true } = {}) {
+/**
+ * What Discord shows: the game, the launcher, time played, its cover with a
+ * GameShelf badge, and buttons (seen by friends, not on your own profile) to
+ * the game's page and to where to get GameShelf.
+ */
+function buildActivity({ name, launcher, startedAt, image, badge, url, getUrl }, { showDetails = true } = {}) {
   const activity = {
     type: 0,
     details: clip(name, 128).padEnd(2, ' '),
@@ -63,7 +67,11 @@ function buildActivity({ name, launcher, startedAt, image, badge, url }, { showD
   // The small round badge on the cover's corner.
   if (isHttps(badge)) Object.assign(assets, { small_image: badge, small_text: 'GameShelf' });
   if (Object.keys(assets).length) activity.assets = assets;
-  if (isHttps(url)) activity.buttons = [{ label: 'View game', url }];
+  const buttons = [
+    isHttps(url) && { label: 'View game', url },
+    isHttps(getUrl) && { label: 'Get GameShelf', url: getUrl },
+  ].filter(Boolean);
+  if (buttons.length) activity.buttons = buttons;
   if (showDetails) activity.status_display_type = SHOW_DETAILS;
   return activity;
 }

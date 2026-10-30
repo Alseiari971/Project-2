@@ -20,6 +20,7 @@ test('the activity shows the game, its launcher, play time, cover and a link', (
   assert.deepStrictEqual(buildActivity({
     name: 'Resident Evil Requiem', launcher: 'Steam', startedAt: 1700000000000,
     image: 'https://images.igdb.com/cover.jpg', badge: 'https://example.com/gameshelf.png', url: 'https://www.igdb.com/games/resident-evil-requiem',
+    getUrl: 'https://example.com/get',
   }), {
     type: 0,
     details: 'Resident Evil Requiem',
@@ -32,7 +33,10 @@ test('the activity shows the game, its launcher, play time, cover and a link', (
       small_image: 'https://example.com/gameshelf.png',
       small_text: 'GameShelf',
     },
-    buttons: [{ label: 'View game', url: 'https://www.igdb.com/games/resident-evil-requiem' }],
+    buttons: [
+      { label: 'View game', url: 'https://www.igdb.com/games/resident-evil-requiem' },
+      { label: 'Get GameShelf', url: 'https://example.com/get' },
+    ],
     status_display_type: 2,
   });
   // Games added by hand, without a cover or a public page.
