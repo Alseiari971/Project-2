@@ -5,6 +5,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { readPack, PackError, MANIFEST, SIGNATURE } = require('./pack');
+const { exists } = require('./files');
 
 const forGameMatch = (manifest, { steamAppId, gameId }) => Boolean(manifest.game) && (
   (steamAppId && manifest.game.steamAppId === Number(steamAppId)) || (gameId && manifest.game.gameId === gameId));
@@ -40,8 +41,14 @@ function createPackLibrary({ dir, publicKey }) {
       return readPack(pack.dir, { publicKey });
     },
 
-    /** Checks the pack in `sourceDir` and copies it in, replacing an older copy with the same id. */
+    /**
+     * Checks the pack in `sourceDir` and copies it in, replacing an older copy
+     * with the same id. The pack builder's own output folder works too: its
+     * pack is in its "pack" folder.
+     */
     async add(sourceDir) {
+      const built = path.join(sourceDir, 'pack');
+      if (!(await exists(path.join(sourceDir, MANIFEST))) && (await exists(path.join(built, MANIFEST)))) sourceDir = built;
       const pack = await readPack(sourceDir, { publicKey });
       if (!pack.manifest.game) throw new PackError('This pack doesn\'t say which game it\'s for.');
       const target = path.join(dir, pack.manifest.id);

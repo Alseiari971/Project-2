@@ -177,6 +177,15 @@ test('packs are checked when added, and only their listed files are copied', asy
   assert.deepEqual(await library.list(), []);
 });
 
+test('the pack builder\'s output folder can be added: its pack is in "pack"', async () => {
+  const library = createPackLibrary({ dir: await temp('gs-lib-'), publicKey });
+  const built = await temp('gs-built-');
+  await fs.rename(await overlayPack(), path.join(built, 'pack'));
+  await fs.writeFile(path.join(built, 'translations.csv'), 'key,source,arabic\n');
+  assert.equal((await library.add(built)).id, 'overlay-pack');
+  await assert.rejects(library.add(await temp('gs-empty-')), /has no pack\.json/);
+});
+
 test('unsigned, changed or unbound packs are refused', async () => {
   const library = createPackLibrary({ dir: await temp('gs-lib-'), publicKey });
   const changed = await overlayPack();
