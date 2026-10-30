@@ -305,6 +305,31 @@ class BuildingReEngine(unittest.TestCase):
         self.assertTrue(any('Took 1 message files out of re_chunk_000.pak' in line for line in self.logged))
         self.assertEqual(sorted(p.name for p in game.iterdir()), ['re_chunk_000.pak'])  # the game folder isn't written to
 
+    def test_only_message_files_with_arabic_go_into_the_patch(self):
+        game = self.tmp / 'RE3 Demo'
+        game.mkdir()
+        other = [('00000000-0000-0000-0000-0000000000aa', 'Press any button.')]
+        (game / 're_chunk_000.pak').write_bytes(game_pak([(MSG_PATH, game_msg(ENTRIES), 1),
+                                                          ('natives/stm/message/ui.msg.22', game_msg(other), 1)]))
+        common = [str(game), '--engine', 'reengine', '--msg-tool', str(self.tool), '--no-shape', '--no-translate',
+                  '--id', 'test-re', '--version', '1.0.0', '--steam-app-id', '1173690',
+                  '--key', str(self.keys / 'k/pack-signing.key'), '--out', str(self.tmp / 'out')]
+        out = build(parse_args(common + ['--review']), log=self.logged.append)
+        reviewed = out / 'translations.csv'
+        with reviewed.open(encoding='utf-8-sig') as f:
+            rows = list(csv.DictReader(f))
+        for row in rows:
+            if row['source'] == ENTRIES[0][1]:
+                row['arabic'] = 'يجب أن نصل إلى القلعة قبل حلول الليل.'
+        with reviewed.open('w', encoding='utf-8-sig', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=list(rows[0]))
+            writer.writeheader()
+            writer.writerows(rows)
+        pack = build(parse_args(common + ['--translations', str(reviewed)]), log=self.logged.append)
+        files = read_pak((pack / 'payload/re_chunk_000.pak.patch_XXX.pak').read_bytes())
+        self.assertEqual(list(files), [path_hashes(MSG_PATH)])  # the UI file has no Arabic, so the game keeps its own
+        self.assertTrue(any('1 message files have no Arabic yet' in line for line in self.logged))
+
     def test_an_overlay_pack_from_the_same_message_files(self):
         args = parse_args([str(self.extracted(with_dump=False)), '--engine', 'overlay', '--msg-tool', str(self.tool),
                            '--id', 'test-re-overlay', '--version', '1.0.0', '--steam-app-id', '1173690',

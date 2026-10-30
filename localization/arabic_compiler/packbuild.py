@@ -434,9 +434,14 @@ def build_reengine(source, rows, args, out: Path, payload: Path, log):
     languages = args.msg_language or ['English']
     arabic = {r.key: r.arabic for r in rows if r.arabic and r.key}
     waiting = []
+    untouched = 0
     for dump in source.msg_dumps:
         texts = {guid: (compiler(arabic[f'{dump.in_pak}#{guid}']) if compiler else arabic[f'{dump.in_pak}#{guid}'])
                  for guid in dump.english if f'{dump.in_pak}#{guid}' in arabic}
+        if not texts:
+            # No Arabic in this file: the game keeps its own, and the patch doesn't carry a copy.
+            untouched += 1
+            continue
         edited = out / 'msg-edited' / f'{dump.in_pak}.{dump.kind}'
         changed = remsg.write_dump(dump, texts, languages, edited)
         log(f'{dump.in_pak}: {changed} lines in Arabic ({" and ".join(languages)}{", shaped" if compiler else ""}).')
@@ -447,6 +452,8 @@ def build_reengine(source, rows, args, out: Path, payload: Path, log):
                 raise BuildError(str(err)) from None
         else:
             waiting.append(edited)
+    if untouched:
+        log(f'{untouched} message files have no Arabic yet and stay as the game\'s own.')
     if waiting:
         raise BuildError(f'The Arabic is in the dumps in {out / "msg-edited"}. Give --msg-tool (REMSG_Converter\'s src/main.py, '
                          'or its .exe) to turn them into .msg files, then run again.')
