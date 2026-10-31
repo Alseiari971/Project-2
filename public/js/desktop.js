@@ -117,9 +117,12 @@ async function checkOnline(button) {
       : server.status === 'partial' && server.total
         ? t('{percent}% translated so far', { percent: percent(server.translated, server.total) })
         : t('Made from your copy of the game'));
-    button.title = t('With your OK, GameShelf reads this game\'s text on your PC, translates it into Arabic and makes the Arabic patch here, so you can play in Arabic right away. It can take a few minutes.');
+    button.title = online.overlayOnly
+      ? t('This game\'s files can\'t be changed, so the Arabic shows over the game (Accessibility overlay). With your OK, GameShelf reads the game\'s text on your PC and translates it into Arabic. It can take a few minutes.')
+      : t('With your OK, GameShelf reads this game\'s text on your PC, translates it into Arabic and makes the Arabic patch here, so you can play in Arabic right away. It can take a few minutes.');
   } else {
     button.dataset.action = 'request';
+    button.dataset.why = online.cantBuild ? explain(online.cantBuild) : '';
     paintRequested(button, server);
   }
 }
@@ -127,8 +130,10 @@ async function checkOnline(button) {
 function paintRequested(button, server) {
   setLabel(button, server.asked ? t('Arabic requested') : t('Request Arabic subtitles'),
     server.requests === 1 ? t('1 player asked') : t('{count} players asked', { count: server.requests || 0 }));
-  button.disabled = Boolean(server.asked);
-  button.title = t('GameShelf can\'t make Arabic for this game by itself yet. Requests show which games players want most.');
+  // Still clickable once asked: it says why this PC can't make the Arabic.
+  button.disabled = false;
+  button.classList.toggle('is-asked', Boolean(server.asked));
+  button.title = [button.dataset.why, t('Your request is counted: GameShelf\'s team sees which games players want most.')].filter(Boolean).join('\n');
 }
 
 const PHASES = {
@@ -249,8 +254,12 @@ function wireArabic(button) {
       } else if (button.dataset.action === 'login') {
         location.hash = '#/login';
       } else if (button.dataset.action === 'request') {
+        const already = button.classList.contains('is-asked');
         paintRequested(button, await desktop.requestArabic(key));
-        toast(t('Thanks! Your request for Arabic subtitles is counted.'));
+        const why = button.dataset.why;
+        toast(already
+          ? t('Already requested. {why}', { why: why || t('GameShelf\'s team can see it.') })
+          : why ? t('Request sent. GameShelf can\'t make it on this PC itself: {why}', { why }) : t('Thanks! Your request for Arabic subtitles is counted.'));
       } else {
         const on = button.getAttribute('aria-checked') !== 'true';
         const { info, error } = await desktop.setArabic(key, on);

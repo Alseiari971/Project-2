@@ -81,20 +81,23 @@ function createArabicService({ dataDir, publicKey, overlayAvailable = process.pl
     const overlayPack = found.find((p) => p.engine === 'overlay');
     // GameShelf's cloud catalog: a pack not on this PC yet, or a newer version of one that is.
     const cloud = catalog ? await catalog.forGame(game).catch(() => null) : null;
-    // A pack to download, or an approved Arabic set to build the patch from here.
+    // How Arabic would come here: a patch, or (games whose files can't change) the overlay.
+    const tier = result.fileChanges ? result.tier : 'overlay';
+    const engine = result.engine?.engine || null;
+    // A pack to download, or an approved Arabic set to build the patch (or overlay pack) from here.
     const fits = cloud && ((cloud.mode === 'native' && result.fileChanges && cloud.engine === TIER_ENGINES[result.tier])
       || (cloud.mode === 'overlay' && overlayAvailable)
-      || (cloud.mode === 'build' && result.fileChanges && cloud.tier === result.tier && Boolean(builder?.canBuild(result.tier))));
-    const tier = result.fileChanges ? result.tier : null;
+      || (cloud.mode === 'build' && cloud.tier === tier && (tier !== 'overlay' || overlayAvailable) && Boolean(builder?.canBuild(tier, engine))));
     const local = native || (overlayAvailable && overlayPack);
     const update = fits && local && cloud.id === local.id && cloud.version !== local.version ? cloud : null;
     let out;
     if (native) {
-      out = { ...base, mode: 'native', pack: summary(native), update, tier };
+      out = { ...base, mode: 'native', pack: summary(native), update, tier, engine };
     } else if (overlayPack && overlayAvailable) {
-      out = { ...base, mode: 'overlay', pack: summary(overlayPack), detail: result.why, update, tier };
+      out = { ...base, mode: 'overlay', pack: summary(overlayPack), detail: result.why, update, tier, engine };
     } else if (fits) {
-      out = { ...base, mode: cloud.mode === 'overlay' ? 'overlay' : 'native', pack: summary(cloud), cloud, tier, detail: cloud.mode === 'overlay' ? result.why : null };
+      const asOverlay = cloud.mode === 'overlay' || (cloud.mode === 'build' && cloud.tier === 'overlay');
+      out = { ...base, mode: asOverlay ? 'overlay' : 'native', pack: summary(cloud), cloud, tier, engine, detail: asOverlay ? result.why : null };
     } else if (overlayPack) {
       out = { ...base, why: why('The subtitle overlay needs Windows 10 or newer.') };
     } else if (found.length) {
@@ -102,7 +105,7 @@ function createArabicService({ dataDir, publicKey, overlayAvailable = process.pl
       out = { ...base, why: result.why || why('There\'s no Arabic pack for this version of the game.') };
     } else {
       // Nothing on this PC yet: the app can get it from GameShelf's server (see online.js and builder.js).
-      out = { ...base, missing: true, tier: result.fileChanges ? result.tier : null, why: why('There\'s no Arabic pack for this game yet.') };
+      out = { ...base, missing: true, tier, engine, overlayOnly: !result.fileChanges, detail: result.why, why: why('There\'s no Arabic pack for this game yet.') };
     }
     return { ...out, enabled: out.mode !== 'unavailable' && prefs[game.key] === true };
   }
@@ -119,7 +122,7 @@ function createArabicService({ dataDir, publicKey, overlayAvailable = process.pl
       try {
         // From the cloud catalog: downloaded and checked now, so Play starts right away.
         if (now.cloud || now.update) {
-          await install(now.cloud || now.update, onProgress, game, now.tier).catch((err) => {
+          await install(now.cloud || now.update, onProgress, { ...game, engine: now.engine }, now.tier).catch((err) => {
             if (now.cloud) throw err; // an update that fails keeps the pack already here
           });
           now = await info(game);
@@ -163,7 +166,7 @@ function createArabicService({ dataDir, publicKey, overlayAvailable = process.pl
     let now = await info(game);
     try {
       if (now.cloud || now.update) {
-        await install(now.cloud || now.update, onProgress, game, now.tier).catch((err) => {
+        await install(now.cloud || now.update, onProgress, { ...game, engine: now.engine }, now.tier).catch((err) => {
           if (now.cloud) throw err;
         });
         now = await info(game);

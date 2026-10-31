@@ -19,8 +19,20 @@ const { gameKey } = require('./online');
 // Most of a game's lines must have Arabic before its pack goes in.
 const ENOUGH_ARABIC = 0.9;
 
+/**
+ * Why this PC can't make Arabic for a game (`info` from the Arabic service), or
+ * null when it can. Games whose files can't change get the overlay instead,
+ * which needs Windows' text recognition and a way to read the game's text.
+ */
+function cantMake(info, packBuilder, overlayAvailable) {
+  if (info.tier === 'overlay' && !overlayAvailable) return 'The subtitle overlay needs Windows 10 or newer.';
+  if (packBuilder.canBuild(info.tier, info.engine)) return null;
+  if (!info.engine || info.engine === 'custom') return 'GameShelf can\'t read this game\'s text: it doesn\'t know the game\'s engine.';
+  return 'This copy of GameShelf can\'t read this kind of game\'s text yet.';
+}
+
 /** `server()` is GameShelf's server, where the shared translations are. */
-function createArabicRequests({ arabic, packBuilder, online, server }) {
+function createArabicRequests({ arabic, packBuilder, online, server, overlayAvailable = process.platform === 'win32' }) {
   /**
    * `game` is { key, dir, steamAppId, gameId, title }. Resolves to one of:
    * - { done: true, info, submitted }: Arabic is on here, and sent for review (submitted: { id, total } or null);
@@ -37,11 +49,8 @@ function createArabicRequests({ arabic, packBuilder, online, server }) {
       if (serverKey) await online.request(serverKey, game.title, reason).catch(() => {});
       return { done: false, requested: true, reason, info: before };
     };
-    if (!packBuilder.canBuild(before.tier)) {
-      return askAdmins(before.tier
-        ? 'GameShelf can\'t read this kind of game on players\' PCs yet.'
-        : 'GameShelf can\'t add Arabic to this game\'s files (its engine, or anti-cheat).');
-    }
+    const cant = cantMake(before, packBuilder, overlayAvailable);
+    if (cant) return askAdmins(cant);
     let auth;
     try {
       auth = await online.builderEnv();
@@ -51,7 +60,7 @@ function createArabicRequests({ arabic, packBuilder, online, server }) {
 
     let result;
     try {
-      result = await packBuilder.build({ ...game, tier: before.tier }, { server: server(), auth, onProgress });
+      result = await packBuilder.build({ ...game, tier: before.tier, engine: before.engine }, { server: server(), auth, onProgress });
     } catch (err) {
       // The game's files couldn't be read here (encrypted, say): the admins hear about it.
       if (/encrypted|couldn't read|can't read|no text|no english|found no/i.test(err.message)) return askAdmins(err.message);
@@ -87,4 +96,4 @@ function createArabicRequests({ arabic, packBuilder, online, server }) {
   return { run };
 }
 
-module.exports = { createArabicRequests, ENOUGH_ARABIC };
+module.exports = { createArabicRequests, cantMake, ENOUGH_ARABIC };

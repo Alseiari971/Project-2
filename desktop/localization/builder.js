@@ -14,7 +14,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawn: defaultSpawn } = require('node:child_process');
 
-const BUILDABLE = { 're-patch': 'reengine', 'renpy-tl': 'renpy', 'godot-override': 'godot', 'unity-bepinex': 'unity', 'unreal-pak': 'unreal' };
+const BUILDABLE = { 're-patch': 'reengine', 'renpy-tl': 'renpy', 'godot-override': 'godot', 'unity-bepinex': 'unity', 'unreal-pak': 'unreal', overlay: 'overlay' };
 
 /**
  * Where the builder and its Python are. Installed, they're in the app's
@@ -85,9 +85,12 @@ function readLine(line, state) {
 function createPackBuilder({ paths, outDir, keyFile, spawn = defaultSpawn, nodePath = process.execPath }) {
   const running = new Map(); // game key -> { promise, child, state }
 
-  // What each engine needs besides Python and the builder.
+  // What each engine needs besides Python and the builder, to change its files or (overlay) just to read its text.
   const needs = { 're-patch': () => paths.msgTool, 'unity-bepinex': () => paths.unityTools, 'unreal-pak': () => paths.repak };
-  const canBuild = (tier) => Boolean(BUILDABLE[tier] && paths.python && (!needs[tier] || needs[tier]()));
+  const readers = { unreal: () => paths.repak, unity: () => paths.unityTools, reengine: () => paths.msgTool, renpy: () => true, godot: () => true };
+  /** Whether this PC can make Arabic for a game: `tier` from the game check, `engine` its engine (for the overlay). */
+  const canBuild = (tier, engine) => Boolean(BUILDABLE[tier] && paths.python
+    && (tier === 'overlay' ? Boolean(readers[engine]?.()) : (!needs[tier] || needs[tier]())));
 
   /**
    * Builds the pack for a game. `game` is { key, dir, tier, steamAppId, gameId,
@@ -99,7 +102,7 @@ function createPackBuilder({ paths, outDir, keyFile, spawn = defaultSpawn, nodeP
    */
   function build(game, { server, auth = {}, set = null, fontTargets = [], version = null, onProgress = () => {} }) {
     if (running.has(game.key)) return running.get(game.key).promise;
-    if (!canBuild(game.tier)) return Promise.reject(new Error('GameShelf can\'t make Arabic for this game on this PC.'));
+    if (!canBuild(game.tier, game.engine)) return Promise.reject(new Error('GameShelf can\'t make Arabic for this game on this PC.'));
     const id = `gameshelf-${game.steamAppId ? `steam-${game.steamAppId}` : game.gameId}-ar`;
     const out = path.join(outDir, id);
     const args = [paths.script, game.dir, '--id', id, '--version', version || `1.0.${Math.floor(Date.now() / 1000)}`,
@@ -109,7 +112,8 @@ function createPackBuilder({ paths, outDir, keyFile, spawn = defaultSpawn, nodeP
     if (set) args.push('--arabic-by-hash', set, '--no-translate');
     else args.push('--shared', server);
     if (fontTargets.length) args.push('--font-targets', fontTargets.join(','));
-    if (game.tier === 're-patch') args.push('--msg-tool', paths.msgTool, '--require-fonts');
+    if (paths.msgTool && (game.tier === 're-patch' || game.engine === 'reengine')) args.push('--msg-tool', paths.msgTool);
+    if (game.tier === 're-patch') args.push('--require-fonts');
     const state = { phase: 'starting', total: 0, have: 0, asking: 0, asked: 0, missing: 0, translated: 0, lines: 0, limited: false, packDir: null };
     const child = spawn(paths.python, args, {
       windowsHide: true,

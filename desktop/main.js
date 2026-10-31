@@ -22,7 +22,7 @@ const { createArabicOnline, gameKey } = require('./localization/online');
 const { createPackBuilder, findBuilder, localPackKey } = require('./localization/builder');
 const { createPassThrough, createCloudClient, createRemoteGames, SESSION_COOKIE } = require('./cloud');
 const { createStudio } = require('./localization/studio');
-const { createArabicRequests } = require('./localization/requests');
+const { createArabicRequests, cantMake } = require('./localization/requests');
 const config = require('./config.json');
 const { normalizeTitle } = require('../src/text');
 
@@ -339,7 +339,7 @@ const arabic = createArabicService({
   catalog: online.catalog,
   // Approved Arabic sets: the patch is built here, from the player's own copy of the game.
   builder: {
-    canBuild: (tier) => packBuilder.canBuild(tier),
+    canBuild: (tier, engine) => packBuilder.canBuild(tier, engine),
     fromSet: async ({ game, tier, entry, set, setFile, onProgress }) => (await packBuilder.build(
       { ...game, tier, title: entry.title || set.title }, { set: setFile, fontTargets: set.fontTargets || [], version: entry.version, onProgress })).packDir,
   },
@@ -364,7 +364,8 @@ const studio = createStudio({
   },
 });
 // "Request Arabic subtitles", after the player agrees (see requests.js).
-const requests = createArabicRequests({ arabic, packBuilder, online, server: () => cloud.server() });
+const overlayAvailable = process.platform === 'win32' || Boolean(devOcrHelper);
+const requests = createArabicRequests({ arabic, packBuilder, online, server: () => cloud.server(), overlayAvailable });
 let overlays = null; // created once the app is ready
 
 const arabicGame = (g) => ({ key: g.key, dir: g.dir, steamAppId: g.steamAppId || null, gameId: pageOf(g)?.id || null });
@@ -529,7 +530,7 @@ function arabicBadges() {
           const info = await arabic.info(arabicGame(game));
           if (info.enabled) badge = 'on';
           else if (info.mode === 'native' || info.mode === 'overlay') badge = 'ready';
-          else if (info.missing && packBuilder.canBuild(info.tier)) badge = 'request';
+          else if (info.missing && !cantMake(info, packBuilder, overlayAvailable)) badge = 'request';
         } catch {}
         if (badge === 'request') buildable.push(game);
         send(game.key, badge);
@@ -795,7 +796,12 @@ function registerIpc() {
     const info = await arabic.info(arabicGame(game));
     const serverKey = gameKey(arabicGame(game));
     const signedIn = await online.signedIn();
-    const out = { configured: online.configured, signedIn, missing: Boolean(info.missing), canBuild: packBuilder.canBuild(info.tier), building: packBuilder.progress(key), server: null, error: null };
+    const cant = info.missing ? cantMake(info, packBuilder, overlayAvailable) : null;
+    const out = {
+      configured: online.configured, signedIn, missing: Boolean(info.missing), canBuild: !cant, overlayOnly: Boolean(info.overlayOnly),
+      // Why not, for the button (and the admins, with the request).
+      cantBuild: cant ? { text: cant, vars: {} } : null, building: packBuilder.progress(key), server: null, error: null,
+    };
     if (!info.missing || !signedIn || !serverKey) return out;
     try {
       out.server = await online.status(serverKey);
@@ -816,7 +822,10 @@ function registerIpc() {
     const game = await installedGame(key);
     const serverKey = gameKey(arabicGame(game));
     if (!serverKey) throw new Error('GameShelf doesn\'t know which game this is, so it can\'t ask for it.');
-    return online.request(serverKey, pageOf(game)?.name || game.name);
+    // The admins see why this PC couldn't make it.
+    const info = await arabic.info(arabicGame(game));
+    const reason = info.missing ? cantMake(info, packBuilder, overlayAvailable) : null;
+    return online.request(serverKey, pageOf(game)?.name || game.name, reason || '');
   });
   // Admin Panel: "Approve, Sign & Publish" a player's submission (signed here, with the Pack Studio's key).
   handle('admin:approve', async (submissionId) => {

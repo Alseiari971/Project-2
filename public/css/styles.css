@@ -1557,6 +1557,8 @@ label { display: grid; gap: 8px; font-size: 13px; font-weight: 700; color: var(-
 .arabic-toggle.is-busy::after { content: ""; position: absolute; inset-block-end: 0; inset-inline-start: 0; height: 3px; width: var(--progress, 0%); background: var(--accent); transition: width 0.4s var(--ease); }
 .arabic-toggle.is-busy .arabic-mark { animation: play-pulse 1.6s ease-in-out infinite; }
 .arabic-toggle.is-busy .switch { display: none; }
+.arabic-toggle.is-asked .arabic-mark { background: var(--pill-active); color: var(--text); }
+.arabic-toggle.is-asked { opacity: 0.85; }
 
 /* ---- "Request Arabic subtitles": asking before reading the game ---- */
 .consent-dialog { max-width: 520px; padding: 0; border: 1px solid var(--border-strong); border-radius: 18px; background: var(--panel); color: var(--text); box-shadow: 0 30px 80px -20px rgba(0, 0, 0, 0.7); }

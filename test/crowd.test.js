@@ -197,11 +197,93 @@ test('a game the player\'s PC can\'t read goes to the admins as a request, with 
   const online = createArabicOnline({ cloud, cacheDir: path.join(tmp, 'dl'), publicKeys: [PUBLIC] });
   const packBuilder = createPackBuilder({ paths: { ...findBuilder({ packaged: false, repoDir: REPO, env: { GAMESHELF_PYTHON: python } }), msgTool: null }, outDir: path.join(tmp, 'b'), keyFile: localPackKey(tmp).keyFile });
   const arabic = createArabicService({ dataDir: path.join(tmp, 'd'), publicKey: PUBLIC, overlayAvailable: false, catalog: online.catalog, builder: { canBuild: (tier) => packBuilder.canBuild(tier), fromSet: async () => null } });
-  const requests = createArabicRequests({ arabic, packBuilder, online, server: () => base });
+  const requests = createArabicRequests({ arabic, packBuilder, online, server: () => base, overlayAvailable: true });
   const result = await requests.run({ key: 'steam:999', dir: gameDir, steamAppId: 999, gameId: null, title: 'Mystery' }, { consent: true });
   assert.equal(result.requested, true);
   const admin = cloudAs(base, await signUp('hamad'));
   const [request] = (await admin.json('/api/admin/requests')).requests;
   assert.deepEqual([request.game, request.name, request.requests], ['steam:999', 'Mystery', 1]);
-  assert.match(request.reason, /can't/);
+  assert.match(request.reason, /doesn't know the game's engine/);
+});
+
+test('a game whose files can\'t change (signed Unreal paks) gets Arabic as the overlay, made the same way', { skip: !python && 'the pack builder needs Python with its requirements' }, async (t) => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'gs-crowd-'));
+  t.after(() => fs.rm(tmp, { recursive: true, force: true }));
+  const db = openDatabase(':memory:');
+  const fetch = async (_url, init) => {
+    const user = JSON.parse(init.body).messages[1].content;
+    const translations = JSON.parse(user.slice(user.indexOf('['))).map(({ id, text }) => ({ id, arabic: `عربي ${text}` }));
+    return { ok: true, status: 200, headers: new Map(), json: async () => ({ choices: [{ message: { content: JSON.stringify({ translations }) } }] }) };
+  };
+  const translations = createTranslationMemory({ db, env: { OPENAI_API_KEY: 'k' }, fetch });
+  const server = createApp({ db, games: createLocalProvider(), translations, dataDir: tmp, arabicGames: createArabicGames({ db, translations }),
+    submissions: createSubmissions({ db, translations, publicKeys: [PUBLIC] }) }).listen(0, '127.0.0.1');
+  await new Promise((resolve) => server.once('listening', resolve));
+  t.after(() => server.close());
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const res = await globalThis.fetch(`${base}/api/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'alice', password: 'correct horse' }) });
+  const cloud = cloudAs(base, /gs_session=([^;]+)/.exec(res.headers.get('set-cookie'))[1]);
+
+  // An Unreal game that only loads signed paks (a .sig beside its pak), and a stand-in for repak that reads its "pak".
+  const english = spawnSync(python, ['-c', [
+    'import sys; sys.path.insert(0, "localization")',
+    'from arabic_compiler import locres as L',
+    'data = L.write(L.LocRes(3, [L.Namespace("UI", [L.Entry("Start", "Start the investigation", 1), L.Entry("Quit", "Leave the facility", 2)])]))',
+    'sys.stdout.write(data.hex())',
+  ].join('\n')], { cwd: REPO, encoding: 'utf8' }).stdout;
+  const gameDir = path.join(tmp, 'Daymare');
+  const pe = Buffer.alloc(512);
+  pe.write('MZ', 0, 'latin1');
+  pe.writeUInt32LE(0x80, 0x3c);
+  pe.write('PE\0\0', 0x80, 'latin1');
+  pe.writeUInt16LE(0x8664, 0x84);
+  for (const [name, data] of Object.entries({
+    'Daymare.exe': pe,
+    'Engine/Binaries/Win64/x.txt': 'x',
+    'Daymare/Binaries/Win64/Daymare-Win64-Shipping.exe': pe,
+    'Daymare/Content/Paks/pakchunk0-Windows.pak': JSON.stringify({ files: { 'Daymare/Content/Localization/Game/en/Game.locres': english } }),
+    'Daymare/Content/Paks/pakchunk0-Windows.sig': 'signed',
+  })) {
+    await fs.mkdir(path.dirname(path.join(gameDir, name)), { recursive: true });
+    await fs.writeFile(path.join(gameDir, name), data);
+  }
+  const repak = path.join(tmp, 'repak');
+  await fs.writeFile(path.join(tmp, 'fake_repak.py'), [
+    'import json, sys',
+    'cmd, args = sys.argv[1], sys.argv[2:]',
+    'pak = json.loads(open(args[0]).read())',
+    'if cmd == "list": print("\\n".join(pak["files"]))',
+    'elif cmd == "info": print("version: V11")',
+    'elif cmd == "get": sys.stdout.buffer.write(bytes.fromhex(pak["files"][args[1]]))',
+  ].join('\n'));
+  await fs.writeFile(repak, `#!/bin/sh\nexec "${python}" "${path.join(tmp, 'fake_repak.py')}" "$@"\n`, { mode: 0o755 });
+
+  const dataDir = path.join(tmp, 'alice');
+  const online = createArabicOnline({ cloud, cacheDir: path.join(dataDir, 'dl'), publicKeys: [PUBLIC] });
+  const local = localPackKey(dataDir);
+  const packBuilder = createPackBuilder({
+    paths: { ...findBuilder({ packaged: false, repoDir: REPO, env: { GAMESHELF_PYTHON: python } }), msgTool: null, repak },
+    outDir: path.join(dataDir, 'builds'), keyFile: local.keyFile, nodePath: process.execPath,
+  });
+  const arabic = createArabicService({ dataDir, publicKey: [PUBLIC, local.publicKey], overlayAvailable: true, catalog: online.catalog,
+    builder: { canBuild: (tier, engine) => packBuilder.canBuild(tier, engine), fromSet: async () => null } });
+  const game = { key: 'steam:1868320', dir: gameDir, steamAppId: 1868320, gameId: null, title: 'Daymare: 1994 Sandcastle Demo' };
+
+  const before = await arabic.info(game);
+  assert.deepEqual([before.missing, before.tier, before.engine, before.overlayOnly], [true, 'overlay', 'unreal', true]);
+  // Without repak, this PC can't read it: the admins get the request with the reason.
+  const noTool = createPackBuilder({ paths: { ...findBuilder({ packaged: false, repoDir: REPO, env: { GAMESHELF_PYTHON: python } }), repak: null }, outDir: tmp, keyFile: local.keyFile });
+  assert.equal(noTool.canBuild('overlay', 'unreal'), false);
+
+  const requests = createArabicRequests({ arabic, packBuilder, online, server: () => base, overlayAvailable: true });
+  const made = await requests.run(game, { consent: true });
+  assert.equal(made.done, true, JSON.stringify(made.error || made));
+  assert.deepEqual([made.info.mode, made.info.enabled], ['overlay', true]);
+  assert.deepEqual([made.submitted.total, made.submitted.translated], [2, 2]);
+  const admin = await db.prepare('SELECT engine, tier FROM arabic_submissions').get();
+  assert.deepEqual({ ...admin }, { engine: 'overlay', tier: 'overlay' });
+
+  // Without Windows' text recognition, the overlay can't show: the reason says so.
+  const { cantMake } = require('../desktop/localization/requests');
+  assert.match(cantMake(before, packBuilder, false), /Windows 10/);
 });
