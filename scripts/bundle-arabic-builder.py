@@ -110,28 +110,42 @@ def pip_install(site: Path, version: str, packages: list):
 
 
 def add_tools(out: Path, version: str):
-    """repak, UnityPy, BepInEx and XUnity.AutoTranslator: each skipped with a warning when it can't be fetched."""
+    """repak, UnityPy, BepInEx and XUnity.AutoTranslator. Only what's missing is fetched, so running
+    this again retries what failed; each one that can't be fetched is skipped with a warning."""
     tools = out / 'tools'
     tools.mkdir(parents=True, exist_ok=True)
-    try:
-        with zipfile.ZipFile(io.BytesIO(download(REPAK_URL))) as archive:
-            exe = next(n for n in archive.namelist() if n.lower().endswith('repak.exe'))
-            (tools / 'repak.exe').write_bytes(archive.read(exe))
-            for name in archive.namelist():
-                if 'license' in name.lower() and not name.endswith('/'):
-                    (tools / f'repak-{Path(name).name}').write_bytes(archive.read(name))
-    except Exception as err:  # noqa: BLE001 (any failure just leaves Unreal out)
-        print(f'WARNING: repak wasn\'t added ({err}); Unreal games will be request-only.')
+    if not (tools / 'repak.exe').is_file():
+        try:
+            with zipfile.ZipFile(io.BytesIO(download(REPAK_URL))) as archive:
+                exe = next(n for n in archive.namelist() if n.lower().endswith('repak.exe'))
+                (tools / 'repak.exe').write_bytes(archive.read(exe))
+                for name in archive.namelist():
+                    if 'license' in name.lower() and not name.endswith('/'):
+                        (tools / f'repak-{Path(name).name}').write_bytes(archive.read(name))
+        except Exception as err:  # noqa: BLE001 (any failure just leaves Unreal out)
+            print(f'WARNING: repak wasn\'t added ({err}).')
     unity = tools / 'unity'
     unity.mkdir(exist_ok=True)
-    try:
-        pip_install(out / 'python' / 'Lib' / 'site-packages', version, ['UnityPy'])
-        for name, url in UNITY_TOOLS.items():
-            (unity / name).write_bytes(download(url))
-    except Exception as err:  # noqa: BLE001
-        shutil.rmtree(unity, ignore_errors=True)
-        print(f'WARNING: the Unity tools weren\'t all added ({err}); Unity games will be request-only. '
-              'Put bepinex-mono.zip, bepinex-il2cpp.zip, xunity-mono.zip and xunity-il2cpp.zip in build-tools/arabic-builder/tools/unity/ yourself to add them.')
+    site = out / 'python' / 'Lib' / 'site-packages'
+    if not (site / 'UnityPy').is_dir():
+        try:
+            pip_install(site, version, ['UnityPy'])
+        except Exception as err:  # noqa: BLE001
+            print(f'WARNING: UnityPy wasn\'t added ({err}).')
+    for name, url in UNITY_TOOLS.items():
+        if (unity / name).is_file():
+            continue
+        try:
+            (unity / f'{name}.part').write_bytes(download(url))
+            (unity / f'{name}.part').replace(unity / name)
+        except Exception as err:  # noqa: BLE001
+            (unity / f'{name}.part').unlink(missing_ok=True)
+            print(f'WARNING: {name} wasn\'t added ({err}). Download it yourself from {url.rsplit("/download/", 1)[0]} '
+                  f'and save it as {unity / name}.')
+    ready = lambda flag: 'ready' if flag else 'NOT ready (request-only)'  # noqa: E731
+    print(f'Unreal games (repak): {ready((tools / "repak.exe").is_file())}')
+    print(f'Unity Mono games: {ready((site / "UnityPy").is_dir() and all((unity / n).is_file() for n in ("bepinex-mono.zip", "xunity-mono.zip")))}')
+    print(f'Unity IL2CPP games: {ready((site / "UnityPy").is_dir() and all((unity / n).is_file() for n in ("bepinex-il2cpp.zip", "xunity-il2cpp.zip")))}')
 
 
 def add_builder(out: Path):
@@ -161,8 +175,7 @@ def main(argv=None) -> int:
         # The builder's own code is copied fresh every time, so the app never ships an old one.
         shutil.rmtree(OUT / 'localization', ignore_errors=True)
         add_builder(OUT)
-        if not (OUT / 'tools').is_dir():
-            add_tools(OUT, args.python)
+        add_tools(OUT, args.python)
         print(f'{OUT} is there; refreshed the builder\'s code.')
         return 0
     temp = OUT.with_name(OUT.name + '.new')
