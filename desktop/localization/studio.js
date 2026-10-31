@@ -256,6 +256,22 @@ function createStudio({ paths, dataDir, cloud, appKeys = [], secure = null, spaw
     cancel: () => running?.kill(),
     /** A built pack folder as a .zip (what the catalog takes). */
     zip: (packDir) => writeZip(readTree(packDir)),
+    /**
+     * "Approve, Sign & Publish" for a player's submission: the server's exact
+     * Arabic set, signed here with GameShelf's pack key (the game isn't needed),
+     * then published. Resolves to the catalog entry.
+     */
+    async approve(submissionId) {
+      const s = readSettings();
+      const keyPublic = s.keyFile ? publicKeyOf(s.keyFile) : null;
+      if (!keyPublic) throw new StudioError('Pick GameShelf\'s pack-signing.key in the Pack Studio first.');
+      if (!appKeys.some((k) => samePem(k, keyPublic))) throw new StudioError('That signing key isn\'t GameShelf\'s, so players\' apps wouldn\'t accept it. Pick GameShelf\'s pack-signing.key in the Pack Studio.');
+      const id = encodeURIComponent(String(submissionId));
+      const { set } = await cloud.json(`/api/admin/submissions/${id}/set`);
+      const signature = crypto.sign(null, Buffer.from(set, 'utf8'), crypto.createPrivateKey(fs.readFileSync(s.keyFile, 'utf8'))).toString('base64');
+      const { pack } = await cloud.json(`/api/admin/submissions/${id}/approve`, { method: 'POST', raw: JSON.stringify({ set, signature }), type: 'application/octet-stream', timeout: 5 * 60 * 1000 });
+      return pack;
+    },
     /** Publishes a built pack to the cloud catalog (admins only; the server checks). */
     async publish(packDir) {
       const res = await cloud.request('/api/admin/packs', { method: 'POST', raw: writeZip(readTree(packDir)), type: 'application/zip', timeout: 10 * 60 * 1000 });

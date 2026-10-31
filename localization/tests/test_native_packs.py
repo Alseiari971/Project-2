@@ -7,7 +7,9 @@ import json
 import os
 import pickle
 import shutil
+import struct
 import subprocess
+import sys
 import tempfile
 import unittest
 import zlib
@@ -170,12 +172,56 @@ class GodotSources(unittest.TestCase):
         self.assertTrue(source.keyed)
         self.assertEqual([(r.key, r.source) for r in source.rows], [('TITLE', 'Chapter One')])
 
-    def test_packed_godot_games_are_left_for_the_engines_tools(self):
+    def test_a_built_godot_game_is_read_from_its_pck_or_its_exe(self):
+        scene_text = b'[node name="Start" type="Button"]\ntext = "Start the journey"\n'
+        binary = b'RSRC' + struct.pack('<I', len(b'Hello, traveler.') + 1) + b'Hello, traveler.\0' + struct.pack('<I', 5) + b'Node\0'
+        script = b'func _ready():\n\t$Label.text = tr("Where am I?")\n'
+        pck = godot_pck({'res://main.tscn': scene_text, 'res://intro.scn': binary, 'res://main.gd': script, 'res://icon.png': b'png'})
         game = self.tmp / 'export'
         game.mkdir()
-        (game / 'Game.pck').write_bytes(b'GDPC')
-        with self.assertRaisesRegex(SourceError, 'GDRE Tools'):
-            read_source(game)
+        (game / 'Game.pck').write_bytes(pck)
+        source = read_source(game)
+        self.assertEqual(source.engine, 'godot')
+        self.assertEqual(source.godot_version, 4)
+        self.assertEqual(sorted(r.source for r in source.rows), ['Hello, traveler.', 'Start the journey', 'Where am I?'])
+
+        # The same pack built into the game's .exe.
+        embedded = self.tmp / 'embedded'
+        embedded.mkdir()
+        (embedded / 'Game.exe').write_bytes(b'MZ' + b'\0' * 100 + pck + struct.pack('<Q', len(pck)) + b'GDPC')
+        self.assertEqual(len(read_source(embedded).rows), 3)
+
+        # An encrypted pack needs the game's key, which isn't looked for.
+        locked = self.tmp / 'locked'
+        locked.mkdir()
+        (locked / 'Game.pck').write_bytes(godot_pck({'res://main.tscn': scene_text}, flags=1))
+        with self.assertRaisesRegex(SourceError, 'encrypted'):
+            read_source(locked)
+
+    def test_a_godot_3_pack_with_translation_tables(self):
+        game = self.tmp / 'g3'
+        game.mkdir()
+        (game / 'Game.pck').write_bytes(godot_pck({'res://text.csv': b'keys,en\nTITLE,Chapter One\n'}, fmt=1, major=3))
+        source = read_source(game)
+        self.assertEqual((source.keyed, source.godot_version, [(r.key, r.source) for r in source.rows]), (True, 3, [('TITLE', 'Chapter One')]))
+
+
+def godot_pck(files: dict, fmt=2, major=4, flags=0) -> bytes:
+    """A Godot .pck holding `files` ({res:// path: bytes}), as Godot writes them."""
+    header = b'GDPC' + struct.pack('<4I', fmt, major, 2, 0)
+    if fmt >= 2:
+        header += struct.pack('<IQ', flags, 0)
+    header += b'\0' * 64
+    names = [(p.encode('utf-8') + b'\0' * (4 - len(p.encode('utf-8')) % 4)) for p in files]
+    directory_size = 4 + sum(4 + len(n) + 16 + 16 + (4 if fmt >= 2 else 0) for n in names)
+    offset = len(header) + directory_size
+    directory, body = struct.pack('<I', len(files)), b''
+    for name, data in zip(names, files.values()):
+        directory += struct.pack('<I', len(name)) + name + struct.pack('<QQ', offset + len(body), len(data)) + b'\0' * 16
+        if fmt >= 2:
+            directory += struct.pack('<I', 0)
+        body += data
+    return header + directory + body
 
 
 @unittest.skipUnless(HAS_NODE, 'signing needs Node.js')
@@ -307,3 +353,62 @@ class BuildingNative(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+FAKE_REPAK = r'''
+import json, os, sys
+from pathlib import Path
+# Stands in for repak: a "pak" here is a JSON file of {path in pak: text}.
+cmd, args = sys.argv[1], sys.argv[2:]
+if cmd == 'pack':
+    out = Path(args[-1]); out.write_bytes(b'packed by the stand-in')
+    sys.exit(0)
+pak = json.loads(Path(args[0]).read_text())
+if pak.get('encrypted'):
+    sys.stderr.write('Error: pak is encrypted, an AES key is required\n'); sys.exit(1)
+if cmd == 'list':
+    print('\n'.join(pak['files']))
+elif cmd == 'info':
+    print('mount point: ../../../\nversion: V8B\nencrypted index: false')
+elif cmd == 'get':
+    sys.stdout.buffer.write(bytes.fromhex(pak['files'][args[1]]))
+'''
+
+
+class UnrealFromPaks(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp)
+        tool = self.tmp / 'repak'
+        script = self.tmp / 'fake_repak.py'
+        script.write_text(FAKE_REPAK, encoding='utf-8')
+        tool.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{script}" "$@"\n', encoding='utf-8')
+        tool.chmod(0o755)
+        os.environ['GAMESHELF_REPAK'] = str(tool)
+        self.addCleanup(os.environ.pop, 'GAMESHELF_REPAK', None)
+
+    def game(self, files, encrypted=False):
+        game = self.tmp / 'Daymare'
+        (game / 'Daymare' / 'Content' / 'Paks').mkdir(parents=True)
+        (game / 'Daymare' / 'Content' / 'Paks' / 'pakchunk0-Windows.pak').write_text(json.dumps({'files': files, 'encrypted': encrypted}))
+        return game
+
+    def test_the_english_text_and_fonts_come_out_of_the_games_own_paks(self):
+        from arabic_compiler import locres as locres_format
+        english = locres_format.write(locres_format.LocRes(3, [locres_format.Namespace('UI', [
+            locres_format.Entry('Start', 'Start Game', 1), locres_format.Entry('Quit', 'Quit to desktop', 2)])]))
+        game = self.game({
+            'Daymare/Content/Localization/Game/en/Game.locres': english.hex(),
+            'Daymare/Content/Localization/Game/fr/Game.locres': '00',
+            'Daymare/Content/UI/Fonts/Roboto.ufont': '00',
+            'Engine/Content/Slate/Fonts/Roboto-Regular.ttf': '00',
+        })
+        source = read_source(game)
+        self.assertEqual((source.engine, source.locres_path, source.pak_version), ('unreal', 'Daymare/Content/Localization/Game/en/Game.locres', 'V8B'))
+        self.assertEqual([r.source for r in source.rows], ['Start Game', 'Quit to desktop'])
+        self.assertIn('Daymare/Content/UI/Fonts/Roboto.ufont', source.pak_listing)
+
+    def test_encrypted_paks_are_left_alone(self):
+        game = self.game({}, encrypted=True)
+        with self.assertRaisesRegex(SourceError, 'encrypted'):
+            read_source(game)

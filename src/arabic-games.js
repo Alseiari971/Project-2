@@ -21,7 +21,9 @@ function createArabicGames({ db, translations }) {
   const getGame = db.prepare('SELECT * FROM arabic_games WHERE game = ?');
   const countRequests = db.prepare('SELECT COUNT(*) AS n FROM arabic_requests WHERE game = ?');
   const askedBy = db.prepare('SELECT 1 FROM arabic_requests WHERE game = ? AND asker = ?');
-  const addRequest = db.prepare('INSERT INTO arabic_requests (game, asker, name) VALUES (?, ?, ?) ON CONFLICT (game, asker) DO NOTHING');
+  const pendingFor = db.prepare("SELECT 1 FROM arabic_submissions WHERE game = ? AND status = 'pending'");
+  const addRequest = db.prepare(`INSERT INTO arabic_requests (game, asker, name, reason) VALUES (?, ?, ?, ?)
+    ON CONFLICT (game, asker) DO UPDATE SET reason = CASE WHEN excluded.reason <> '' THEN excluded.reason ELSE reason END`);
   const saveGame = db.prepare(`INSERT INTO arabic_games (game, name, engine, total_lines) VALUES (?, ?, ?, ?)
     ON CONFLICT (game) DO UPDATE SET name = CASE WHEN excluded.name <> '' THEN excluded.name ELSE name END,
       engine = excluded.engine, total_lines = excluded.total_lines, updated_at = datetime('now')`);
@@ -46,15 +48,29 @@ function createArabicGames({ db, translations }) {
       translated: Number.isFinite(translated) ? translated : 0,
       requests: countRequests.get(game).n,
       asked: Boolean(asker && askedBy.get(game, asker.key)),
+      // A player's Arabic for it is waiting for an admin.
+      pending: Boolean(pendingFor.get(game)),
       fontTargets: row ? JSON.parse(row.font_targets) : [],
     };
   }
 
-  /** A player asks for Arabic in a game. Returns the game's status. */
-  function request(asker, game, name = '') {
+  /** A player asks for Arabic in a game; `reason` says why their PC couldn't make it. Returns the game's status. */
+  function request(asker, game, name = '', reason = '') {
     checkGame(game);
-    addRequest.run(game, asker.key, String(name).slice(0, 200));
+    addRequest.run(game, asker.key, String(name || '').slice(0, 200), String(reason || '').slice(0, 300));
     return status(game, asker);
+  }
+
+  /** The RE Engine font names in a game's file list, saved for the game (admins). Returns { fontTargets }. */
+  function setFontList(game, text) {
+    checkGame(game);
+    const names = [...new Set((text.match(/^natives\/\S+\.oft(?:\.\d{1,3})?(?:\.(?:stm|x64))?\s*$/gim) || []).map((n) => n.trim()))]
+      .filter((t) => FONT_TARGET_RE.test(t) && !t.includes('..')).slice(0, MAX_FONT_TARGETS).sort();
+    if (!names.length) throw new TypeError('That file list has no .oft font names.');
+    const row = getGame.get(game);
+    if (!row) saveGame.run(game, '', 'reengine', 0);
+    saveFonts.run(JSON.stringify(names), game);
+    return { fontTargets: names };
   }
 
   /**
@@ -75,12 +91,13 @@ function createArabicGames({ db, translations }) {
 
   /** The most asked-for games, for admins. */
   function requests(limit = 100) {
-    return db.prepare(`SELECT r.game, MAX(r.name) AS name, COUNT(*) AS requests, MIN(r.created_at) AS first, MAX(r.created_at) AS last
+    return db.prepare(`SELECT r.game, MAX(r.name) AS name, COUNT(*) AS requests, MIN(r.created_at) AS first, MAX(r.created_at) AS last,
+        MAX(r.reason) AS reason
       FROM arabic_requests r GROUP BY r.game ORDER BY requests DESC, last DESC LIMIT ?`).all(limit)
       .map((r) => ({ ...r, ...status(r.game) }));
   }
 
-  return { status, request, report, requests, isAdmin };
+  return { status, request, report, requests, setFontList, isAdmin };
 }
 
 module.exports = { createArabicGames, READY };

@@ -38,6 +38,10 @@ const ADDED_COLUMNS = {
     // 'user' or 'admin' (see ADMIN_USERS in src/roles.js).
     role: "TEXT NOT NULL DEFAULT 'user'",
   },
+  // Why a player's PC couldn't make the Arabic itself (encrypted files, say), for admins.
+  arabic_requests: {
+    reason: "TEXT NOT NULL DEFAULT ''",
+  },
   library: {
     game_backdrop: 'TEXT',
     game_genres: "TEXT NOT NULL DEFAULT '[]'",
@@ -168,6 +172,46 @@ function openDatabase(file = process.env.DB_FILE || path.join(__dirname, '..', '
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS pack_downloads_pack ON pack_downloads(pack_id, version);
+
+    -- Arabic made on a player's PC for a game GameShelf had no pack for, waiting
+    -- for an admin (see src/submissions.js). The English is kept here so admins
+    -- can check the Arabic without owning the game; it's never sent to players.
+    CREATE TABLE IF NOT EXISTS arabic_submissions (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      game         TEXT NOT NULL,
+      name         TEXT NOT NULL DEFAULT '',
+      engine       TEXT NOT NULL,
+      tier         TEXT NOT NULL,
+      font_targets TEXT NOT NULL DEFAULT '[]',
+      lines        TEXT NOT NULL,
+      total_lines  INTEGER NOT NULL,
+      status       TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+      note         TEXT NOT NULL DEFAULT '',
+      submitted_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      reviewed_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+      reviewed_at  TEXT
+    );
+    CREATE INDEX IF NOT EXISTS arabic_submissions_game ON arabic_submissions(game, status);
+
+    -- Approved Arabic, signed by an admin: each player's app builds the game's
+    -- patch from it on their own PC. One row per version.
+    CREATE TABLE IF NOT EXISTS arabic_sets (
+      id           TEXT NOT NULL,
+      version      TEXT NOT NULL,
+      game         TEXT NOT NULL,
+      engine       TEXT NOT NULL,
+      tier         TEXT NOT NULL,
+      title        TEXT NOT NULL DEFAULT '',
+      body         TEXT NOT NULL,
+      signature    TEXT NOT NULL,
+      sha256       TEXT NOT NULL,
+      size         INTEGER NOT NULL,
+      submission   INTEGER REFERENCES arabic_submissions(id) ON DELETE SET NULL,
+      approved_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (id, version)
+    );
 
     -- Personal access tokens, for tools such as the pack builder. Only a hash is kept.
     CREATE TABLE IF NOT EXISTS api_tokens (

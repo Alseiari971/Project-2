@@ -16,6 +16,7 @@ const {
 } = require('./auth');
 const { ROLES, adminNames, bootstrapAdmins } = require('./roles');
 const { readBody, RegistryError, MAX_PACK_BYTES } = require('./pack-registry');
+const { SubmissionError } = require('./submissions');
 const { TranslationLimit, GAME_RE: GAME_KEY_RE } = require('./translation-memory');
 const { GENRES, findGenre } = require('./games/genres');
 const profile = require('./profile');
@@ -34,6 +35,7 @@ const DEFAULT_ACCENT = '#e7ff0c';
 // Big Steam libraries are capped to the most-played games to keep matching quick.
 const STEAM_IMPORT_MAX = 300;
 const MAX_INSTALLER_BYTES = 1024 * 1024 * 1024;
+const MAX_SUBMISSION_BYTES = 64 * 1024 * 1024;
 const PREVIEW_TTL_MS = 30 * 60 * 1000;
 
 // Guess a list status from Steam playtime (minutes).
@@ -88,7 +90,7 @@ function pitchFrom(text) {
   return pitch.trim();
 }
 
-function createApi({ db, games, prices, steam, steamStore, translations, arabicGames, packs, downloadsDir }) {
+function createApi({ db, games, prices, steam, steamStore, translations, arabicGames, packs, submissions, downloadsDir }) {
   bootstrapAdmins(db);
   const api = express.Router();
   const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30 });
@@ -726,15 +728,68 @@ function createApi({ db, games, prices, steam, steamStore, translations, arabicG
     if (!Array.isArray(keys) || keys.length > 500) throw new TypeError('Send up to 500 games at a time.');
     return { games: Object.fromEntries(keys.map(String).filter((k) => GAME_KEY_RE.test(k)).map((k) => [k, arabicGames.status(k, askerOf(req))])) };
   }));
-  api.post('/arabic/requests', requireUser, translateLimiter, arabicRoute(({ game, name }, req) => arabicGames.request(askerOf(req), String(game), name)));
+  api.post('/arabic/requests', requireUser, translateLimiter, arabicRoute(({ game, name, reason }, req) => arabicGames.request(askerOf(req), String(game), name, reason)));
   api.post('/arabic/report', requireUser, translateLimiter, arabicRoute((body, req) => arabicGames.report(askerOf(req), { ...body, game: String(body.game) }, req.user)));
 
   // ---- The cloud catalog of Arabic packs (see src/pack-registry.js) ---------
 
-  // Every published pack, newest version of each. Public: it's what the app checks against.
+  // Every published pack, newest version of each, and every approved Arabic set
+  // (mode 'build': the app builds the patch from it). Public: it's what the app checks against.
   api.get('/localization/packs', (_req, res) => {
-    res.json({ packs: packs ? packs.list() : [] });
+    res.json({ packs: [...(packs ? packs.list() : []), ...(submissions ? submissions.catalog() : [])] });
   });
+  // An approved Arabic set and its signature, for signed-in players.
+  api.get('/localization/sets/:id/download', requireUser, (req, res) => {
+    const found = submissions?.download(req.params.id, req.user.id);
+    if (!found) return res.status(404).json({ error: 'That Arabic pack isn\'t in the catalog.' });
+    res.json({ set: found.set, signature: found.signature });
+  });
+
+  // ---- Arabic made on players' PCs, waiting for an admin (see src/submissions.js) ----
+
+  const submissionRoute = (fn) => asyncRoute(async (req, res) => {
+    if (!submissions) return res.status(503).json({ error: 'Arabic subtitles aren\'t set up on this server.' });
+    try {
+      res.json(await fn(req, res));
+    } catch (err) {
+      if (err instanceof SubmissionError || err instanceof RegistryError) return res.status(err.status).json({ error: err.message });
+      throw err;
+    }
+  });
+  const submitLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 20 });
+  // Big games have tens of thousands of lines, so the body is read here rather than by the 500 kB JSON parser.
+  api.post('/arabic/submissions', requireUser, submitLimiter, submissionRoute(async (req) => {
+    let body;
+    try {
+      body = req.body && Object.keys(req.body).length ? req.body : JSON.parse((await readBody(req, MAX_SUBMISSION_BYTES)).toString('utf8'));
+    } catch (err) {
+      if (err instanceof RegistryError) throw err;
+      throw new SubmissionError('That isn\'t a submission.');
+    }
+    return submissions.submit(req.user, body);
+  }));
+  api.get('/admin/submissions', requireAdmin, submissionRoute(async () => ({ submissions: submissions.list() })));
+  api.get('/admin/submissions/:id', requireAdmin, submissionRoute(async (req) => submissions.get(req.params.id, {
+    offset: req.query.offset, limit: req.query.limit, query: String(req.query.q || ''), missing: req.query.missing === '1',
+  })));
+  api.patch('/admin/submissions/:id/lines', requireAdmin, submissionRoute(async (req) => submissions.edit(req.params.id, req.body?.edits)));
+  api.post('/admin/submissions/:id/reject', requireAdmin, submissionRoute(async (req) => ({ submission: submissions.reject(req.params.id, req.user, req.body?.note) })));
+  // Approving: the admin's desktop app gets the exact Arabic set, signs it with GameShelf's pack key and sends the signature.
+  api.get('/admin/submissions/:id/set', requireAdmin, submissionRoute(async (req) => submissions.prepare(req.params.id)));
+  // The set can be megabytes for a big game, so it's read here too (as JSON: { set, signature }).
+  api.post('/admin/submissions/:id/approve', requireAdmin, submissionRoute(async (req, res) => {
+    let body;
+    try {
+      body = req.body && Object.keys(req.body).length ? req.body : JSON.parse((await readBody(req, MAX_SUBMISSION_BYTES)).toString('utf8'));
+    } catch (err) {
+      if (err instanceof RegistryError) throw err;
+      throw new SubmissionError('That isn\'t a signed Arabic set.');
+    }
+    const pack = submissions.approve(req.params.id, { set: body?.set, signature: body?.signature }, req.user);
+    res.status(201);
+    return { pack };
+  }));
+
   // The pack itself, for signed-in players only.
   api.get('/localization/packs/:id/download', requireUser, (req, res) => {
     const found = packs?.download(req.params.id, req.user.id);
@@ -852,6 +907,17 @@ function createApi({ db, games, prices, steam, steamStore, translations, arabicG
   api.get('/admin/requests', requireAdmin, (_req, res) => {
     res.json({ requests: arabicGames ? arabicGames.requests() : [] });
   });
+  // An RE Engine game's file list (REE.PAK.Tool's .list, as text): the font names in it
+  // are saved for the game, so players' apps can give those fonts the Arabic font.
+  api.put('/admin/games/:game/file-list', requireAdmin, submissionRoute(async (req) => {
+    const text = (await readBody(req, 128 * 1024 * 1024)).toString('utf8');
+    try {
+      return arabicGames.setFontList(String(req.params.game), text);
+    } catch (err) {
+      if (err instanceof TypeError) throw new SubmissionError(err.message);
+      throw err;
+    }
+  }));
   // The older address of the same list.
   api.get('/arabic/requests', requireAdmin, (_req, res) => {
     res.json({ requests: arabicGames ? arabicGames.requests() : [] });

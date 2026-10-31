@@ -5,6 +5,7 @@
 // - for games with no pack, whether the server's shared translations are ready
 //   (the app then builds the patch here, see builder.js), and requests.
 const fs = require('node:fs/promises');
+const crypto = require('node:crypto');
 const path = require('node:path');
 const { readZip, packFiles } = require('../../src/zip');
 const { CloudError } = require('../cloud');
@@ -21,7 +22,10 @@ function gameKey({ steamAppId, gameId }) {
   return null;
 }
 
-function createArabicOnline({ cloud, cacheDir }) {
+/**
+ * `publicKeys`: GameShelf's pack key(s), which approved Arabic sets are signed with.
+ */
+function createArabicOnline({ cloud, cacheDir, publicKeys = [] }) {
   let catalog = { at: 0, packs: null, loading: null };
 
   async function packs({ fresh = false } = {}) {
@@ -56,8 +60,17 @@ function createArabicOnline({ cloud, cacheDir }) {
     async status(key) {
       return (await cloud.json('/api/arabic/status', { method: 'POST', body: { games: [key] } })).games?.[key] || null;
     },
-    async request(key, name) {
-      return cloud.json('/api/arabic/requests', { method: 'POST', body: { game: key, name } });
+    /** Asks for Arabic in a game; `reason` says why this PC couldn't make it (for the admins). */
+    async request(key, name, reason = '') {
+      return cloud.json('/api/arabic/requests', { method: 'POST', body: { game: key, name, reason } });
+    },
+
+    /**
+     * Sends the Arabic this PC made to GameShelf for an admin to approve:
+     * { game, name, engine, fontTargets, lines: [English] }. Resolves to { id, total, translated }.
+     */
+    async submit(submission) {
+      return cloud.json('/api/arabic/submissions', { method: 'POST', raw: JSON.stringify(submission), type: 'application/octet-stream', timeout: 10 * 60 * 1000 });
     },
 
     catalog: {
@@ -97,6 +110,29 @@ function createArabicOnline({ cloud, cacheDir }) {
         }
         await fs.rm(zip, { force: true });
         return { dir, done: tidy };
+      },
+      /**
+       * Downloads an approved Arabic set (mode 'build') and checks it: the
+       * catalog's SHA-256, and GameShelf's signature. Resolves to { file, set, done }.
+       */
+      async fetchSet(entry, { onProgress = () => {} } = {}) {
+        onProgress({ phase: 'downloading', done: 0, total: entry.size || 0 });
+        const { set, signature } = await cloud.json(entry.downloadUrl, { timeout: 5 * 60 * 1000 });
+        const body = Buffer.from(String(set || ''), 'utf8');
+        if (crypto.createHash('sha256').update(body).digest('hex') !== entry.sha256) throw new CloudError('The Arabic didn\'t download correctly. Please try again.');
+        const signed = publicKeys.some((key) => {
+          try {
+            return crypto.verify(null, body, key, Buffer.from(String(signature || ''), 'base64'));
+          } catch {
+            return false;
+          }
+        });
+        if (!signed) throw new CloudError('The Arabic from GameShelf isn\'t signed with GameShelf\'s key, so it wasn\'t used.');
+        onProgress({ phase: 'downloading', done: body.length, total: body.length });
+        const file = path.join(cacheDir, `${entry.id}-${entry.version}.set.json`.replace(/[^\w.\-]/g, '_'));
+        await fs.mkdir(cacheDir, { recursive: true });
+        await fs.writeFile(file, body);
+        return { file, set: JSON.parse(body.toString('utf8')), done: () => fs.rm(file, { force: true }) };
       },
       forget: () => { catalog = { at: 0, packs: null, loading: null }; },
     },

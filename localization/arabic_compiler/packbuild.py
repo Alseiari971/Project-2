@@ -104,6 +104,8 @@ def parse_args(argv=None):
     t.add_argument('--glossary', help='CSV of "english,arabic" terms to always translate the same way')
     t.add_argument('--cache', help='translation cache file (default: <out>/translation-cache.sqlite)')
     t.add_argument('--no-json-mode', action='store_true', help='for OpenAI-compatible servers without JSON output mode')
+    t.add_argument('--arabic-by-hash', help='a JSON file of Arabic by the SHA-256 of each English line ({hash: arabic}, or GameShelf\'s '
+                   'signed Arabic set): the Arabic for lines it has, used before anything else')
     t.add_argument('--no-translate', action='store_true', help='don\'t call any API: use only translations already in the source or cache')
     t.add_argument('--limit', type=int, help='only the first N lines (to try things out)')
     t.add_argument('--review', action='store_true', help='stop after writing translations.csv')
@@ -147,7 +149,7 @@ def parse_args(argv=None):
     c.add_argument('--font-converter-cmd', help='reengine: an installed tool that makes .oft fonts, with {input} and {output}, '
                                                 'e.g. "REE.Fonts.Cryptor.exe {input} {output}" (GameShelf makes them itself otherwise)')
     c.add_argument('--no-fonts', action='store_true', help='unreal, reengine: leave the game\'s fonts as they are')
-    c.add_argument('--godot', type=int, choices=[3, 4], default=4, help='godot: the game\'s Godot version (default 4)')
+    c.add_argument('--godot', type=int, choices=[3, 4], help='godot: the game\'s Godot version (default: what its .pck says, else 4)')
     c.add_argument('--msg-tool', help='reengine: REMSG_Converter (its src/main.py, or the .exe), to read and write .msg files')
     c.add_argument('--msg-path', help='reengine: where a single dump\'s message file sits in the game, e.g. natives/stm/message/x.msg.22')
     c.add_argument('--msg-language', action='append', choices=sorted(remsg.LANGUAGE_IDS),
@@ -203,6 +205,50 @@ def shared_translate(rows, args, log) -> dict:
         elif not row.arabic and _LETTERS.search(_TOKENS.sub('', row.source)) is None:
             row.arabic = row.source
     return failed
+
+
+def choose_unity_tools(args, log):
+    """For a Unity game folder: Mono or IL2CPP (IL2CPP games have GameAssembly.dll), and the matching
+    BepInEx and XUnity.AutoTranslator releases from GAMESHELF_UNITY_TOOLS (the desktop app's copies:
+    bepinex-mono.zip, bepinex-il2cpp.zip, xunity-mono.zip, xunity-il2cpp.zip)."""
+    folder = Path(args.source)
+    if not args.backend and folder.is_dir():
+        args.backend = 'il2cpp' if (folder / 'GameAssembly.dll').exists() else 'mono'
+        log(f'A Unity {"IL2CPP" if args.backend == "il2cpp" else "Mono"} game.')
+    tools = os.environ.get('GAMESHELF_UNITY_TOOLS')
+    if tools and args.backend:
+        backend = 'il2cpp' if args.backend == 'il2cpp' else 'mono'
+        for attr, name in (('bepinex', f'bepinex-{backend}.zip'), ('autotranslator', f'xunity-{backend}.zip')):
+            if not getattr(args, attr) and (Path(tools) / name).exists():
+                setattr(args, attr, str(Path(tools) / name))
+
+
+def apply_by_hash(rows, path, log):
+    """Arabic by the SHA-256 of each English line, from a JSON object or a signed Arabic set ({"lines": [[hash, arabic]]})."""
+    data = json.loads(Path(path).read_text(encoding='utf-8'))
+    table = dict(data['lines']) if isinstance(data, dict) and isinstance(data.get('lines'), list) else data
+    found = 0
+    for row in rows:
+        arabic = table.get(line_hash(row.source))
+        if arabic and not row.arabic and problem_with(row.source, arabic) is None:
+            row.arabic = arabic
+            found += 1
+    log(f'Arabic for {found} of {len(rows)} lines from {Path(path).name}.')
+
+
+def write_build_info(out: Path, rows, args, kind):
+    """build-info.json: what the desktop app sends GameShelf with the game's English (engine, font names, line counts)."""
+    lines = [r.source for r in rows if _LETTERS.search(_TOKENS.sub('', r.source))]
+    info = {
+        'engine': kind,
+        'fontTargets': list(getattr(args, 'fonts_used', None) or []),
+        'lines': len(set(lines)),
+        'missing': len({r.source for r in rows if not r.arabic and r.source in set(lines)}),
+        'godot': args.godot if kind == 'godot' else None,
+    }
+    (out / 'build-info.json').write_text(json.dumps(info, indent=2), encoding='utf-8')
+    # The English lines themselves, for the desktop app's submission (an admin reads them beside the Arabic).
+    (out / 'english.json').write_text(json.dumps(sorted(set(lines)), ensure_ascii=False), encoding='utf-8')
 
 
 def report_lines(rows, args, kind, log):
@@ -564,12 +610,36 @@ RE_FONT = re.compile(r'^(natives/\S+\.oft(?:\.\d+)?(?:\.(?:stm|x64))?)\s*$', re.
 RE_BOLD_FONT = re.compile(r'bold|bd\.|heavy|black|-b\.', re.I)
 
 
+# Font files Capcom's RE Engine games keep, for games nobody has given a file list for
+# (--pak-list, or one an admin uploaded): the folders they're kept in, and the font
+# names known from Resident Evil 3. Only the paks' file tables are checked for them;
+# the fonts themselves are never read.
+RE_FONT_FOLDERS = [
+    'natives/stm/escape/ui/ui0000/font/', 'natives/x64/escape/ui/ui0000/font/', 'natives/stm/gui/font/', 'natives/x64/gui/font/',
+    'natives/stm/gui/ui0000/font/', 'natives/x64/gui/ui0000/font/', 'natives/stm/ui/font/', 'natives/x64/ui/font/',
+]
+RE_FONT_NAMES = [
+    'americantypeitcpro-med', 'cap-tsukugolatin-d', 'cap-udkakugoc70latin-m', 'cap-udkakugosmalllatin-m', 'capcom-dotgothic12std-m',
+    'courbd', 'fot-newcinemaastd-d', 'fot-tsukugopro-d', 'fot-udkakugo_smallpr6-m', 'fot-udkakugoc70pro-m', 'fotk-ydgothic130',
+    'fotk-yoongothic750', 'helveticaneueltw1g-cn', 'helveticaneueltw1g-mdcn', 'mheihk-medium', 'myingheiprc-w5',
+    'neuehelveticapro-69cmmd', 'ocratributepro-regular',
+]
+
+
+def re_builtin_font_names() -> list:
+    return [f'{folder}{name}.oft.1' for folder in RE_FONT_FOLDERS for name in RE_FONT_NAMES]
+
+
 def re_font_targets(args, source, log) -> list:
     """The game's .oft font names to put the Arabic font under: from --font-targets and --pak-list,
-    kept to the ones the game's paks hold (only their file tables are read)."""
+    or else GameShelf's own list of the usual ones, kept to the ones the game's paks hold
+    (only their file tables are read)."""
     names = [t.strip().replace('\\', '/') for t in (args.font_targets or '').split(',') if t.strip()]
     if args.pak_list:
         names += RE_FONT.findall(Path(args.pak_list).read_text(encoding='utf-8', errors='replace'))
+    builtin = not names and bool(source.game_paks)
+    if builtin:
+        names = re_builtin_font_names()
     names = [n for n in dict.fromkeys(names) if n.lower().startswith('natives/') and '..' not in n.split('/')]
     if not names or not source.game_paks:
         return names
@@ -578,7 +648,10 @@ def re_font_targets(args, source, log) -> list:
         with GamePak(path) as pak:
             present |= set(pak.entries)
     found = [n for n in names if path_hashes(n) in present]
-    log(f'{len(found)} of the {len(names)} font names given are in the game\'s paks.')
+    if builtin:
+        log(f'Found {len(found)} of GameShelf\'s usual RE Engine font names in the game\'s paks.')
+    else:
+        log(f'{len(found)} of the {len(names)} font names given are in the game\'s paks.')
     # Games keep a font more than once (name.oft.1, name.oft.1.stm, name.oft.1.x64) and may
     # draw with any of them, so every copy the game has gets the Arabic font.
     copies = [c for n in names for c in _font_copies(n) if c not in names and path_hashes(c) in present]
@@ -737,6 +810,7 @@ def build_unreal(source, translations: dict, args, payload: Path, stage_root: Pa
     # loads after the game's, so the game draws its text with it.
     staged = [(target, in_pak)]
     fonts = unreal_font_targets(args, log)
+    args.fonts_used = [f.as_posix() for f in fonts]
     if fonts:
         regular, bold, license_text = font_files(args)
         for font in fonts:
@@ -806,6 +880,20 @@ def build(args, log=print) -> Path:
         log(note)
     kind = args.kind or source.engine or 'overlay'
     args.resolved_kind = kind
+    if kind == 'godot':
+        args.godot = args.godot or source.godot_version or 4
+    if kind == 'unity':
+        choose_unity_tools(args, log)
+    if kind == 'unreal' and source.pak_tool:
+        # Read from the game's own paks: pack with the same tool, at the same pak version, and find its fonts in the same listing.
+        args.packer_path = args.packer_path or source.pak_tool
+        args.packer = args.packer or 'repak'
+        if source.pak_version and args.pak_version == 'V11':
+            args.pak_version = source.pak_version
+        if source.pak_listing and not args.pak_list and not args.font_targets:
+            listing = out / 'game-pak-list.txt'
+            listing.write_text(source.pak_listing, encoding='utf-8')
+            args.pak_list = str(listing)
     if source.game_paks:
         try:
             source.msg_files = remsg.extract_messages(source.game_paks, out / 'msg-from-game', log)
@@ -822,6 +910,8 @@ def build(args, log=print) -> Path:
     # RE Engine message files that already hold the Arabic need no translating.
     prebuilt = kind == 'reengine' and args.msg_prebuilt and not source.rows
     rows = source.rows[:args.limit] if args.limit else source.rows
+    if args.arabic_by_hash:
+        apply_by_hash(rows, args.arabic_by_hash, log)
     if args.translations:
         apply_reviewed(rows, args.translations, log)
     if not rows and not prebuilt:
@@ -882,6 +972,7 @@ def build(args, log=print) -> Path:
 
     if args.shared and rows:
         report_lines(rows, args, kind, log)
+    write_build_info(out, rows, args, kind)
     log(sign(pack_dir, args, kind))
     log(f'Done: {pack_dir}{f" ({len(pairs)} lines)" if pairs else ""}. Add it in GameShelf under App settings, Arabic subtitle packs.')
     return pack_dir

@@ -220,11 +220,25 @@ function createTranslationMemory({ db, env = process.env, fetch = globalThis.fet
     }
   }
 
+  /**
+   * An admin's own Arabic for a line (from reviewing a submission): kept as
+   * 'reviewed', replacing the machine translation. Throws TypeError when it
+   * breaks a tag or placeholder of the English.
+   */
+  const saveReviewed = db.prepare(`INSERT INTO translation_memory (game, line_hash, arabic, origin, model) VALUES (?, ?, ?, 'reviewed', NULL)
+    ON CONFLICT (game, line_hash) DO UPDATE SET arabic = excluded.arabic, origin = 'reviewed', model = NULL`);
+  function review(game, english, arabic) {
+    checkGame(game);
+    const problem = problemWith(english, arabic);
+    if (problem) throw new TypeError(`That Arabic can't be used: ${problem}.`);
+    saveReviewed.run(game, sha256(english), arabic);
+  }
+
   /** How many lines are stored for a game. */
   const countStmt = db.prepare('SELECT COUNT(*) AS n FROM translation_memory WHERE game = ?');
   const stored = (game) => countStmt.get(game).n;
 
-  return { configured: Boolean(apiKey), lookup, translate, stored, model };
+  return { configured: Boolean(apiKey), lookup, translate, review, stored, model };
 }
 
 module.exports = { createTranslationMemory, problemWith, sha256, TranslationLimit, GAME_RE };

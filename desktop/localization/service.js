@@ -22,7 +22,12 @@ const PREFLIGHT_TTL_MS = 60 * 1000;
 
 const why = (text, vars = {}) => ({ text, vars });
 
-function createArabicService({ dataDir, publicKey, overlayAvailable = process.platform === 'win32', localization, packs, catalog = null }) {
+/**
+ * `catalog` is GameShelf's cloud catalog (online.js); `builder` builds a game's
+ * patch on this PC from an approved Arabic set: { canBuild(tier), fromSet({ game,
+ * tier, entry, set, setFile, onProgress }) -> pack folder } (see main.js).
+ */
+function createArabicService({ dataDir, publicKey, overlayAvailable = process.platform === 'win32', localization, packs, catalog = null, builder = null }) {
   localization ??= createLocalization({ dataDir });
   packs ??= createPackLibrary({ dir: path.join(dataDir, 'localization', 'packs'), publicKey });
   const prefsFile = path.join(dataDir, 'localization', 'arabic.json');
@@ -76,16 +81,20 @@ function createArabicService({ dataDir, publicKey, overlayAvailable = process.pl
     const overlayPack = found.find((p) => p.engine === 'overlay');
     // GameShelf's cloud catalog: a pack not on this PC yet, or a newer version of one that is.
     const cloud = catalog ? await catalog.forGame(game).catch(() => null) : null;
-    const fits = cloud && ((cloud.mode === 'native' && result.fileChanges && cloud.engine === TIER_ENGINES[result.tier]) || (cloud.mode === 'overlay' && overlayAvailable));
+    // A pack to download, or an approved Arabic set to build the patch from here.
+    const fits = cloud && ((cloud.mode === 'native' && result.fileChanges && cloud.engine === TIER_ENGINES[result.tier])
+      || (cloud.mode === 'overlay' && overlayAvailable)
+      || (cloud.mode === 'build' && result.fileChanges && cloud.tier === result.tier && Boolean(builder?.canBuild(result.tier))));
+    const tier = result.fileChanges ? result.tier : null;
     const local = native || (overlayAvailable && overlayPack);
     const update = fits && local && cloud.id === local.id && cloud.version !== local.version ? cloud : null;
     let out;
     if (native) {
-      out = { ...base, mode: 'native', pack: summary(native), update };
+      out = { ...base, mode: 'native', pack: summary(native), update, tier };
     } else if (overlayPack && overlayAvailable) {
-      out = { ...base, mode: 'overlay', pack: summary(overlayPack), detail: result.why, update };
+      out = { ...base, mode: 'overlay', pack: summary(overlayPack), detail: result.why, update, tier };
     } else if (fits) {
-      out = { ...base, mode: cloud.mode, pack: summary(cloud), cloud, detail: cloud.mode === 'overlay' ? result.why : null };
+      out = { ...base, mode: cloud.mode === 'overlay' ? 'overlay' : 'native', pack: summary(cloud), cloud, tier, detail: cloud.mode === 'overlay' ? result.why : null };
     } else if (overlayPack) {
       out = { ...base, why: why('The subtitle overlay needs Windows 10 or newer.') };
     } else if (found.length) {
@@ -110,7 +119,7 @@ function createArabicService({ dataDir, publicKey, overlayAvailable = process.pl
       try {
         // From the cloud catalog: downloaded and checked now, so Play starts right away.
         if (now.cloud || now.update) {
-          await install(now.cloud || now.update, onProgress).catch((err) => {
+          await install(now.cloud || now.update, onProgress, game, now.tier).catch((err) => {
             if (now.cloud) throw err; // an update that fails keeps the pack already here
           });
           now = await info(game);
@@ -154,7 +163,7 @@ function createArabicService({ dataDir, publicKey, overlayAvailable = process.pl
     let now = await info(game);
     try {
       if (now.cloud || now.update) {
-        await install(now.cloud || now.update, onProgress).catch((err) => {
+        await install(now.cloud || now.update, onProgress, game, now.tier).catch((err) => {
           if (now.cloud) throw err;
         });
         now = await info(game);
@@ -178,8 +187,22 @@ function createArabicService({ dataDir, publicKey, overlayAvailable = process.pl
   }
 
   /** Downloads a catalog pack, checks it (SHA-256, then its signature and files) and adds it to this PC's packs. */
-  async function install(entry, onProgress = () => {}) {
+  async function install(entry, onProgress = () => {}, game = null, tier = null) {
     if (!catalog) throw new Error('There\'s no Arabic pack catalog in this copy of GameShelf.');
+    if (entry.mode === 'build') {
+      // Approved Arabic: the patch is built here, from the player's own copy of the game.
+      if (!builder || !game) throw new Error('GameShelf can\'t make Arabic for this game on this PC.');
+      const got = await catalog.fetchSet(entry, { onProgress });
+      try {
+        const packDir = await builder.fromSet({ game, tier, entry, set: got.set, setFile: got.file, onProgress });
+        onProgress({ phase: 'checking' });
+        await packs.add(packDir);
+      } finally {
+        await got.done();
+      }
+      checks.clear();
+      return;
+    }
     const got = await catalog.fetch(entry, { onProgress });
     try {
       onProgress({ phase: 'checking' });

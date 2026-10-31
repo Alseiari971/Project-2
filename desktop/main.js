@@ -22,6 +22,7 @@ const { createArabicOnline, gameKey } = require('./localization/online');
 const { createPackBuilder, findBuilder, localPackKey } = require('./localization/builder');
 const { createPassThrough, createCloudClient, createRemoteGames, SESSION_COOKIE } = require('./cloud');
 const { createStudio } = require('./localization/studio');
+const { createArabicRequests } = require('./localization/requests');
 const config = require('./config.json');
 const { normalizeTitle } = require('../src/text');
 
@@ -328,10 +329,21 @@ const cloud = createCloudClient({
   session: async () => (origin ? (await session.defaultSession.cookies.get({ url: origin, name: SESSION_COOKIE }))[0]?.value || null : null),
 });
 // Arabic packs from the cloud catalog, and the shared translations (see online.js).
-const online = createArabicOnline({ cloud, cacheDir: path.join(dataDir, 'localization', 'downloads') });
+const online = createArabicOnline({ cloud, cacheDir: path.join(dataDir, 'localization', 'downloads'), publicKeys: [packKey].filter(Boolean) });
 // Packs this app builds itself (from GameShelf's server, see below) are signed with a key made on this PC.
 const localKey = localPackKey(dataDir);
-const arabic = createArabicService({ dataDir, publicKey: [packKey, localKey.publicKey].filter(Boolean), overlayAvailable: process.platform === 'win32' || Boolean(devOcrHelper), catalog: online.catalog });
+const arabic = createArabicService({
+  dataDir,
+  publicKey: [packKey, localKey.publicKey].filter(Boolean),
+  overlayAvailable: process.platform === 'win32' || Boolean(devOcrHelper),
+  catalog: online.catalog,
+  // Approved Arabic sets: the patch is built here, from the player's own copy of the game.
+  builder: {
+    canBuild: (tier) => packBuilder.canBuild(tier),
+    fromSet: async ({ game, tier, entry, set, setFile, onProgress }) => (await packBuilder.build(
+      { ...game, tier, title: entry.title || set.title }, { set: setFile, fontTargets: set.fontTargets || [], version: entry.version, onProgress })).packDir,
+  },
+});
 const builderPaths = findBuilder({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, repoDir: path.join(__dirname, '..') });
 const packBuilder = createPackBuilder({
   paths: builderPaths,
@@ -351,8 +363,8 @@ const studio = createStudio({
     decrypt: (data) => safeStorage.decryptString(data),
   },
 });
-// Most of a game's lines must have Arabic before its pack goes in.
-const ENOUGH_ARABIC = 0.9;
+// "Request Arabic subtitles", after the player agrees (see requests.js).
+const requests = createArabicRequests({ arabic, packBuilder, online, server: () => cloud.server() });
 let overlays = null; // created once the app is ready
 
 const arabicGame = (g) => ({ key: g.key, dir: g.dir, steamAppId: g.steamAppId || null, gameId: pageOf(g)?.id || null });
@@ -794,21 +806,10 @@ function registerIpc() {
   });
   // Makes the pack on this PC, with the Arabic from the server (which translates
   // what it doesn't have yet, once, for everyone), then turns Arabic on.
-  handle('arabic:get', async (key) => {
+  // Only after the player agreed in the dialog (consent: true) does GameShelf read the game's files.
+  handle('arabic:get', async (key, options = {}) => {
     const game = await installedGame(key);
-    const before = await arabic.info(arabicGame(game));
-    if (!before.missing) return { done: true, info: before };
-    try {
-      const result = await packBuilder.build({ ...arabicGame(game), tier: before.tier, title: pageOf(game)?.name || game.name },
-        { server: cloud.server(), auth: await online.builderEnv(), onProgress: arabicProgress(key) });
-      const have = result.total ? (result.total - result.missing) / result.total : 0;
-      if (have < ENOUGH_ARABIC) return { done: false, result, info: before };
-      await arabic.packs.add(result.packDir);
-      const { info, error } = await arabic.set(arabicGame(game), true);
-      return { done: true, result, info, error };
-    } catch (err) {
-      return { done: false, info: before, error: { text: err.message, vars: {} } };
-    }
+    return requests.run({ ...arabicGame(game), title: pageOf(game)?.name || game.name }, { consent: options?.consent === true, onProgress: arabicProgress(key) });
   });
   // For games this PC can't make Arabic for: the request is counted on the server.
   handle('arabic:request', async (key) => {
@@ -816,6 +817,13 @@ function registerIpc() {
     const serverKey = gameKey(arabicGame(game));
     if (!serverKey) throw new Error('GameShelf doesn\'t know which game this is, so it can\'t ask for it.');
     return online.request(serverKey, pageOf(game)?.name || game.name);
+  });
+  // Admin Panel: "Approve, Sign & Publish" a player's submission (signed here, with the Pack Studio's key).
+  handle('admin:approve', async (submissionId) => {
+    await requireAdmin();
+    const pack = await studio.approve(submissionId);
+    online.catalog.forget();
+    return pack;
   });
   // ---- Pack Studio (admins only; the server checks again when a pack is published) ----
   const requireAdmin = async () => {

@@ -41,7 +41,8 @@ contextBridge.exposeInMainWorld('gameshelfDesktop', {
   arabicInfo: (key) => ipcRenderer.invoke('arabic:info', key),
   setArabic: (key, on) => ipcRenderer.invoke('arabic:set', key, on),
   arabicOnline: (key) => ipcRenderer.invoke('arabic:online', key),
-  getArabic: (key) => ipcRenderer.invoke('arabic:get', key),
+  getArabic: (key, options) => ipcRenderer.invoke('arabic:get', key, options),
+  approveSubmission: (id) => ipcRenderer.invoke('admin:approve', id),
   requestArabic: (key) => ipcRenderer.invoke('arabic:request', key),
   onArabicProgress: (fn) => {
     const listener = (_event, progress) => fn(progress);

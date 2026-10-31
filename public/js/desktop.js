@@ -106,24 +106,18 @@ async function checkOnline(button) {
   if (!online.configured || !online.server) return;
   const server = online.server;
   button.disabled = false;
-  if (online.canBuild && server.status === 'ready') {
-    button.classList.remove('mode-unavailable');
-    button.classList.add('mode-available');
-    button.dataset.action = 'get';
-    setLabel(button, t('Arabic subtitles'), t('Ready on GameShelf'));
-    button.title = t('GameShelf has this game\'s Arabic. Turning it on makes the Arabic patch from your own copy of the game.');
-    return;
-  }
   button.classList.remove('mode-unavailable');
   button.classList.add('is-request');
   button.setAttribute('role', 'button');
   button.removeAttribute('aria-checked');
   if (online.canBuild) {
     button.dataset.action = 'get';
-    setLabel(button, t('Request Arabic subtitles'), server.status === 'partial' && server.total
-      ? t('{percent}% translated so far', { percent: percent(server.translated, server.total) })
-      : t('Translated once, for every player'));
-    button.title = t('GameShelf translates this game\'s text into Arabic and makes the Arabic patch from your own copy of the game. It can take a few minutes.');
+    setLabel(button, t('Request Arabic subtitles'), server.pending
+      ? t('Waiting for an admin\'s approval')
+      : server.status === 'partial' && server.total
+        ? t('{percent}% translated so far', { percent: percent(server.translated, server.total) })
+        : t('Made from your copy of the game'));
+    button.title = t('With your OK, GameShelf reads this game\'s text on your PC, translates it into Arabic and makes the Arabic patch here, so you can play in Arabic right away. It can take a few minutes.');
   } else {
     button.dataset.action = 'request';
     paintRequested(button, server);
@@ -145,12 +139,30 @@ const PHASES = {
   done: 'Making the Arabic patch…',
 };
 
+// "Request Arabic subtitles" in three steps: which step each phase is, and its words.
+const REQUEST_STEPS = {
+  starting: [1, 'Reading game text…'],
+  reading: [1, 'Reading game text…'],
+  translating: [2, 'Translating to Arabic…'],
+  packing: [3, 'Building pack…'],
+  done: [3, 'Building pack…'],
+  checking: [3, 'Building pack…'],
+  submitting: [3, 'Building pack & submitting for review…'],
+};
+
 function paintProgress(button, progress) {
   button.classList.add('is-busy');
   button.disabled = true;
   let small;
   let share = 0;
-  if (progress.phase === 'downloading') {
+  if (button.classList.contains('is-request') && REQUEST_STEPS[progress.phase]) {
+    const [step, words] = REQUEST_STEPS[progress.phase];
+    const inner = progress.phase === 'translating' && progress.asking ? progress.asked / progress.asking : progress.phase === 'submitting' ? 1 : 0.5;
+    share = (step - 1 + inner) / 3;
+    small = progress.phase === 'translating' && progress.asking
+      ? t('Step {step} of 3 · Translating to Arabic… {done} of {total} lines', { step, done: progress.asked.toLocaleString(), total: progress.asking.toLocaleString() })
+      : t('Step {step} of 3 · {words}', { step, words: t(words) });
+  } else if (progress.phase === 'downloading') {
     share = progress.total ? progress.done / progress.total : 0;
     small = progress.total ? t('Downloading Arabic pack… {percent}%', { percent: percent(progress.done, progress.total) }) : t('Downloading Arabic pack…');
   } else if (progress.phase === 'translating' && progress.asking) {
@@ -170,14 +182,52 @@ desktop?.onArabicProgress?.((progress) => {
   document.querySelectorAll(`[data-arabic="${CSS.escape(progress.key)}"]`).forEach((button) => paintProgress(button, progress));
 });
 
+/**
+ * Asks the player before GameShelf reads anything of the game's: resolves to true for "Approve & Generate".
+ */
+function askConsent(name) {
+  return new Promise((resolve) => {
+    const dialog = document.createElement('dialog');
+    dialog.className = 'consent-dialog';
+    dialog.setAttribute('aria-labelledby', 'consent-title');
+    mount(dialog, html`
+      <form method="dialog">
+        <span class="arabic-mark" aria-hidden="true">ع</span>
+        <h2 id="consent-title">${t('Allow GameShelf to scan this game\'s text files on your PC to generate the Arabic subtitles?')}</h2>
+        <p class="muted">${bdi(name)}</p>
+        <ul>
+          <li>${t('GameShelf reads the game\'s English text on this PC and sends it to GameShelf\'s server, which translates it into Arabic. You don\'t need an API key.')}</li>
+          <li>${t('The Arabic patch is made on your PC, so you can play in Arabic right away. The game\'s files aren\'t uploaded.')}</li>
+          <li>${t('The English lines and their Arabic go to GameShelf\'s team for review. Once approved, every player with this game can turn Arabic on.')}</li>
+        </ul>
+        <div class="consent-actions">
+          <button class="btn btn-quiet" value="cancel">${t('Cancel')}</button>
+          <button class="btn btn-light" value="approve" autofocus>${t('Approve & Generate')}</button>
+        </div>
+      </form>`);
+    document.body.append(dialog);
+    dialog.addEventListener('close', () => {
+      resolve(dialog.returnValue === 'approve');
+      dialog.remove();
+    });
+    dialog.showModal();
+  });
+}
+
 async function getArabic(button) {
   const key = button.dataset.arabic;
+  const request = button.classList.contains('is-request');
+  if (request && !(await askConsent(button.closest('.page')?.querySelector('h1')?.textContent?.trim() || ''))) return;
   paintProgress(button, { phase: 'starting' });
-  const { done, result, info, error } = await desktop.getArabic(key);
+  const { done, result, info, error, submitted, requested, reason } = await desktop.getArabic(key, { consent: true });
   paintArabic(button, info);
   if (done) {
     if (error) toast(explain(error), { error: !info.enabled });
+    else if (submitted?.id) toast(t('Arabic subtitles on. Your Arabic was sent to GameShelf for review: once it\'s approved, every player with this game gets it.'));
+    else if (submitted?.error) toast(t('Arabic subtitles on. It couldn\'t be sent for review just now: {reason}', { reason: t(submitted.error) }));
     else toast(t('Arabic subtitles on. Press Play to start the game in Arabic.'));
+  } else if (requested) {
+    toast(t('GameShelf couldn\'t make Arabic for this game on your PC ({reason}). Your request was sent to the GameShelf team.', { reason: t(reason) }), { error: true });
   } else if (error) {
     toast(explain(error), { error: true });
   } else if (result?.limited) {

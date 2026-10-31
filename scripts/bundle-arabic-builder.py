@@ -8,6 +8,9 @@ resources; see "extraResources" in package.json):
   localization/ the builder (arabic_compiler) and its fonts
   scripts/      build-arabic-pack.py
   remsg/        REMSG_Converter (MIT), for RE Engine message files
+  tools/        repak (MIT or Apache-2.0), for Unreal games' .pak files; and in
+                tools/unity/, BepInEx (LGPL-2.1) and XUnity.AutoTranslator (MIT)
+                for Unity games, Mono and IL2CPP (with UnityPy, MIT, in python/)
 
 That's what the "Request Arabic subtitles" button runs, so players never need
 Python or a command prompt. Run it on any computer with Python 3 and internet:
@@ -39,6 +42,15 @@ REMSG_COMMIT = '4289554cd0bdd8eba8c61fa0addbcbe9726a7c0f'
 REMSG_URL = f'https://github.com/dtlnor/REMSG_Converter/archive/{REMSG_COMMIT}.zip'
 # What REMSG_Converter needs (its requirements.txt).
 REMSG_REQUIREMENTS = ['chardet>=5.2.0', 'mmh3>=4.0.1']
+# Tools for more engines. Each is optional: when one can't be fetched, the app
+# just can't make Arabic for that engine on players' PCs (it sends a request instead).
+REPAK_URL = 'https://github.com/trumank/repak/releases/download/v0.2.3/repak_cli-x86_64-pc-windows-msvc.zip'
+UNITY_TOOLS = {
+    'bepinex-mono.zip': 'https://github.com/BepInEx/BepInEx/releases/download/v5.4.23.6/BepInEx_win_x64_5.4.23.6.zip',
+    'bepinex-il2cpp.zip': 'https://builds.bepinex.dev/projects/bepinex_be/791/BepInEx-Unity.IL2CPP-win-x64-6.0.0-be.791%2Bb782da4.zip',
+    'xunity-mono.zip': 'https://github.com/bbepis/XUnity.AutoTranslator/releases/download/v5.6.3.1/XUnity.AutoTranslator-BepInEx-5.6.3.1.zip',
+    'xunity-il2cpp.zip': 'https://github.com/bbepis/XUnity.AutoTranslator/releases/download/v5.6.3.1/XUnity.AutoTranslator-BepInEx-IL2CPP-5.6.3.1.zip',
+}
 
 
 def download(url: str) -> bytes:
@@ -88,6 +100,40 @@ def add_remsg(out: Path):
         raise SystemExit('REMSG_Converter\'s download doesn\'t look as expected (no src/main.py or LICENSE).')
 
 
+def pip_install(site: Path, version: str, packages: list):
+    with tempfile.TemporaryDirectory() as wheels:
+        subprocess.run([sys.executable, '-m', 'pip', 'download', '--only-binary=:all:', '--platform', 'win_amd64',
+                        '--python-version', '.'.join(version.split('.')[:2]), '--dest', wheels, *packages], check=True)
+        for wheel in sorted(Path(wheels).glob('*.whl')):
+            with zipfile.ZipFile(wheel) as archive:
+                archive.extractall(site)
+
+
+def add_tools(out: Path, version: str):
+    """repak, UnityPy, BepInEx and XUnity.AutoTranslator: each skipped with a warning when it can't be fetched."""
+    tools = out / 'tools'
+    tools.mkdir(parents=True, exist_ok=True)
+    try:
+        with zipfile.ZipFile(io.BytesIO(download(REPAK_URL))) as archive:
+            exe = next(n for n in archive.namelist() if n.lower().endswith('repak.exe'))
+            (tools / 'repak.exe').write_bytes(archive.read(exe))
+            for name in archive.namelist():
+                if 'license' in name.lower() and not name.endswith('/'):
+                    (tools / f'repak-{Path(name).name}').write_bytes(archive.read(name))
+    except Exception as err:  # noqa: BLE001 (any failure just leaves Unreal out)
+        print(f'WARNING: repak wasn\'t added ({err}); Unreal games will be request-only.')
+    unity = tools / 'unity'
+    unity.mkdir(exist_ok=True)
+    try:
+        pip_install(out / 'python' / 'Lib' / 'site-packages', version, ['UnityPy'])
+        for name, url in UNITY_TOOLS.items():
+            (unity / name).write_bytes(download(url))
+    except Exception as err:  # noqa: BLE001
+        shutil.rmtree(unity, ignore_errors=True)
+        print(f'WARNING: the Unity tools weren\'t all added ({err}); Unity games will be request-only. '
+              'Put bepinex-mono.zip, bepinex-il2cpp.zip, xunity-mono.zip and xunity-il2cpp.zip in build-tools/arabic-builder/tools/unity/ yourself to add them.')
+
+
 def add_builder(out: Path):
     ignore = shutil.ignore_patterns('__pycache__', '*.pyc')
     shutil.copytree(REPO / 'localization' / 'arabic_compiler', out / 'localization' / 'arabic_compiler', ignore=ignore)
@@ -99,7 +145,11 @@ def add_builder(out: Path):
         f'python/: Python {PYTHON} for Windows (Python Software Foundation License, python/LICENSE.txt), with the\n'
         '  builder\'s requirements from PyPI (each with its license in its .dist-info folder).\n'
         f'remsg/: REMSG_Converter by dtlnor, MIT License (remsg/LICENSE), commit {REMSG_COMMIT}.\n'
-        'localization/assets/fonts/: IBM Plex Sans Arabic, SIL Open Font License (OFL.txt).\n', encoding='utf-8')
+        'localization/assets/fonts/: IBM Plex Sans Arabic, SIL Open Font License (OFL.txt).\n'
+        'tools/repak.exe: repak by trumank, MIT or Apache-2.0 (github.com/trumank/repak).\n'
+        'tools/unity/: BepInEx (LGPL-2.1, github.com/BepInEx/BepInEx) and XUnity.AutoTranslator by bbepis\n'
+        '  (MIT, github.com/bbepis/XUnity.AutoTranslator), installed into Unity games when a player turns Arabic on;\n'
+        '  python/Lib/site-packages/UnityPy: UnityPy by K0lb3 (MIT).\n', encoding='utf-8')
 
 
 def main(argv=None) -> int:
@@ -111,6 +161,8 @@ def main(argv=None) -> int:
         # The builder's own code is copied fresh every time, so the app never ships an old one.
         shutil.rmtree(OUT / 'localization', ignore_errors=True)
         add_builder(OUT)
+        if not (OUT / 'tools').is_dir():
+            add_tools(OUT, args.python)
         print(f'{OUT} is there; refreshed the builder\'s code.')
         return 0
     temp = OUT.with_name(OUT.name + '.new')
@@ -120,6 +172,7 @@ def main(argv=None) -> int:
         add_python(temp, args.python)
         add_remsg(temp)
         add_builder(temp)
+        add_tools(temp, args.python)
     except Exception:
         shutil.rmtree(temp, ignore_errors=True)
         raise

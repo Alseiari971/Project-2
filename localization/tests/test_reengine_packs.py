@@ -455,6 +455,17 @@ class BuildingReEngine(unittest.TestCase):
         # The game keeps courbd twice (.oft.1 and .oft.1.stm, the one RE3 draws with): both get the Arabic font.
         self.assertEqual(files[path_hashes(font_dir + 'courbd.oft.1.stm')], encode_oft(DEFAULT_BOLD_FONT.read_bytes()))
 
+        # With no file list at all, GameShelf's own list of the usual RE Engine fonts finds them (by the paks' file tables).
+        self.logged.clear()
+        pack = build(parse_args(common), log=self.logged.append)
+        files = read_pak((pack / 'payload/re_chunk_000.pak.patch_XXX.pak').read_bytes())
+        for name in ('helveticaneueltw1g-cn.oft.1', 'courbd.oft.1', 'courbd.oft.1.stm'):
+            self.assertIn(path_hashes(font_dir + name), files)
+        self.assertTrue(any('of GameShelf\'s usual RE Engine font names' in line for line in self.logged))
+        info = json.loads((pack.parent / 'build-info.json').read_text())
+        self.assertEqual(info['engine'], 'reengine')
+        self.assertIn(font_dir + 'courbd.oft.1.stm', info['fontTargets'])
+
         # Names without their copies (as the server may have them) still reach every copy.
         pack = build(parse_args(common + ['--font-targets', font_dir + 'courbd.oft.1', '--require-fonts']), log=self.logged.append)
         files = read_pak((pack / 'payload/re_chunk_000.pak.patch_XXX.pak').read_bytes())

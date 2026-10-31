@@ -25,11 +25,17 @@ import csv
 import io
 import json
 import pickle
+import os
 import re
+import shutil
+import subprocess
+import tempfile
 import zlib
+from struct import error as struct_error
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import godotpck
 from . import locres as locres_format
 from . import remsg
 
@@ -61,6 +67,13 @@ class Source:
     msg_files: list = field(default_factory=list)
     # RE Engine: the game's own paks, base first, to take the message files out of.
     game_paks: list = field(default_factory=list)
+    # Godot: the major version a .pck was made with (3 or 4).
+    godot_version: int | None = None
+    # Unreal: the game's pak listing (for its font files), the pak tool that read
+    # it, and the pak version to write the Arabic pak with.
+    pak_listing: str | None = None
+    pak_tool: str | None = None
+    pak_version: str | None = None
 
 
 def _csv(path: Path) -> Source:
@@ -116,6 +129,60 @@ def _xunity(path: Path) -> Source:
         if original:
             rows.append(Row(original, translated if translated and translated != original else None))
     return Source(rows, engine='unity')
+
+
+# An Unreal game's English text table inside its paks.
+_ENGLISH_LOCRES = re.compile(r'(?:^|/)Localization/Game/en(?:-us|-gb)?/Game\.locres$', re.I)
+_OUR_PAK = re.compile(r'ArabicLocalization', re.I)
+
+
+def _repak(tool: str, *args, binary=False):
+    return subprocess.run([tool, *args], capture_output=True, text=not binary, timeout=600)
+
+
+def _unreal_paks(folder: Path) -> Source:
+    """An Unreal game's English .locres and its file list, read from its own .pak files with repak.
+    Paks with an encrypted index need the game's own key, which isn't looked for."""
+    tool = os.environ.get('GAMESHELF_REPAK') or shutil.which('repak')
+    if not tool:
+        raise SourceError('Reading this Unreal game\'s .pak files needs repak (github.com/trumank/repak). Extract its English '
+                          'Game.locres from your own copy (with FModel), then run this on that file.')
+    paks = sorted((p for p in folder.rglob('*.pak') if not _OUR_PAK.search(p.name)), key=lambda p: -p.stat().st_size)
+    if not paks:
+        raise SourceError(f'Found no .pak files in {folder}.')
+    listing, encrypted, found = [], [], None
+    for pak in paks:
+        result = _repak(tool, 'list', str(pak))
+        if result.returncode != 0:
+            message = (result.stderr or result.stdout).lower()
+            if 'encrypt' in message or 'aes' in message or 'key' in message:
+                encrypted.append(pak.name)
+            continue
+        names = [line.strip().replace('\\', '/') for line in result.stdout.splitlines() if line.strip()]
+        listing += names
+        english = [n for n in names if _ENGLISH_LOCRES.search(n)]
+        if english and not found:
+            found = (pak, sorted(english, key=len)[0])
+    if not found:
+        if encrypted:
+            raise SourceError(f'The game\'s paks are encrypted ({", ".join(encrypted[:3])}); reading them needs the game\'s own key, which GameShelf won\'t look for.')
+        raise SourceError('Found no English Game.locres in the game\'s .pak files. The game may keep its text in its .utoc/.ucas '
+                          'files, which GameShelf can\'t read yet.')
+    pak, inside = found
+    data = _repak(tool, 'get', str(pak), inside, binary=True)
+    if data.returncode != 0 or not data.stdout:
+        raise SourceError(f'repak couldn\'t read {inside} from {pak.name}.')
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / 'Game.locres'
+        target.write_bytes(data.stdout)
+        source = _locres(target, inside)
+    info = _repak(tool, 'info', str(pak))
+    version = re.search(r'version[^\n]*?\b(V\d+[AB]?)\b', info.stdout or '', re.I) if info.returncode == 0 else None
+    source.pak_listing = '\n'.join(listing)
+    source.pak_tool = tool
+    source.pak_version = version.group(1).upper() if version else None
+    source.notes.append(f'Read {inside} from {pak.name}.')
+    return source
 
 
 def _locres(path: Path, locres_path: str | None = None) -> Source:
@@ -417,6 +484,55 @@ def _godot_project(folder: Path) -> Source:
     return Source(rows, engine='godot', notes=['Godot text was read from scenes and tr() calls. Check translations.csv for lines that aren\'t game text.'])
 
 
+def _godot_pck(path: Path) -> Source:
+    """A built Godot game's text, from its .pck (or the pack built into its .exe)."""
+    try:
+        pck = godotpck.read_pck(path)
+    except (godotpck.PckError, OSError, struct_error) as err:
+        raise SourceError(f'Couldn\'t read {path.name}: {err}') from None
+    files = [f for f in pck.files if not f.encrypted]
+    if not files:
+        raise SourceError('Every file in the game\'s pack is encrypted; that needs the game\'s own key, which GameShelf won\'t look for.')
+    version = pck.godot[0] if pck.godot[0] in (3, 4) else None
+    lower = lambda f: f.path.lower()  # noqa: E731
+    # Translation tables the game looks its text up in, kept in the pack as they were written.
+    rows, seen = [], set()
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        for i, entry in enumerate(f for f in files if lower(f).endswith(('.csv', '.po', '.pot'))):
+            data = pck.read(entry)
+            target = Path(tmp) / f'{i}{Path(entry.path).suffix}'
+            target.write_bytes(data)
+            if target.suffix.lower() == '.csv' and not _first_line(target).startswith(('keys,', 'key,', 'id,')):
+                continue
+            for row in (_godot_csv(target) if target.suffix.lower() == '.csv' else _po(target)).rows:
+                if row.key not in seen:
+                    seen.add(row.key)
+                    rows.append(row)
+    if rows:
+        return Source(rows, engine='godot', keyed=True, godot_version=version, notes=[f'Read the translation tables in {path.name}.'])
+    # No tables: the English is in the scenes and scripts (as text, or in Godot's binary formats).
+    for entry in files:
+        name = lower(entry)
+        if name.endswith(('.tscn', '.tres')):
+            found = (_godot_unescape(m.group(1)) for m in _GODOT_TEXT_PROPERTY.finditer(pck.read(entry).decode('utf-8', 'replace')))
+        elif name.endswith('.gd'):
+            found = (_godot_unescape(m.group(1)) for m in _GODOT_TR_CALL.finditer(pck.read(entry).decode('utf-8', 'replace')))
+        elif name.endswith(('.scn', '.res', '.gdc')) and entry.size <= 8 * 1024 * 1024:
+            # Binary files also hold class and property names ("Node", "Label"): only phrases count there.
+            found = (t for t in godotpck.binary_strings(pck.read(entry)) if ' ' in t.strip() or t.rstrip()[-1:] in '.!?:…')
+        else:
+            continue
+        for text in found:
+            if looks_like_text(text) and text not in seen and not text.startswith(('res://', 'uid://')):
+                seen.add(text)
+                rows.append(Row(text, None, entry.path))
+    if not rows:
+        raise SourceError(f'Found no text in {path.name}.')
+    return Source(rows, engine='godot', godot_version=version,
+                  notes=[f'Godot text was read from the scenes and scripts in {path.name}. Check translations.csv for lines that aren\'t game text.'])
+
+
 # ---- Capcom RE Engine ----
 
 def msg_dump_source(dumps: list) -> Source:
@@ -478,14 +594,11 @@ def _game_folder(folder: Path) -> Source:
         if not assets:
             raise SourceError(f'{data_dirs[0].name} has no .assets files to read.')
         return _unity(assets)
-    if any(folder.glob('*.pck')):
-        raise SourceError('This Godot game keeps its text inside its .pck file. Recover the project from your own copy '
-                          '(with GDRE Tools) and run this on that folder, or give the game\'s translation CSV. Encrypted '
-                          '.pck files need the game\'s own key, which this tool won\'t look for.')
+    pack = godotpck.find_pck(folder)
+    if pack:
+        return _godot_pck(pack)
     if (folder / 'Engine').is_dir() or any(folder.rglob('*.pak')):
-        raise SourceError('This game keeps its text inside .pak files. Extract its English Game.locres from your own copy '
-                          '(with UnrealPak or FModel), then run this on that file. Encrypted paks need the game\'s own key, '
-                          'which this tool won\'t look for.')
+        return _unreal_paks(folder)
     raise SourceError(f'Found no game text in {folder}. Give a .locres, Unity .assets, Ren\'Py .rpy/.rpa, CSV, .po, JSON or XUnity .txt file instead.')
 
 
@@ -511,6 +624,8 @@ def read_source(path: str | Path, *, locres_path: str | None = None, msg_path: s
         return _godot_csv(path) if first.startswith(('keys,', 'key,', 'id,')) and 'source' not in first else _csv(path)
     if suffix in ('.po', '.pot'):
         return _po(path)
+    if suffix == '.pck':
+        return _godot_pck(path)
     if suffix == '.rpy':
         return _renpy([(path.name, path.read_text(encoding='utf-8-sig', errors='replace'))])
     if suffix == '.rpa':

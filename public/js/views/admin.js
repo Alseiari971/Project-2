@@ -9,8 +9,8 @@ import { icon } from '../icons.js';
 import { t } from '../i18n.js';
 
 const desktop = window.gameshelfDesktop;
-const TABS = ['overview', 'users', 'packs', 'requests', 'installer', ...(desktop?.studio ? ['studio'] : [])];
-const TAB_LABELS = { overview: 'Overview', users: 'Users', packs: 'Arabic packs', requests: 'Requests', installer: 'Windows app', studio: 'Pack Studio' };
+const TABS = ['overview', 'approvals', 'requests', 'packs', 'users', 'installer', ...(desktop?.studio ? ['studio'] : [])];
+const TAB_LABELS = { overview: 'Overview', approvals: 'Pending approvals', users: 'Users', packs: 'Arabic packs', requests: 'Requests', installer: 'Windows app', studio: 'Pack Studio' };
 const ENGINE_LABELS = { auto: 'Detect it', unreal: 'Unreal Engine', unity: 'Unity', reengine: 'Capcom RE Engine', godot: 'Godot', renpy: "Ren'Py", overlay: 'Accessibility overlay' };
 
 const formatSize = (bytes) => (bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
@@ -83,7 +83,7 @@ export async function adminView(app, params) {
       <div id="admin-body" class="admin-body"></div>
     </div>`);
   const body = document.getElementById('admin-body');
-  await { overview, users, packs, requests, installer, studio }[tab](body);
+  await { overview, approvals, users, packs, requests, installer, studio }[tab](body, params);
 }
 
 // ---- Overview ------------------------------------------------------------------
@@ -223,14 +223,172 @@ async function packs(body) {
 async function requests(body) {
   const { requests: rows } = await api('/admin/requests');
   const STATUS = { ready: 'Arabic ready', partial: 'Partly translated', none: 'Not started' };
-  mount(body, rows.length
-    ? html`<div class="admin-table">${rows.map((r) => html`
-        <div class="admin-row">
-          <div><strong>${bdi(r.name || r.game)}</strong> <span class="muted small">${r.game}</span></div>
-          <span>${r.requests === 1 ? t('1 player asked') : t('{count} players asked', { count: r.requests })}</span>
-          <span class="muted small">${t(STATUS[r.status])}${r.total ? ` · ${r.translated}/${r.total}` : ''}</span>
+  mount(body, html`
+    ${rows.length
+      ? html`<div class="admin-table">${rows.map((r) => html`
+          <div class="admin-row">
+            <div><strong>${bdi(r.name || r.game)}</strong> <span class="muted small">${r.game}${r.reason ? html` · ${t(r.reason)}` : ''}</span></div>
+            <span>${r.requests === 1 ? t('1 player asked') : t('{count} players asked', { count: r.requests })}</span>
+            <span class="muted small">${r.pending ? t('Waiting for approval') : t(STATUS[r.status])}${r.total ? ` · ${r.translated}/${r.total}` : ''}</span>
+            <button class="btn btn-sm btn-quiet" type="button" data-font-list="${r.game}">${t('Font list…')}</button>
+          </div>`)}</div>`
+      : html`<p class="muted">${t('Nobody has asked for Arabic in a game yet.')}</p>`}
+    <section class="panel">
+      <h2>${t('RE Engine font list')}</h2>
+      <p class="muted small">${t('Players\' apps find the usual RE Engine fonts by themselves. For a game whose fonts they miss, upload its file list (the .list from REE.PAK.Tool, free on GitHub): you don\'t need the game.')}</p>
+      <form class="font-list-form" id="font-list-form">
+        <input class="input" name="game" placeholder="steam:1173690" dir="ltr" required pattern="(steam:[0-9]+|game:[a-z0-9-]+)">
+        <input type="file" name="list" accept=".list,.txt" required>
+        <button class="btn btn-light" type="submit">${icon('upload')} ${t('Upload')}</button>
+      </form>
+    </section>`);
+  const form = document.getElementById('font-list-form');
+  body.addEventListener('click', (e) => {
+    const button = e.target.closest('[data-font-list]');
+    if (!button) return;
+    form.game.value = button.dataset.fontList;
+    form.list.click();
+  });
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const file = form.list.files[0];
+    if (!file) return;
+    try {
+      const { fontTargets } = await upload(`/api/admin/games/${encodeURIComponent(form.game.value.trim())}/file-list`, file, { method: 'PUT', type: 'text/plain' });
+      toast(t('Saved {count} font names for {game}.', { count: fontTargets.length, game: form.game.value.trim() }));
+      form.reset();
+    } catch (err) {
+      toast(errorText(err), { error: true });
+    }
+  });
+}
+
+// ---- Pending approvals: Arabic made on players' PCs ------------------------------------
+
+async function approvals(body, params) {
+  const id = params.get('id');
+  if (id) return review(body, id);
+  const { submissions } = await api('/admin/submissions');
+  const STATUS = { pending: 'Waiting for approval', approved: 'Approved', rejected: 'Turned down' };
+  mount(body, submissions.length
+    ? html`<div class="admin-table">${submissions.map((s) => html`
+        <div class="admin-row ${s.status === 'pending' ? '' : 'is-off'}">
+          <div><strong>${bdi(s.name || s.game)}</strong>
+            <span class="muted small">${s.game} · ${t(ENGINE_LABELS[s.engine] || s.engine)} · ${t('{n} lines', { n: s.total })}${s.fontTargets.length ? ` · ${t('{n} fonts', { n: s.fontTargets.length })}` : ''}</span></div>
+          <span class="muted small">${s.submittedBy ? bdi(`@${s.submittedBy}`) : ''}</span>
+          <span class="role-tag ${s.status === 'pending' ? 'admin' : ''}">${t(STATUS[s.status])}</span>
+          <a class="btn btn-sm btn-quiet" href="#/admin?tab=approvals&id=${s.id}">${t(s.status === 'pending' ? 'Review' : 'Open')}</a>
         </div>`)}</div>`
-    : html`<p class="muted">${t('Nobody has asked for Arabic in a game yet.')}</p>`);
+    : html`<p class="muted">${t('Nothing is waiting. When a player makes Arabic for a game, it shows up here for you to check and approve.')}</p>`);
+}
+
+async function review(body, id) {
+  const ui = { offset: 0, query: '', missing: false, edits: new Map() };
+  const load = () => api(`/admin/submissions/${encodeURIComponent(id)}?offset=${ui.offset}&limit=100&q=${encodeURIComponent(ui.query)}${ui.missing ? '&missing=1' : ''}`);
+  let page = await load();
+  const s = page.submission;
+  const pending = s.status === 'pending';
+
+  const rows = (lines) => lines.map((l) => html`
+    <div class="review-row">
+      <div class="review-en" dir="ltr">${l.english}</div>
+      <textarea class="input review-ar" dir="rtl" lang="ar" data-hash="${l.hash}" rows="2" ${pending ? '' : 'readonly'} placeholder="${t('No Arabic yet')}">${ui.edits.get(l.hash) ?? l.arabic ?? ''}</textarea>
+    </div>`);
+
+  mount(body, html`
+    <p><a href="#/admin?tab=approvals">${t('← Pending approvals')}</a></p>
+    <section class="panel review-head">
+      <div>
+        <h2>${bdi(s.name || s.game)}</h2>
+        <p class="muted small">${s.game} · ${t(ENGINE_LABELS[s.engine] || s.engine)} · ${s.submittedBy ? t('from {user}', { user: `@${s.submittedBy}` }) : ''}</p>
+        <p>${t('{translated} of {total} lines have Arabic.', { translated: s.translated, total: s.total })}
+          ${s.fontTargets.length ? t('{n} game fonts get the Arabic font.', { n: s.fontTargets.length }) : ''}</p>
+      </div>
+      ${pending ? html`
+        <div class="review-actions">
+          ${desktop?.approveSubmission
+            ? html`<button class="btn btn-light" type="button" id="approve">${icon('shield')} ${t('Approve, Sign & Publish')}</button>`
+            : html`<p class="muted small">${t('Approving signs the Arabic with GameShelf\'s key, which stays on your PC: open this page in GameShelf for Windows.')}</p>`}
+          <button class="btn btn-quiet" type="button" id="reject">${t('Turn down')}</button>
+        </div>` : html`<span class="role-tag">${t(s.status === 'approved' ? 'Approved' : 'Turned down')}</span>`}
+    </section>
+    <form class="search-bar" id="review-search" role="search">
+      <label class="search-field">${icon('search')}<input type="search" name="q" placeholder="${t('Find a line (English or Arabic)')}" aria-label="${t('Find a line (English or Arabic)')}"></label>
+      <label class="check-row small"><input type="checkbox" name="missing"> ${t('Only lines without Arabic')}</label>
+    </form>
+    <div class="review-list" id="review-list"></div>
+    <div class="settings-actions">
+      <button class="btn btn-quiet" type="button" id="more" hidden>${t('Show more')}</button>
+      ${pending ? html`<button class="btn btn-light" type="button" id="save" disabled>${t('Save changes')}</button>` : ''}
+    </div>`);
+
+  const list = document.getElementById('review-list');
+  const more = document.getElementById('more');
+  const save = document.getElementById('save');
+  const show = (append) => {
+    const box = document.createElement('div');
+    mount(box, html`${rows(page.lines)}`);
+    if (!append) list.replaceChildren();
+    list.append(...box.children);
+    more.hidden = ui.offset + page.lines.length >= page.matching;
+  };
+  show(false);
+
+  list.addEventListener('input', (e) => {
+    const area = e.target.closest('[data-hash]');
+    if (!area) return;
+    ui.edits.set(area.dataset.hash, area.value);
+    if (save) save.disabled = false;
+  });
+  more.addEventListener('click', async () => {
+    ui.offset += 100;
+    page = await load();
+    show(true);
+  });
+  const search = document.getElementById('review-search');
+  search.addEventListener('submit', (e) => e.preventDefault());
+  search.addEventListener('input', async () => {
+    ui.query = search.q.value.trim();
+    ui.missing = search.missing.checked;
+    ui.offset = 0;
+    page = await load();
+    show(false);
+  });
+  save?.addEventListener('click', async () => {
+    save.disabled = true;
+    try {
+      const edits = [...ui.edits].map(([hash, arabic]) => ({ hash, arabic }));
+      const { saved } = await api(`/admin/submissions/${encodeURIComponent(id)}/lines`, { method: 'PATCH', body: { edits } });
+      ui.edits.clear();
+      toast(t('Saved {count} lines. Every player gets them.', { count: saved }));
+    } catch (err) {
+      toast(errorText(err), { error: true });
+      save.disabled = false;
+    }
+  });
+  document.getElementById('approve')?.addEventListener('click', async (e) => {
+    if (ui.edits.size) return toast(t('Save your changes first.'), { error: true });
+    const button = e.currentTarget;
+    button.disabled = true;
+    try {
+      const pack = await desktop.approveSubmission(id);
+      toast(t('Published {name} {version}: players get it the next time they turn Arabic on.', { name: pack.title || pack.id, version: pack.version }));
+      location.hash = '#/admin?tab=approvals';
+    } catch (err) {
+      toast(errorText(err), { error: true });
+      button.disabled = false;
+    }
+  });
+  document.getElementById('reject')?.addEventListener('click', async () => {
+    const note = prompt(t('Why? (the note stays in the Admin Panel)')) ?? null;
+    if (note === null) return;
+    try {
+      await api(`/admin/submissions/${encodeURIComponent(id)}/reject`, { method: 'POST', body: { note } });
+      location.hash = '#/admin?tab=approvals';
+    } catch (err) {
+      toast(errorText(err), { error: true });
+    }
+  });
 }
 
 // ---- Windows installer -------------------------------------------------------------

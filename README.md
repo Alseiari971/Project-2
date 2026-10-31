@@ -130,11 +130,20 @@ Many single-player games have no Arabic, and most game engines can't draw it: th
 
 **Getting Arabic without leaving the app.** Players need to be signed in. When a game has no pack on the PC yet, the app looks in GameShelf's **cloud catalog** of signed packs: if there's one for the game, the switch shows as available (Native patch or Accessibility overlay), and turning it on (or pressing Play with it on) downloads the pack ("Downloading Arabic pack… 45%"), checks it against the catalog's SHA-256 and GameShelf's signature, and puts it in. A newer version in the catalog comes down the next time Arabic is turned on or the game is started. When the catalog has no pack, the switch becomes one of these:
 
-- **Ready on GameShelf:** the server has the game's Arabic. Turning the switch on makes the Arabic patch on the player's PC, from their own copy of the game, with the server's Arabic, then turns it on. Nothing to download by hand, no command prompt.
-- **Request Arabic subtitles** (RE Engine and Ren'Py games): the same, but the server first translates the lines it doesn't have yet, once, for every player after. The button shows how far it is (reading the game's text, translating 1,900 of 4,406 lines, making the patch). The patch goes in when at least 90% of the lines have Arabic; if the server's daily limit stops it first, pressing the button again later carries on where it stopped.
-- **Request Arabic subtitles** (other games): counts the request on the server, so you can see which games players want most.
+- **Arabic subtitles** (an approved game): the game's Arabic was approved by an admin. Turning the switch on downloads the signed Arabic, checks GameShelf's signature, and builds the patch on the player's PC from their own copy of the game. Nothing is translated again.
+- **Request Arabic subtitles** (a game nobody has approved Arabic for yet): see below.
 
-Only Arabic text comes from the server, and only the game's line hashes and English lines go to it (to be translated); the game's own files never leave the PC. The app signs the packs it makes with a key made on that PC, which only that copy of the app trusts. It runs the same pack builder as below, with a Python that comes inside the installer (`scripts/bundle-arabic-builder.py` puts it, the builder and REMSG_Converter in `build-tools/arabic-builder/`; `npm run dist` runs it). From source on Windows, run that script once so `npm run app` can use it, or set `GAMESHELF_PYTHON` (and `GAMESHELF_MSG_TOOL` for RE Engine games); `GAMESHELF_ARABIC_SERVER` points the app at another server.
+**Crowd-sourced Arabic: request, approve, everyone plays.** Admins don't need to own the games players ask for:
+
+1. A player presses **Request Arabic subtitles**. GameShelf asks first: *"Allow GameShelf to scan this game's text files on your PC to generate the Arabic subtitles?"*, with **Approve & Generate**.
+2. With their OK, the app reads the game's English from their own copy (Ren'Py scripts; Godot `.pck` files and packs built into the `.exe`; Unity asset files, with UnityPy; unencrypted Unreal `.pak` files, with repak; RE Engine paks, with the usual font files found by name in the paks' file tables or from a file list an admin uploaded) and finds the font files the Arabic font goes in place of.
+3. GameShelf's server translates the lines it doesn't have yet with its own AI provider (the player needs no key), the patch is built and switched on, so they play in Arabic right away, and the English lines, the engine and the font names go to the server as a submission. The button shows the three steps: *Reading game text… → Translating to Arabic… → Building pack & submitting for review…*
+4. In **Admin Panel → Pending approvals**, an admin reads each English line beside its Arabic, fixes lines (kept for everyone as reviewed translations), and presses **Approve, Sign & Publish** in the desktop app: it signs the game's Arabic with `pack-signing.key` (the game isn't needed), and the server checks that signature against GameShelf's key before publishing it.
+5. Every player with the game then sees the Arabic switch ready; the player who asked gets the approved version the next time they play.
+
+What players get is the Arabic only (each line by a SHA-256 of its English), signed; each player's app builds the patch from their own copy of the game. The English is kept on the server for admins to review, and never sent to other players; the games' own files never leave anyone's PC. When a player's PC can't read a game (an engine GameShelf can't patch, encrypted files, a Unity or Unreal game without the tools for it), the app tells them and sends the request to the admins with the reason (Admin Panel → Requests), where admins can also upload an RE Engine game's file list.
+
+The app signs the packs it builds with a key made on that PC, which only that copy of the app trusts. It runs the same pack builder as below, with a Python that comes inside the installer (`scripts/bundle-arabic-builder.py` puts it, the builder, REMSG_Converter, repak, UnityPy, BepInEx and XUnity.AutoTranslator in `build-tools/arabic-builder/`; `npm run dist:win` runs it; the tools it can't fetch are left out, and their engines become request-only). From source on Windows, run that script once so `npm run app` can use it, or set `GAMESHELF_PYTHON` (and `GAMESHELF_MSG_TOOL`, `GAMESHELF_REPAK`, `GAMESHELF_UNITY_TOOLS`).
 
 The pieces, in `localization/` and `desktop/localization/`:
 
@@ -346,5 +355,12 @@ The website talks to the server only through this JSON API, so a phone app can r
 | POST | `/api/admin/packs` | A signed pack's .zip as the body; checked, then published |
 | PATCH / DELETE | `/api/admin/packs/:id/:version` | `{ published }`, or delete that version |
 | PUT | `/api/admin/installer` | The Windows installer (.exe) as the body |
+| POST | `/api/arabic/submissions` | A player's app: `{ game, name, engine, fontTargets, lines: [English] }` |
+| GET | `/api/admin/submissions`, `/api/admin/submissions/:id?q=&offset=&missing=1` | Waiting submissions, and one's lines with their Arabic |
+| PATCH | `/api/admin/submissions/:id/lines` | `{ edits: [{ hash, arabic }] }` |
+| GET / POST | `/api/admin/submissions/:id/set`, `/api/admin/submissions/:id/approve` | The exact Arabic set to sign; `{ set, signature }` publishes it |
+| POST | `/api/admin/submissions/:id/reject` | `{ note }` |
+| PUT | `/api/admin/games/:game/file-list` | An RE Engine game's file list (text): its font names are kept for the game |
+| GET | `/api/localization/sets/:id/download` | An approved Arabic set and its signature (signed-in users) |
 
 Logins use a cookie session. A native mobile app would most likely switch to token auth (an `Authorization` header), which is a small change in `src/auth.js`.
