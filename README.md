@@ -54,14 +54,19 @@ It installs Node.js 22 and [Caddy](https://caddyserver.com) (which gets the HTTP
 
 Keys go in `/etc/gameshelf.env` (readable only by root; see Settings below), then `systemctl restart gameshelf`. The log: `journalctl -u gameshelf -n 50`.
 
+**Admins and the Admin Panel.** Accounts are `user`s unless they're admins. Put your username in `ADMIN_USERS` (comma separated; `ARABIC_ADMINS` works too) and that account becomes an admin when the server starts or when it's registered. Admins get **Admin Panel** in the sidebar: the site at a glance, users (make admin, make user; there's always at least one admin), the cloud catalog of Arabic packs (drop a signed pack's .zip to publish it; unpublish or delete versions; download counts), what players ask for, and the Windows installer the website hands out. The server checks the role on every admin request.
+
+Uploaded packs go in `packs/` and the installer in `downloads/` beside the database (or `DATA_DIR`). The website's **Download GameShelf for Windows** button serves the uploaded installer, or redirects to `DOWNLOAD_URL` (a GitHub release, say) when there's none. Packs are only accepted when signed with GameShelf's pack key: its public half is `localizationPackKey` in `desktop/config.json` (or `PACK_PUBLIC_KEY`, the PEM or a file holding it).
+
 ## Windows app
 
-GameShelf also comes as a desktop app. It runs everything on your computer, so it works without hosting the website anywhere.
+GameShelf also comes as a desktop app for Windows. Players sign in with the same account as on the website (`server` in `desktop/config.json`), so their lists and profile are the same everywhere, and they never need keys of their own: the app shows its own copy of the pages and passes `/api` requests through to the server (see `desktop/cloud.js`). The sign-in is kept, so they stay signed in.
 
-- **Try it from the code:** `npm install`, then `npm run app`. It uses the same `.env` keys and database as `npm start`.
-- **Make the installer:** on a Windows PC, run `npm run dist`. You get `dist/GameShelf-Setup-0.1.0.exe`. Double-click it to install; it adds GameShelf to the Start menu and the desktop.
+- **Try it from the code:** `npm install`, then `npm run app`. `GAMESHELF_SERVER=http://127.0.0.1:3000` points it at a server you run yourself; `GAMESHELF_SERVER=local` runs the whole website inside the app instead, with its own accounts and the `.env` keys, as before.
+- **Make the installer:** on a Windows PC with Python 3, run `npm run dist:win`. It first runs `scripts/prepare-dist.js`: GameShelf's pack signing key pair in `../gameshelf-keys/` (made the first time; keep `pack-signing.key` private and backed up), its public half in `desktop/config.json` (commit that, and update the server, so both check packs with it), and Python with the Arabic pack builder for the installer. You get `dist/GameShelf-Setup.exe`, an installer that asks where to install, adds Start menu and desktop shortcuts, and has everything inside: the app, the pack builder with its Python and fonts, REMSG_Converter and the overlay's OCR helper. Upload it in the Admin Panel (Windows app) for the website's download button.
+- **Finding games:** the app looks for games installed through Steam (its folder from the registry, every library in `libraryfolders.vdf`, and `SteamLibrary` folders on every drive), the Epic Games Launcher (its manifests, with each game's program) and GOG (Galaxy's registry entries, and each game's `goggame-*.info` file), when it starts and when a player signs in or presses **Rescan PC games** in Library. Library starts with **On this PC**: those games, each with its Arabic at a glance (Arabic on, Arabic ready, Arabic on request). Players can have them put on My games, now and as they install more; Steam games they've played start as Played (playing in the last two weeks: Playing), the rest as Want to play.
 
-The installed app opens on a welcome page where you paste your IGDB keys (and optionally a Steam key). You can change them later with the settings button next to your avatar. The keys, your accounts and your lists are saved in `%APPDATA%\GameShelf` on that PC.
+Without a server (`GAMESHELF_SERVER=local`), the installed app opens on a welcome page where you paste your IGDB keys (and optionally a Steam key), and accounts and lists are saved in `%APPDATA%\GameShelf` on that PC.
 
 Good to know:
 
@@ -123,7 +128,7 @@ Many single-player games have no Arabic, and most game engines can't draw it: th
 - **Accessibility overlay:** GameShelf reads the game's English subtitles off the screen and shows the Arabic over them, without touching the game. This is what games with anti-cheat, signed files or their own engines get.
 - **Unavailable:** there's no Arabic pack for the game (hover for the reason).
 
-**Getting Arabic without leaving the app.** When a game has no pack on the PC yet, the app asks GameShelf's server (`arabicServer` in `desktop/config.json`) about it, and the switch becomes one of these:
+**Getting Arabic without leaving the app.** Players need to be signed in. When a game has no pack on the PC yet, the app looks in GameShelf's **cloud catalog** of signed packs: if there's one for the game, the switch shows as available (Native patch or Accessibility overlay), and turning it on (or pressing Play with it on) downloads the pack ("Downloading Arabic pack… 45%"), checks it against the catalog's SHA-256 and GameShelf's signature, and puts it in. A newer version in the catalog comes down the next time Arabic is turned on or the game is started. When the catalog has no pack, the switch becomes one of these:
 
 - **Ready on GameShelf:** the server has the game's Arabic. Turning the switch on makes the Arabic patch on the player's PC, from their own copy of the game, with the server's Arabic, then turns it on. Nothing to download by hand, no command prompt.
 - **Request Arabic subtitles** (RE Engine and Ren'Py games): the same, but the server first translates the lines it doesn't have yet, once, for every player after. The button shows how far it is (reading the game's text, translating 1,900 of 4,406 lines, making the patch). The patch goes in when at least 90% of the lines have Arabic; if the server's daily limit stops it first, pressing the button again later carries on where it stopped.
@@ -246,10 +251,16 @@ A GameShelf website can keep every Arabic line it has machine-translated, so eac
 - **Using it from the pack builder:** make an access token on the website (Edit profile, Access tokens), set it as `GAMESHELF_TOKEN`, and add `--shared https://your-gameshelf-site`. The builder takes what the memory has, has the server translate the rest, and checks every answer again. With `--no-translate` it only takes what's already there; with `--provider` too, lines the server couldn't do (say, over a limit) go to your own API key.
 - **The desktop app** uses the same memory without an account: each copy gets its own device token (`POST /api/arabic/devices`, a few per address a day) and the same daily limit as an account.
 - **Which games are ready:** pack builds with `--shared` tell the server how many lines the game has; a game is ready once the memory holds 95% of them. `POST /api/arabic/status` `{ games }` says so, with how many players asked; `POST /api/arabic/requests` `{ game, name }` counts a request; `POST /api/arabic/report` is the builders' line count.
-- **Admins** (`ARABIC_ADMINS`, usernames, comma separated): `GET /api/arabic/requests` lists the most asked-for games. An admin's build also saves the font names an RE Engine game's patch replaces (from `--pak-list`), so players' apps can build it with no file list: build each RE Engine game once yourself with `--shared` and `--pak-list`.
+- **Admins** (see Admin Panel above): `GET /api/admin/requests` lists the most asked-for games. An admin's build also saves the font names an RE Engine game's patch replaces (from `--pak-list`), so players' apps can build it with no file list: build each RE Engine game once yourself with `--shared` and `--pak-list`.
 - **API:** `POST /api/translations/lookup` `{ game, hashes }` and `POST /api/translations/translate` `{ game, lines: [{ hash, english }], context }`, for signed-in users (session or `Authorization: Bearer gst_...`) and desktop apps (`Bearer gsd_...`); tokens at `GET/POST/DELETE /api/me/tokens`.
 
 Translations of a game's script are derived from it, so sharing them is best kept to games whose publishers allow fan translations.
+
+### Pack Studio (Admin Panel, desktop app)
+
+Admins build packs without a command prompt: pick the game's folder (or a file with its text), the engine (or let it detect it), how to translate (GameShelf's shared memory, your own OpenAI or Gemini key, or only your checked translations.csv), and GameShelf's `pack-signing.key`. The Studio runs the same pack builder as `scripts/build-arabic-pack.py`, shows its output as it goes, and signs the pack. Then **Publish to Cloud Catalog** sends it to the server, and every player gets it the next time they turn Arabic on; **Add to this PC** tries it locally first, and **Open translations.csv** is for checking lines and building again with them. API keys are saved encrypted by Windows (or kept until the app closes when it can't). The Studio warns when the chosen key isn't the one players' apps check with.
+
+Packs hold game files where the engine needs them (an RE Engine patch carries the game's message files with the Arabic added, for example), so publishing them shares that game data; the in-app build ("Request Arabic subtitles") makes those patches on each player's PC instead, from their own copy.
 
 ## Project layout
 
@@ -325,5 +336,15 @@ The website talks to the server only through this JSON API, so a phone app can r
 | GET | `/api/users/:username` | A profile: game list, showcases, level, badges, comments |
 | POST | `/api/users/:username/comments` | `{ body }` leaves a comment on a profile |
 | DELETE | `/api/comments/:id` | Deletes a comment (its author or the profile owner) |
+| POST | `/api/games/match` | `{ games: [{ steamAppId, name }] }` the GameShelf page of each game on a PC (or null) |
+| POST | `/api/me/library/installed` | `{ games: [{ steamAppId, name, status }] }` adds the ones not on your list |
+| GET | `/api/localization/packs` | The cloud catalog of Arabic packs: `id, version, engine, mode, steamAppId, gameSlug, sha256, size, downloadUrl` |
+| GET | `/api/localization/packs/:id/download` | The pack's .zip (signed-in users) |
+| GET | `/api/download/info` | Whether the Windows installer is available, and its size |
+| GET | `/api/admin/stats`, `/api/admin/users?q=`, `/api/admin/packs`, `/api/admin/requests` | Admin Panel (admins only) |
+| PATCH | `/api/admin/users/:username` | `{ role: 'user' \| 'admin' }` |
+| POST | `/api/admin/packs` | A signed pack's .zip as the body; checked, then published |
+| PATCH / DELETE | `/api/admin/packs/:id/:version` | `{ published }`, or delete that version |
+| PUT | `/api/admin/installer` | The Windows installer (.exe) as the body |
 
 Logins use a cookie session. A native mobile app would most likely switch to token auth (an `Authorization` header), which is a small change in `src/auth.js`.

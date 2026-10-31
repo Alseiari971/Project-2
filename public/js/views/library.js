@@ -1,5 +1,8 @@
-// "My games": the logged-in user's list, with filters, sorting and grid or list views.
-import { html, mount, state, refreshLibrary, STATUS_LABELS, parseDbTime } from '../lib.js';
+// "My games": the logged-in user's list, with filters, sorting and grid or list
+// views. In the desktop app it starts with the games on this PC (found in Steam,
+// Epic and GOG), each with how it stands for Arabic subtitles.
+import { html, mount, state, refreshLibrary, STATUS_LABELS, parseDbTime, onLeave, toast } from '../lib.js';
+import { desktop, installedTile, wireLaunchButtons, wireArabicBadges, syncPcGames } from '../desktop.js';
 import { libraryTile, gameListRow, emptyState, pillGroup, viewToggle, savedView, saveView, stars, formatHours, statusBadge } from '../components.js';
 import { icon } from '../icons.js';
 import { t } from '../i18n.js';
@@ -17,6 +20,7 @@ export async function libraryView(app, params) {
     return;
   }
   await refreshLibrary();
+  const pc = desktop ? { games: await desktop.installedGames().catch(() => []), sync: await desktop.librarySyncSettings().catch(() => ({ auto: null })) } : null;
   // A link can open the list on one status, e.g. #/library?status=want.
   const linked = params?.get('status');
   const ui = { status: STATUS_LABELS[linked] ? linked : 'all', sort: 'recent', query: '', view: savedView() };
@@ -57,6 +61,43 @@ export async function libraryView(app, params) {
     ...Object.entries(STATUS_LABELS).map(([key, label]) => ({ key, label, count: counts[key] })),
   ];
 
+  // Games on this PC that GameShelf knows and that aren't on My games yet.
+  const notListed = () => pc.games.filter((g) => g.game.id && !state.library.some((e) => e.gameId === g.game.id));
+
+  function pcShelf() {
+    if (!pc) return '';
+    const missing = notListed().length;
+    const prompt = pc.sync.auto === null && missing
+      ? html`<div class="pc-prompt" role="region" aria-label="${t('My games')}">
+          <p>${t('Put the games on this PC on My games too? ({count}) Steam games you\'ve played start as Played; the rest as Want to play. You can change any of them later.', { count: missing })}</p>
+          <div class="pc-prompt-actions">
+            <button class="pill-btn pill-light" type="button" data-sync="yes">${t('Add them, and new games too')}</button>
+            <button class="pill-btn" type="button" data-sync="no">${t('Not now')}</button>
+          </div>
+        </div>`
+      : '';
+    return html`
+      <section class="lib-section pc-shelf">
+        <div class="pc-head">
+          <h2>${t('On this PC')} <span>${pc.games.length}</span></h2>
+          <div class="pc-actions">
+            ${pc.sync.auto === false && missing ? html`<button class="pill-btn" type="button" data-sync="once">${icon('plus')}<span>${t('Add to My games')}</span></button>` : ''}
+            <button class="pill-btn" type="button" id="rescan">${icon('refresh')}<span>${t('Rescan PC games')}</span></button>
+          </div>
+        </div>
+        ${prompt}
+        ${pc.games.length
+          ? html`<div class="card-grid">${pc.games.map((g) => installedTile(g, { badge: true }))}</div>`
+          : html`<p class="muted">${t('No games from Steam, Epic Games or GOG found on this PC. Installed one just now? Press Rescan PC games.')}</p>`}
+      </section>`;
+  }
+
+  function wirePc() {
+    if (!pc) return;
+    wireLaunchButtons(app.querySelector('.pc-shelf'));
+    onLeave(wireArabicBadges(app.querySelector('.pc-shelf')));
+  }
+
   function render() {
     mount(app, html`
       <div class="page library">
@@ -64,6 +105,7 @@ export async function libraryView(app, params) {
           <h1>${t('My games')}</h1>
           ${viewToggle(ui.view)}
         </div>
+        ${pcShelf()}
         <form class="search-bar" id="lib-search" role="search">
           <label class="search-field">${icon('search')}<input type="search" name="q" value="${ui.query}" placeholder="${t('Search your games')}" aria-label="${t('Search your games')}" autocomplete="off"></label>
           <button class="pill-btn" type="submit">${t('Go')}</button>
@@ -77,8 +119,44 @@ export async function libraryView(app, params) {
     `);
   }
   render();
+  wirePc();
 
   const update = () => mount(document.getElementById('lib-results'), results());
+  // Only the shelf and the list change; the filters stay as they are.
+  const redraw = () => {
+    const box = document.createElement('div');
+    mount(box, pcShelf());
+    app.querySelector('.pc-shelf').replaceWith(box.firstElementChild);
+    wirePc();
+    update();
+  };
+  app.querySelector('.library').addEventListener('click', async (e) => {
+    const rescan = e.target.closest('#rescan');
+    const sync = e.target.closest('[data-sync]');
+    if (!rescan && !sync) return;
+    const button = rescan || sync;
+    if (button.disabled) return;
+    button.disabled = true;
+    try {
+      let listChanged = false;
+      if (rescan) {
+        pc.games = await desktop.rescanGames();
+        if (pc.sync.auto) listChanged = (await syncPcGames({ quiet: true })) > 0;
+        toast(t('Found {count} games on this PC', { count: pc.games.length }));
+      } else if (sync.dataset.sync === 'no') {
+        pc.sync = await desktop.setLibrarySync(false);
+      } else {
+        if (sync.dataset.sync === 'yes') pc.sync = await desktop.setLibrarySync(true);
+        listChanged = (await syncPcGames()) > 0;
+      }
+      // New games on the list change its counts too: draw the whole page again.
+      if (listChanged) await libraryView(app, params);
+      else redraw();
+    } catch (err) {
+      toast(t(err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')), { error: true });
+      button.disabled = false;
+    }
+  });
   app.querySelector('.library').addEventListener('click', (e) => {
     const option = e.target.closest('[data-group] [data-value]');
     if (option) {

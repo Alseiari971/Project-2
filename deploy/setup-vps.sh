@@ -82,8 +82,11 @@ OPENAI_API_KEY=
 # Spending limits: new lines per user per day, characters per month in all.
 TRANSLATE_DAILY_LINES=2000
 TRANSLATE_MONTHLY_CHARS=3000000
-# Your username on the site: can see the most asked-for games, and your pack builds teach it RE Engine games' font names.
-ARABIC_ADMINS=
+# Your username on the site (comma separated for more): admins get the Admin Panel, publish Arabic
+# packs, and their pack builds teach the server RE Engine games' font names.
+ADMIN_USERS=
+# Where the website's Windows download button goes when no installer was uploaded in the Admin Panel.
+DOWNLOAD_URL=
 EOF
 fi
 chown root:root "$ENV_FILE"

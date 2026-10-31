@@ -35,6 +35,8 @@ const ADDED_COLUMNS = {
     background: "TEXT NOT NULL DEFAULT 'midnight'",
     accent: "TEXT NOT NULL DEFAULT '#3b82f6'",
     showcases: "TEXT NOT NULL DEFAULT '[]'",
+    // 'user' or 'admin' (see ADMIN_USERS in src/roles.js).
+    role: "TEXT NOT NULL DEFAULT 'user'",
   },
   library: {
     game_backdrop: 'TEXT',
@@ -121,26 +123,6 @@ function openDatabase(file = process.env.DB_FILE || path.join(__dirname, '..', '
       PRIMARY KEY (user_id, day)
     );
 
-    -- Copies of the desktop app that ask for Arabic subtitles, so players need no
-    -- account. Only hashes of the token and of the address it came from are kept.
-    CREATE TABLE IF NOT EXISTS devices (
-      id           INTEGER PRIMARY KEY AUTOINCREMENT,
-      token_hash   TEXT NOT NULL UNIQUE,
-      ip_hash      TEXT NOT NULL,
-      created_at   TEXT NOT NULL DEFAULT (datetime('now')),
-      last_used_at TEXT
-    );
-    CREATE INDEX IF NOT EXISTS devices_ip ON devices(ip_hash, created_at);
-
-    -- The same limits as translation_usage, for devices.
-    CREATE TABLE IF NOT EXISTS device_usage (
-      device_id INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
-      day       TEXT NOT NULL,
-      lines     INTEGER NOT NULL DEFAULT 0,
-      chars     INTEGER NOT NULL DEFAULT 0,
-      PRIMARY KEY (device_id, day)
-    );
-
     -- How many lines each game has (as its last pack build counted them), and
     -- the font files its Arabic patch replaces. See src/arabic-games.js.
     CREATE TABLE IF NOT EXISTS arabic_games (
@@ -152,7 +134,7 @@ function openDatabase(file = process.env.DB_FILE || path.join(__dirname, '..', '
       updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
-    -- Players asking for Arabic in a game: one row per game and asker ("user:1", "device:7").
+    -- Players asking for Arabic in a game: one row per game and asker ("user:1").
     CREATE TABLE IF NOT EXISTS arabic_requests (
       game       TEXT NOT NULL,
       asker      TEXT NOT NULL,
@@ -160,6 +142,32 @@ function openDatabase(file = process.env.DB_FILE || path.join(__dirname, '..', '
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       PRIMARY KEY (game, asker)
     );
+
+    -- Signed Arabic packs in the cloud catalog (see src/pack-registry.js): one row
+    -- per pack version; the newest published version of each pack is the one served.
+    CREATE TABLE IF NOT EXISTS localization_packs (
+      id           TEXT NOT NULL,
+      version      TEXT NOT NULL,
+      engine       TEXT NOT NULL,
+      mode         TEXT NOT NULL CHECK (mode IN ('native', 'overlay')),
+      title        TEXT NOT NULL DEFAULT '',
+      steam_app_id INTEGER,
+      game_id      TEXT,
+      sha256       TEXT NOT NULL,
+      size         INTEGER NOT NULL,
+      file         TEXT NOT NULL,
+      published    INTEGER NOT NULL DEFAULT 1,
+      uploaded_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (id, version)
+    );
+    CREATE TABLE IF NOT EXISTS pack_downloads (
+      pack_id    TEXT NOT NULL,
+      version    TEXT NOT NULL,
+      user_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS pack_downloads_pack ON pack_downloads(pack_id, version);
 
     -- Personal access tokens, for tools such as the pack builder. Only a hash is kept.
     CREATE TABLE IF NOT EXISTS api_tokens (

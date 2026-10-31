@@ -5,7 +5,8 @@ Lines are asked for by a SHA-256 of their English, per game. What the memory
 doesn't have yet, the server translates once, with its own API key and within
 its limits, and keeps for everyone after. The access token (from Edit profile,
 Access tokens, on the website) is read from GAMESHELF_TOKEN and only ever sent
-in a request header.
+in a request header. The desktop app, which runs this builder for a signed-in
+player, passes their sign-in in GAMESHELF_SESSION instead.
 """
 
 from __future__ import annotations
@@ -31,15 +32,28 @@ def game_key(steam_app_id=None, game_id=None) -> str:
     return f'steam:{steam_app_id}' if steam_app_id else f'game:{game_id}'
 
 
+SESSION_COOKIE = 'gs_session'
+
+
+def credentials(environ) -> dict:
+    """The header that signs requests in: an access token, or the desktop app's sign-in. Empty when neither is set."""
+    if environ.get('GAMESHELF_TOKEN'):
+        return {'Authorization': f'Bearer {environ["GAMESHELF_TOKEN"]}'}
+    if environ.get('GAMESHELF_SESSION'):
+        return {'Cookie': f'{SESSION_COOKIE}={environ["GAMESHELF_SESSION"]}'}
+    return {}
+
+
 class SharedMemory:
-    def __init__(self, url: str, token: str, timeout: float = 600):
+    def __init__(self, url: str, auth: dict | str, timeout: float = 600):
         self.base = url.rstrip('/')
-        self.token = token
+        # An access token, or the headers from credentials().
+        self.auth = {'Authorization': f'Bearer {auth}'} if isinstance(auth, str) else dict(auth)
         self.timeout = timeout
 
     def _post(self, path: str, body: dict) -> dict:
         request = urllib.request.Request(f'{self.base}/api{path}', data=json.dumps(body, ensure_ascii=False).encode('utf-8'), method='POST',
-                                         headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {self.token}'})
+                                         headers={'Content-Type': 'application/json', **self.auth})
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 return json.loads(response.read().decode('utf-8'))
@@ -49,7 +63,7 @@ class SharedMemory:
             except (ValueError, AttributeError):
                 message = None
             if err.code == 401:
-                message = 'the server didn\'t accept the access token in GAMESHELF_TOKEN'
+                message = 'the server didn\'t accept the access token in GAMESHELF_TOKEN (or the sign-in)'
             raise SharedError(f'{self.base} answered {err.code}: {message or "no details"}') from None
         except (urllib.error.URLError, TimeoutError, ConnectionError) as err:
             raise SharedError(f'Couldn\'t reach {self.base}: {err}') from None

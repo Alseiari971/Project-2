@@ -9,7 +9,7 @@
 // - The font files a game's Arabic patch replaces (RE Engine games keep theirs
 //   as .oft files the patch puts the Arabic font in place of) are kept per game,
 //   so the desktop app can build the patch without a list of the game's files.
-//   Only admins (ARABIC_ADMINS, usernames, comma separated) can set them.
+//   Only admins (users.role, see src/roles.js) can set them.
 const { GAME_RE } = require('./translation-memory');
 
 const READY = 0.95;
@@ -17,8 +17,7 @@ const MAX_FONT_TARGETS = 300;
 // name.oft.1, and the copies games keep beside it (name.oft.1.stm, name.oft.1.x64).
 const FONT_TARGET_RE = /^natives\/[\w\-./]{1,200}\.oft(?:\.\d{1,3})?(?:\.(?:stm|x64))?$/i;
 
-function createArabicGames({ db, translations, env = process.env }) {
-  const admins = new Set(String(env.ARABIC_ADMINS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean));
+function createArabicGames({ db, translations }) {
   const getGame = db.prepare('SELECT * FROM arabic_games WHERE game = ?');
   const countRequests = db.prepare('SELECT COUNT(*) AS n FROM arabic_requests WHERE game = ?');
   const askedBy = db.prepare('SELECT 1 FROM arabic_requests WHERE game = ? AND asker = ?');
@@ -32,7 +31,7 @@ function createArabicGames({ db, translations, env = process.env }) {
     if (!GAME_RE.test(String(game))) throw new TypeError('The game should be "steam:<app id>" or "game:<GameShelf id>".');
   }
 
-  const isAdmin = (user) => Boolean(user && admins.has(String(user.username).toLowerCase()));
+  const isAdmin = (user) => user?.role === 'admin';
 
   /** { status: 'ready' | 'partial' | 'none', total, translated, requests, asked, fontTargets } for one game. */
   function status(game, asker) {

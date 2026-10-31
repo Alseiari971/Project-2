@@ -11,6 +11,16 @@ contextBridge.exposeInMainWorld('gameshelfDesktop', {
   saveSettings: (values) => ipcRenderer.invoke('settings:save', values),
   openDataFolder: () => ipcRenderer.invoke('data-folder:open'),
   installedGames: () => ipcRenderer.invoke('installed:list'),
+  rescanGames: () => ipcRenderer.invoke('installed:rescan'),
+  arabicBadges: () => ipcRenderer.invoke('installed:arabic'),
+  onArabicBadge: (fn) => {
+    const listener = (_event, update) => fn(update);
+    ipcRenderer.on('installed:arabic', listener);
+    return () => ipcRenderer.removeListener('installed:arabic', listener);
+  },
+  librarySyncSettings: () => ipcRenderer.invoke('library:sync-settings'),
+  setLibrarySync: (auto) => ipcRenderer.invoke('library:set-sync', auto),
+  syncLibrary: () => ipcRenderer.invoke('library:sync'),
   findInstalled: (game) => ipcRenderer.invoke('installed:find', game),
   launch: (key) => ipcRenderer.invoke('installed:launch', key),
   stop: (key) => ipcRenderer.invoke('installed:stop', key),
@@ -39,6 +49,27 @@ contextBridge.exposeInMainWorld('gameshelfDesktop', {
     return () => ipcRenderer.removeListener('arabic:progress', listener);
   },
   arabicPacks: () => ipcRenderer.invoke('arabic:packs'),
+  studio: {
+    settings: () => ipcRenderer.invoke('studio:settings'),
+    saveSettings: (input) => ipcRenderer.invoke('studio:save-settings', input),
+    pick: (kind) => ipcRenderer.invoke('studio:pick', kind),
+    makeKeys: (folder) => ipcRenderer.invoke('studio:make-keys', folder),
+    build: (options) => ipcRenderer.invoke('studio:build', options),
+    cancel: () => ipcRenderer.invoke('studio:cancel'),
+    publish: (packDir) => ipcRenderer.invoke('studio:publish', packDir),
+    addLocal: (packDir) => ipcRenderer.invoke('studio:add-local', packDir),
+    open: (target) => ipcRenderer.invoke('studio:open', target),
+    onLog: (fn) => {
+      const listener = (_event, entry) => fn(entry);
+      ipcRenderer.on('studio:log', listener);
+      return () => ipcRenderer.removeListener('studio:log', listener);
+    },
+    onProgress: (fn) => {
+      const listener = (_event, progress) => fn(progress);
+      ipcRenderer.on('studio:progress', listener);
+      return () => ipcRenderer.removeListener('studio:progress', listener);
+    },
+  },
   addArabicPack: () => ipcRenderer.invoke('arabic:add-pack'),
   removeArabicPack: (id) => ipcRenderer.invoke('arabic:remove-pack', id),
   arabicOverlayStyle: () => ipcRenderer.invoke('arabic:overlay-style'),

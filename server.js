@@ -1,3 +1,4 @@
+const fs = require('node:fs');
 const path = require('node:path');
 
 // Read settings such as IGDB_CLIENT_ID from a .env file when there is one.
@@ -15,6 +16,23 @@ const { createSteamService } = require('./src/steam');
 const { createSteamStore } = require('./src/steam-store');
 const { createTranslationMemory } = require('./src/translation-memory');
 const { createArabicGames } = require('./src/arabic-games');
+const { createPackRegistry } = require('./src/pack-registry');
+
+// Where uploaded Arabic packs and the Windows installer are kept: beside the database.
+const defaultDataDir = () => process.env.DATA_DIR || path.dirname(path.resolve(process.env.DB_FILE || path.join(__dirname, 'data', 'gameshelf.db')));
+
+// Every response: no sniffing, no outside scripts or styles, no framing.
+function securityHeaders(_req, res, next) {
+  res.set({
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
+    'Content-Security-Policy':
+      "default-src 'self'; img-src 'self' https: data:; style-src 'self'; script-src 'self'; frame-ancestors 'none'; " +
+      // Trailers play in YouTube's privacy-friendly player; Steam's short clips stream from its servers.
+      "frame-src https://www.youtube-nocookie.com; media-src https://*.steamstatic.com",
+  });
+  next();
+}
 
 function createApp({
   db = openDatabase(),
@@ -24,27 +42,28 @@ function createApp({
   steamStore = createSteamStore(),
   translations = createTranslationMemory({ db }),
   arabicGames = createArabicGames({ db, translations }),
+  dataDir = defaultDataDir(),
+  packs = createPackRegistry({ db, dir: path.join(dataDir, 'packs') }),
 } = {}) {
+  const downloadsDir = path.join(dataDir, 'downloads');
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', 'loopback');
 
-  app.use((_req, res, next) => {
-    res.set({
-      'X-Content-Type-Options': 'nosniff',
-      'Referrer-Policy': 'strict-origin-when-cross-origin',
-      'Content-Security-Policy':
-        "default-src 'self'; img-src 'self' https: data:; style-src 'self'; script-src 'self'; frame-ancestors 'none'; " +
-        // Trailers play in YouTube's privacy-friendly player; Steam's short clips stream from its servers.
-        "frame-src https://www.youtube-nocookie.com; media-src https://*.steamstatic.com",
-    });
-    next();
-  });
+  app.use(securityHeaders);
 
   // Large enough for a resized avatar image.
   app.use(express.json({ limit: '500kb' }));
   app.use(loadUser(db));
-  app.use('/api', createApi({ db, games, prices, steam, steamStore, translations, arabicGames }));
+  app.use('/api', createApi({ db, games, prices, steam, steamStore, translations, arabicGames, packs, downloadsDir }));
+  // The website's "Download GameShelf for Windows" button: the installer an admin
+  // uploaded in the Admin Panel, or else DOWNLOAD_URL (a GitHub release, say).
+  app.get('/download/windows', (_req, res) => {
+    const file = path.join(downloadsDir, 'GameShelf-Setup.exe');
+    if (fs.existsSync(file)) return res.download(file, 'GameShelf-Setup.exe');
+    if (process.env.DOWNLOAD_URL) return res.redirect(302, process.env.DOWNLOAD_URL);
+    res.status(404).type('text').send('The Windows app isn\'t available to download yet.');
+  });
   app.use(express.static(path.join(__dirname, 'public')));
 
   app.use((err, _req, res, _next) => {
@@ -79,4 +98,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { createApp };
+module.exports = { createApp, securityHeaders };

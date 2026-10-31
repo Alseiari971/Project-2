@@ -1,6 +1,8 @@
 // JSON API. The website uses it today, and a future mobile app can use the
 // exact same endpoints.
 const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
 const express = require('express');
 const {
   hashPassword,
@@ -8,11 +10,12 @@ const {
   createSession,
   destroySession,
   requireUser,
-  requireAsker,
+  requireAdmin,
   rateLimit,
   createApiToken,
-  createDevice,
 } = require('./auth');
+const { ROLES, adminNames, bootstrapAdmins } = require('./roles');
+const { readBody, RegistryError, MAX_PACK_BYTES } = require('./pack-registry');
 const { TranslationLimit, GAME_RE: GAME_KEY_RE } = require('./translation-memory');
 const { GENRES, findGenre } = require('./games/genres');
 const profile = require('./profile');
@@ -30,6 +33,7 @@ const SORTS = ['popular', 'new', 'top'];
 const DEFAULT_ACCENT = '#e7ff0c';
 // Big Steam libraries are capped to the most-played games to keep matching quick.
 const STEAM_IMPORT_MAX = 300;
+const MAX_INSTALLER_BYTES = 1024 * 1024 * 1024;
 const PREVIEW_TTL_MS = 30 * 60 * 1000;
 
 // Guess a list status from Steam playtime (minutes).
@@ -51,6 +55,9 @@ const publicUser = (u) => ({
   background: u.background,
   joinedAt: u.created_at,
 });
+
+// The logged-in user about themselves: their public profile and their role.
+const selfUser = (u) => ({ ...publicUser(u), role: ROLES.includes(u.role) ? u.role : 'user' });
 
 const libraryEntry = (row) => ({
   gameId: row.game_id,
@@ -81,7 +88,8 @@ function pitchFrom(text) {
   return pitch.trim();
 }
 
-function createApi({ db, games, prices, steam, steamStore, translations, arabicGames }) {
+function createApi({ db, games, prices, steam, steamStore, translations, arabicGames, packs, downloadsDir }) {
+  bootstrapAdmins(db);
   const api = express.Router();
   const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30 });
   const commentLimiter = rateLimit({ windowMs: 60 * 1000, max: 10 });
@@ -376,8 +384,9 @@ function createApi({ db, games, prices, steam, steamStore, translations, arabicG
       return res.status(409).json({ error: 'That username is taken.' });
     }
     const { lastInsertRowid } = q.insertUser.run(username, username, hashPassword(password), DEFAULT_ACCENT);
+    if (adminNames().includes(username.toLowerCase())) db.prepare("UPDATE users SET role = 'admin' WHERE id = ?").run(lastInsertRowid);
     createSession(db, res, lastInsertRowid);
-    res.status(201).json({ user: publicUser(q.userByName.get(username)) });
+    res.status(201).json({ user: selfUser(q.userByName.get(username)) });
   });
 
   api.post('/auth/login', authLimiter, (req, res) => {
@@ -388,7 +397,7 @@ function createApi({ db, games, prices, steam, steamStore, translations, arabicG
       return res.status(401).json({ error: 'Wrong username or password.' });
     }
     createSession(db, res, user.id);
-    res.json({ user: publicUser(user) });
+    res.json({ user: selfUser(user) });
   });
 
   api.post('/auth/logout', (req, res) => {
@@ -401,7 +410,7 @@ function createApi({ db, games, prices, steam, steamStore, translations, arabicG
     if (!req.user) return res.json({ user: null });
     const user = q.userById.get(req.user.id);
     res.json({
-      user: publicUser(user),
+      user: selfUser(user),
       showcases: JSON.parse(user.showcases),
       options: {
         backgrounds: profile.BACKGROUNDS,
@@ -673,7 +682,7 @@ function createApi({ db, games, prices, steam, steamStore, translations, arabicG
 
   const translateLimiter = rateLimit({ windowMs: 60 * 1000, max: 60 });
 
-  api.post('/translations/lookup', requireAsker, translateLimiter, (req, res) => {
+  api.post('/translations/lookup', requireUser, translateLimiter, (req, res) => {
     const { game, hashes } = req.body || {};
     if (!translations) return res.status(503).json({ error: 'Shared translation isn\'t set up on this server.' });
     if (!Array.isArray(hashes) || hashes.length > 5000) return res.status(400).json({ error: 'Send up to 5000 line hashes at a time.' });
@@ -684,13 +693,13 @@ function createApi({ db, games, prices, steam, steamStore, translations, arabicG
     }
   });
 
-  api.post('/translations/translate', requireAsker, translateLimiter, asyncRoute(async (req, res) => {
+  api.post('/translations/translate', requireUser, translateLimiter, asyncRoute(async (req, res) => {
     const { game, lines, context } = req.body || {};
     if (!translations) return res.status(503).json({ error: 'Shared translation isn\'t set up on this server.' });
     if (!Array.isArray(lines) || !lines.length || lines.length > 200) return res.status(400).json({ error: 'Send 1 to 200 lines at a time.' });
     try {
       const wanted = lines.map((l) => ({ hash: String(l?.hash || ''), english: l?.english }));
-      res.json(await translations.translate(req.asker, String(game), wanted, { context: String(context || '') }));
+      res.json(await translations.translate(req.user, String(game), wanted, { context: String(context || '') }));
     } catch (err) {
       if (err instanceof TranslationLimit) return res.status(503).json({ error: err.message });
       if (err instanceof TypeError) return res.status(400).json({ error: err.message });
@@ -701,14 +710,7 @@ function createApi({ db, games, prices, steam, steamStore, translations, arabicG
 
   // ---- Arabic subtitles in the desktop app (see src/arabic-games.js) ---------
 
-  // Each copy of the desktop app gets its own token the first time it asks, so players need no account.
-  const deviceLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 10 });
-  api.post('/arabic/devices', deviceLimiter, (req, res) => {
-    const token = createDevice(db, req.ip);
-    if (!token) return res.status(429).json({ error: 'Too many new copies of GameShelf from this address today. Please try again tomorrow.' });
-    res.status(201).json({ token });
-  });
-
+  const askerOf = (req) => ({ key: `user:${req.user.id}` });
   const arabicRoute = (fn) => (req, res) => {
     if (!arabicGames) return res.status(503).json({ error: 'Arabic subtitles aren\'t set up on this server.' });
     try {
@@ -720,17 +722,198 @@ function createApi({ db, games, prices, steam, steamStore, translations, arabicG
   };
 
   // Where Arabic stands for some games: { games: { "steam:1173690": { status, total, translated, requests, asked, fontTargets } } }.
-  api.post('/arabic/status', requireAsker, translateLimiter, arabicRoute(({ games: keys }, req) => {
+  api.post('/arabic/status', requireUser, translateLimiter, arabicRoute(({ games: keys }, req) => {
     if (!Array.isArray(keys) || keys.length > 500) throw new TypeError('Send up to 500 games at a time.');
-    return { games: Object.fromEntries(keys.map(String).filter((k) => GAME_KEY_RE.test(k)).map((k) => [k, arabicGames.status(k, req.asker)])) };
+    return { games: Object.fromEntries(keys.map(String).filter((k) => GAME_KEY_RE.test(k)).map((k) => [k, arabicGames.status(k, askerOf(req))])) };
   }));
-  api.post('/arabic/requests', requireAsker, translateLimiter, arabicRoute(({ game, name }, req) => arabicGames.request(req.asker, String(game), name)));
-  api.post('/arabic/report', requireAsker, translateLimiter, arabicRoute((body, req) => arabicGames.report(req.asker, { ...body, game: String(body.game) }, req.user)));
-  // The most asked-for games, for the server's admins (ARABIC_ADMINS).
-  api.get('/arabic/requests', requireUser, (req, res) => {
-    if (!arabicGames?.isAdmin(req.user)) return res.status(403).json({ error: 'Only admins can see this.' });
-    res.json({ requests: arabicGames.requests() });
+  api.post('/arabic/requests', requireUser, translateLimiter, arabicRoute(({ game, name }, req) => arabicGames.request(askerOf(req), String(game), name)));
+  api.post('/arabic/report', requireUser, translateLimiter, arabicRoute((body, req) => arabicGames.report(askerOf(req), { ...body, game: String(body.game) }, req.user)));
+
+  // ---- The cloud catalog of Arabic packs (see src/pack-registry.js) ---------
+
+  // Every published pack, newest version of each. Public: it's what the app checks against.
+  api.get('/localization/packs', (_req, res) => {
+    res.json({ packs: packs ? packs.list() : [] });
   });
+  // The pack itself, for signed-in players only.
+  api.get('/localization/packs/:id/download', requireUser, (req, res) => {
+    const found = packs?.download(req.params.id, req.user.id);
+    if (!found) return res.status(404).json({ error: 'That Arabic pack isn\'t in the catalog.' });
+    res.set({ 'Content-Type': 'application/zip', 'X-Pack-Version': found.entry.version, 'X-Pack-Sha256': found.entry.sha256 });
+    res.sendFile(found.path, { headers: { 'Content-Disposition': `attachment; filename="${found.entry.id}-${found.entry.version}.zip"` } }, (err) => {
+      if (err && !res.headersSent) res.status(404).json({ error: 'That Arabic pack isn\'t in the catalog.' });
+    });
+  });
+
+  // ---- Matching a PC's games to GameShelf's pages (desktop app) ---------------
+
+  const matchLimiter = rateLimit({ windowMs: 60 * 1000, max: 30 });
+  /** [{ steamAppId?, name }] -> the same order, each a game summary or null. */
+  async function matchGames(list) {
+    const out = new Array(list.length).fill(null);
+    const steam = list.map((g, i) => [g, i]).filter(([g]) => Number.isInteger(g.steamAppId) && g.steamAppId > 0);
+    if (steam.length) {
+      const found = await games.matchSteamGames(steam.map(([g]) => ({ appid: g.steamAppId, name: g.name })));
+      steam.forEach(([, i], n) => { out[i] = found[n] || null; });
+    }
+    for (const [g, i] of list.map((x, n) => [x, n]).filter(([x]) => !(Number.isInteger(x.steamAppId) && x.steamAppId > 0))) {
+      try {
+        const { results } = await games.search({ query: g.name, pageSize: 5 });
+        out[i] = results.find((r) => normalizeTitle(r.name) === normalizeTitle(g.name)) || null;
+      } catch {
+        out[i] = null;
+      }
+    }
+    return out;
+  }
+  const installedList = (body) => {
+    const list = Array.isArray(body?.games) ? body.games : null;
+    if (!list || list.length > STEAM_IMPORT_MAX) throw new TypeError(`Send up to ${STEAM_IMPORT_MAX} games at a time.`);
+    return list.map((g) => ({ steamAppId: Number(g?.steamAppId) || null, name: String(g?.name || '').slice(0, 200) })).filter((g) => g.name || g.steamAppId);
+  };
+  api.post('/games/match', matchLimiter, asyncRoute(async (req, res) => {
+    let list;
+    try {
+      list = installedList(req.body);
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
+    res.json({ matches: await matchGames(list) });
+  }));
+  // Adds the games on a PC to My games (only ones not on the list yet). Each
+  // comes with the status a Steam import would give it: { steamAppId, name, status }.
+  api.post('/me/library/installed', requireUser, matchLimiter, asyncRoute(async (req, res) => {
+    let list;
+    try {
+      list = installedList(req.body);
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
+    const statusOf = (req.body.games || []).map((g) => (STATUSES.includes(g?.status) ? g.status : 'want'));
+    const found = await matchGames(list);
+    let added = 0;
+    transaction(db, () => {
+      found.forEach((game, i) => {
+        if (!game || q.libraryEntry.get(req.user.id, game.id)) return;
+        q.upsertEntry.run({ userId: req.user.id, gameId: game.id, name: game.name, image: game.image, backdrop: game.backdrop ?? null,
+          logo: game.logo ?? null, genres: JSON.stringify(game.genres || []), status: statusOf[i], rating: null });
+        added++;
+      });
+    });
+    res.json({ added, matched: found.filter(Boolean).length });
+  }));
+
+  // ---- Windows installer ----------------------------------------------------
+
+  const installerFile = downloadsDir ? path.join(downloadsDir, 'GameShelf-Setup.exe') : null;
+  // What the website's download section shows: { available, size, updatedAt, url }.
+  api.get('/download/info', (_req, res) => {
+    const stat = installerFile && fs.existsSync(installerFile) ? fs.statSync(installerFile) : null;
+    const external = process.env.DOWNLOAD_URL || null;
+    res.json({ available: Boolean(stat || external), size: stat?.size ?? null, updatedAt: stat?.mtime ?? null, url: '/download/windows' });
+  });
+
+  // ---- Admin Panel (users.role = 'admin') -------------------------------------
+
+  api.get('/admin/stats', requireAdmin, (_req, res) => {
+    const count = (sql) => db.prepare(sql).get().n;
+    res.json({
+      users: count('SELECT COUNT(*) AS n FROM users'),
+      admins: count("SELECT COUNT(*) AS n FROM users WHERE role = 'admin'"),
+      newUsersThisWeek: count("SELECT COUNT(*) AS n FROM users WHERE created_at > datetime('now', '-7 days')"),
+      packs: packs ? packs.stats() : { packs: 0, downloads: 0, players: 0 },
+      translatedLines: translations ? count('SELECT COUNT(*) AS n FROM translation_memory') : 0,
+      requests: count('SELECT COUNT(*) AS n FROM arabic_requests'),
+      packKey: packs ? packs.configured() : false,
+    });
+  });
+
+  api.get('/admin/users', requireAdmin, (req, res) => {
+    const like = `%${String(req.query.q || '').replace(/[\\%_]/g, '\\$&')}%`;
+    const rows = db.prepare(`SELECT u.*, (SELECT COUNT(*) FROM library l WHERE l.user_id = u.id) AS game_count
+      FROM users u WHERE u.username LIKE ? ESCAPE '\\' OR u.display_name LIKE ? ESCAPE '\\'
+      ORDER BY (u.role = 'admin') DESC, u.created_at DESC LIMIT 200`).all(like, like);
+    res.json({ users: rows.map((u) => ({ ...selfUser(u), games: u.game_count })) });
+  });
+
+  // Promote or demote. The last admin can't be demoted, so the panel never locks everyone out.
+  api.patch('/admin/users/:username', requireAdmin, (req, res) => {
+    const role = String(req.body?.role || '');
+    if (!ROLES.includes(role)) return res.status(400).json({ error: 'The role should be "user" or "admin".' });
+    const user = q.userByName.get(req.params.username);
+    if (!user) return res.status(404).json({ error: 'User not found.' });
+    if (role === 'user' && user.role === 'admin' && db.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'admin'").get().n <= 1) {
+      return res.status(400).json({ error: 'There has to be at least one admin.' });
+    }
+    db.prepare('UPDATE users SET role = ? WHERE id = ?').run(role, user.id);
+    res.json({ user: selfUser(q.userById.get(user.id)) });
+  });
+
+  api.get('/admin/requests', requireAdmin, (_req, res) => {
+    res.json({ requests: arabicGames ? arabicGames.requests() : [] });
+  });
+  // The older address of the same list.
+  api.get('/arabic/requests', requireAdmin, (_req, res) => {
+    res.json({ requests: arabicGames ? arabicGames.requests() : [] });
+  });
+
+  api.get('/admin/packs', requireAdmin, (_req, res) => {
+    res.json({ packs: packs ? packs.all() : [], configured: packs ? packs.configured() : false });
+  });
+  // A signed pack, as a .zip (from the Pack Studio, or dropped in the Admin Panel).
+  api.post('/admin/packs', requireAdmin, asyncRoute(async (req, res) => {
+    if (!packs) return res.status(503).json({ error: 'The pack catalog isn\'t set up on this server.' });
+    try {
+      const zip = await readBody(req, MAX_PACK_BYTES);
+      res.status(201).json({ pack: await packs.publish(zip, { userId: req.user.id }) });
+    } catch (err) {
+      if (err instanceof RegistryError) return res.status(err.status).json({ error: err.message });
+      throw err;
+    }
+  }));
+  api.patch('/admin/packs/:id/:version', requireAdmin, (req, res) => {
+    if (!packs?.setPublished(req.params.id, req.params.version, Boolean(req.body?.published))) return res.status(404).json({ error: 'That pack version isn\'t in the catalog.' });
+    res.json({ ok: true });
+  });
+  api.delete('/admin/packs/:id/:version', requireAdmin, asyncRoute(async (req, res) => {
+    if (!(await packs?.remove(req.params.id, req.params.version))) return res.status(404).json({ error: 'That pack version isn\'t in the catalog.' });
+    res.status(204).end();
+  }));
+
+  // A new Windows installer for the website's download button, streamed to disk.
+  api.put('/admin/installer', requireAdmin, asyncRoute(async (req, res) => {
+    if (!installerFile) return res.status(503).json({ error: 'Downloads aren\'t set up on this server.' });
+    await fs.promises.mkdir(path.dirname(installerFile), { recursive: true });
+    const temp = `${installerFile}.upload`;
+    let size = 0;
+    let head = null;
+    try {
+      await new Promise((resolve, reject) => {
+        const out = fs.createWriteStream(temp);
+        req.on('data', (chunk) => {
+          head ??= chunk.subarray(0, 2);
+          size += chunk.length;
+          if (size > MAX_INSTALLER_BYTES) {
+            req.destroy();
+            out.destroy();
+            reject(new RegistryError('The installer is too big.', 413));
+          }
+        });
+        req.pipe(out);
+        out.on('finish', resolve);
+        out.on('error', reject);
+        req.on('error', reject);
+      });
+      // Windows programs start with "MZ".
+      if (!head || head.toString('latin1') !== 'MZ') throw new RegistryError('That isn\'t a Windows program (.exe).');
+      await fs.promises.rename(temp, installerFile);
+    } catch (err) {
+      await fs.promises.rm(temp, { force: true });
+      if (err instanceof RegistryError) return res.status(err.status).json({ error: err.message });
+      throw err;
+    }
+    res.json({ size });
+  }));
 
   api.use((req, res) => res.status(404).json({ error: 'Not found.' }));
 

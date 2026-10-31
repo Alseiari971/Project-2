@@ -60,46 +60,21 @@ function createApiToken(db, userId, name) {
   return { id: Number(lastInsertRowid), name, token };
 }
 
-// Desktop app tokens, one per copy of the app, for asking for Arabic subtitles without an account.
-const DEVICE_TOKEN_PREFIX = 'gsd_';
-const DEVICES_PER_ADDRESS_PER_DAY = 5;
-
-/** A new device token, or null when this address made too many today. The address itself isn't kept. */
-function createDevice(db, ip) {
-  const ipHash = hashToken(`gameshelf-device:${ip}`);
-  const recent = db.prepare("SELECT COUNT(*) AS n FROM devices WHERE ip_hash = ? AND created_at > datetime('now', '-1 day')").get(ipHash).n;
-  if (recent >= DEVICES_PER_ADDRESS_PER_DAY) return null;
-  const token = DEVICE_TOKEN_PREFIX + crypto.randomBytes(32).toString('base64url');
-  db.prepare('INSERT INTO devices (token_hash, ip_hash) VALUES (?, ?)').run(hashToken(token), ipHash);
-  return token;
-}
-
 // Express middleware: sets req.user from a valid session cookie, or from a
-// personal access token in "Authorization: Bearer gst_...". A desktop app's
-// "Bearer gsd_..." sets req.device instead.
+// personal access token in "Authorization: Bearer gst_...".
 function loadUser(db) {
   const find = db.prepare(`
-    SELECT u.id, u.username, u.display_name, u.bio, u.created_at
+    SELECT u.id, u.username, u.display_name, u.bio, u.created_at, u.role
     FROM sessions s JOIN users u ON u.id = s.user_id
     WHERE s.token_hash = ? AND s.expires_at > ?
   `);
   const findToken = db.prepare(`
-    SELECT u.id, u.username, u.display_name, u.bio, u.created_at, t.id AS token_id
+    SELECT u.id, u.username, u.display_name, u.bio, u.created_at, u.role, t.id AS token_id
     FROM api_tokens t JOIN users u ON u.id = t.user_id
     WHERE t.token_hash = ?
   `);
   const touchToken = db.prepare("UPDATE api_tokens SET last_used_at = datetime('now') WHERE id = ?");
-  const findDevice = db.prepare('SELECT id FROM devices WHERE token_hash = ?');
-  const touchDevice = db.prepare("UPDATE devices SET last_used_at = datetime('now') WHERE id = ?");
   return (req, _res, next) => {
-    const device = /^Bearer (gsd_[\w-]{20,})$/.exec(req.headers.authorization || '')?.[1];
-    if (device) {
-      const row = findDevice.get(hashToken(device));
-      if (row) touchDevice.run(row.id);
-      req.user = null;
-      req.device = row || null;
-      return next();
-    }
     const bearer = /^Bearer (gst_[\w-]{20,})$/.exec(req.headers.authorization || '')?.[1];
     if (bearer) {
       const row = findToken.get(hashToken(bearer));
@@ -119,11 +94,10 @@ function requireUser(req, res, next) {
   next();
 }
 
-/** A signed-in user or a desktop app's device token. Sets req.asker to { kind, id, key }. */
-function requireAsker(req, res, next) {
-  if (req.user) req.asker = { kind: 'user', id: req.user.id, key: `user:${req.user.id}` };
-  else if (req.device) req.asker = { kind: 'device', id: req.device.id, key: `device:${req.device.id}` };
-  else return res.status(401).json({ error: 'Please log in first.' });
+/** Admins only (users.role = 'admin'): 401 when logged out, 403 for everyone else. */
+function requireAdmin(req, res, next) {
+  if (!req.user) return res.status(401).json({ error: 'Please log in first.' });
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Only admins can do this.' });
   next();
 }
 
@@ -146,8 +120,7 @@ function rateLimit({ windowMs, max }) {
 
 module.exports = {
   createApiToken,
-  createDevice,
-  requireAsker,
+  requireAdmin,
   hashPassword,
   verifyPassword,
   createSession,

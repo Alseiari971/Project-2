@@ -14,16 +14,22 @@ const SCRIPT = path.join(__dirname, 'ocr-helper.ps1');
 class OcrError extends Error {}
 
 /**
- * How to start the helper. The app is packed into an archive PowerShell can't
- * read from, so the script is copied to `dataDir` first. GAMESHELF_OCR_HELPER
- * (a Node script speaking the same protocol) replaces it when developing.
+ * How to start the helper. The installer puts the script beside the app's
+ * archive (resources/ocr-helper.ps1, see "extraResources" in package.json),
+ * where PowerShell can read it. Otherwise (from source, or an older install)
+ * it's copied to `dataDir` first, since PowerShell can't read from inside the
+ * app's archive. GAMESHELF_OCR_HELPER (a Node script speaking the same
+ * protocol) replaces it when developing.
  */
-function defaultSpawn({ dataDir, devHelper } = {}) {
+function defaultSpawn({ dataDir, devHelper, resourcesPath = process.resourcesPath } = {}) {
   if (devHelper) {
     return () => spawn(process.execPath, [devHelper], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
   }
   if (process.platform !== 'win32') return null;
+  const shipped = resourcesPath ? path.join(resourcesPath, 'ocr-helper.ps1') : null;
+  const run = (file) => spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', file], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
   return () => {
+    if (shipped && fs.existsSync(shipped)) return run(shipped);
     const copy = path.join(dataDir, 'ocr-helper.ps1');
     const script = fs.readFileSync(SCRIPT);
     let current = null;
@@ -36,7 +42,7 @@ function defaultSpawn({ dataDir, devHelper } = {}) {
       fs.mkdirSync(dataDir, { recursive: true });
       fs.writeFileSync(copy, script);
     }
-    return spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', copy], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    return run(copy);
   };
 }
 

@@ -1,6 +1,7 @@
-// Desktop app only: the API keys the built-in server uses. The desktop app
-// passes them through window.gameshelfDesktop (see desktop/preload.js).
-import { html, bdi, th, mount, toast } from '../lib.js';
+// Desktop app only: language, Discord, games added by hand, Arabic packs and,
+// when the app runs the website itself (no GameShelf server), its API keys.
+// The desktop app passes them through window.gameshelfDesktop (see desktop/preload.js).
+import { html, bdi, th, mount, toast, state } from '../lib.js';
 import { addGame } from '../desktop.js';
 import { t, lang, LANGUAGES, setLang } from '../i18n.js';
 
@@ -20,7 +21,7 @@ const SOURCES = {
 export async function appSettingsView(app, params) {
   document.title = `${t('App settings')} · ${t('GameShelf')}`;
   const desktop = window.gameshelfDesktop;
-  const { values, source, dataDir, discord } = await desktop.getSettings();
+  const { values, source, dataDir, discord, cloud } = await desktop.getSettings();
   const field = (name, label, type = 'text') => html`
     <label>${label}<input class="input" name="${name}" type="${type}" value="${values[name]}" autocomplete="off" spellcheck="false"></label>`;
 
@@ -36,6 +37,7 @@ export async function appSettingsView(app, params) {
           ${LANGUAGES.map((l) => html`<button type="button" class="mood-chip ${l.id === lang ? 'active' : ''}" role="radio" aria-checked="${l.id === lang}" lang="${l.id}" data-lang="${l.id}">${l.name}</button>`)}
         </div>
 
+        ${cloud ? '' : html`
         <h2>${t('Game database')}</h2>
         <p class="settings-status ${source}" id="settings-status">${SOURCES[source]}</p>
         <div class="form-grid">
@@ -46,7 +48,7 @@ export async function appSettingsView(app, params) {
 
         <h2>${t('Steam import')}</h2>
         <div class="form-grid">${field('STEAM_API_KEY', t('Steam Web API key'), 'password')}</div>
-        <p class="muted small">${th('Optional. Free from {link} (any domain name works).', { link: link('https://steamcommunity.com/dev/apikey', 'steamcommunity.com/dev/apikey') })}</p>
+        <p class="muted small">${th('Optional. Free from {link} (any domain name works).', { link: link('https://steamcommunity.com/dev/apikey', 'steamcommunity.com/dev/apikey') })}</p>`}
 
         <h2>Discord</h2>
         <label class="check-row">
@@ -85,7 +87,9 @@ export async function appSettingsView(app, params) {
 
       <section class="panel">
         <h2>${t('Your data')}</h2>
-        <p class="muted">${t('Accounts, game lists and profiles you make in the app are saved on this computer only. Your keys stay here too and are only sent to IGDB and Steam.')}</p>
+        <p class="muted">${cloud
+          ? t('Your account, game lists and profile are saved on GameShelf, the same as on the website. This PC keeps your settings and Arabic packs.')
+          : t('Accounts, game lists and profiles you make in the app are saved on this computer only. Your keys stay here too and are only sent to IGDB and Steam.')}</p>
         ${dataDir ? html`<p class="muted small">${t('Folder:')} <code dir="ltr">${dataDir}</code></p>` : ''}
         <button class="btn btn-quiet" type="button" id="open-data">${t('Open data folder')}</button>
       </section>
@@ -142,7 +146,8 @@ export async function appSettingsView(app, params) {
     const { ready, packs } = await desktop.arabicPacks();
     const el = document.getElementById('arabic-packs');
     if (!el) return;
-    document.getElementById('add-pack').hidden = !ready;
+    // Players get packs from GameShelf's catalog by switching Arabic on; adding one by hand is for admins.
+    document.getElementById('add-pack').hidden = !ready || (cloud && state.user?.role !== 'admin');
     document.getElementById('overlay-style').hidden = !ready;
     if (ready) showOverlayStyle(await desktop.arabicOverlayStyle());
     mount(el, !ready
@@ -179,8 +184,10 @@ export async function appSettingsView(app, params) {
       const { discordOn, ...values } = Object.fromEntries(new FormData(e.target));
       const result = await desktop.saveSettings({ ...values, DISCORD_ACTIVITY: discordOn ? '' : 'off' });
       const status = document.getElementById('settings-status');
-      status.className = `settings-status ${result.source}`;
-      status.textContent = SOURCES[result.source];
+      if (status) {
+        status.className = `settings-status ${result.source}`;
+        status.textContent = SOURCES[result.source];
+      }
       if (result.problem) {
         error.textContent = t("Saved, but IGDB didn't accept the keys: {problem}", { problem: result.problem });
       } else {

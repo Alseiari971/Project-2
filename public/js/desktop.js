@@ -1,7 +1,7 @@
 // Desktop app only: Play and Stop buttons for games installed on this PC, and
 // adding a game by picking its program file. `desktop` is the bridge from
 // desktop/preload.js; it's undefined on the website.
-import { html, bdi, api, mount, toast, year } from './lib.js';
+import { html, bdi, api, mount, toast, year, state, refreshLibrary } from './lib.js';
 import { gameTile, art } from './components.js';
 import { icon } from './icons.js';
 import { t } from './i18n.js';
@@ -65,6 +65,14 @@ function paintArabic(button, info) {
   const notes = mode === 'unavailable'
     ? [explain(info?.why)]
     : [t(mode === 'native' ? 'Adds an Arabic patch the game loads. Turning it off takes it out.' : 'Shows Arabic over the game, read from its English subtitles. The game isn\'t changed.'), explain(info?.detail)];
+  // In GameShelf's catalog, not on this PC yet: it downloads when the switch goes on, for signed-in players.
+  if (info?.cloud) {
+    notes.push(t('GameShelf downloads the Arabic pack when you turn this on.'));
+    if (!state.user) {
+      button.dataset.action = 'login';
+      mount(button.querySelector('small'), html`${t('Log in to turn on')}`);
+    }
+  }
   button.title = notes.filter(Boolean).join('\n');
   // No pack on this PC yet: GameShelf's server may have the Arabic, or it can be asked for.
   if (mode === 'unavailable' && info?.missing) checkOnline(button);
@@ -83,8 +91,19 @@ async function checkOnline(button) {
   } catch {
     return;
   }
-  if (!online.configured || (!online.server && !online.building)) return;
   if (online.building) return paintProgress(button, online.building);
+  if (online.configured && !online.signedIn) {
+    // Asking GameShelf for Arabic needs an account.
+    button.disabled = false;
+    button.classList.remove('mode-unavailable');
+    button.classList.add('is-request');
+    button.setAttribute('role', 'button');
+    button.removeAttribute('aria-checked');
+    button.dataset.action = 'login';
+    setLabel(button, t('Request Arabic subtitles'), t('Log in to ask for Arabic'));
+    return;
+  }
+  if (!online.configured || !online.server) return;
   const server = online.server;
   button.disabled = false;
   if (online.canBuild && server.status === 'ready') {
@@ -120,6 +139,7 @@ function paintRequested(button, server) {
 
 const PHASES = {
   starting: 'Getting ready…',
+  checking: 'Checking the pack…',
   reading: 'Reading the game\'s text…',
   packing: 'Making the Arabic patch…',
   done: 'Making the Arabic patch…',
@@ -130,7 +150,10 @@ function paintProgress(button, progress) {
   button.disabled = true;
   let small;
   let share = 0;
-  if (progress.phase === 'translating' && progress.asking) {
+  if (progress.phase === 'downloading') {
+    share = progress.total ? progress.done / progress.total : 0;
+    small = progress.total ? t('Downloading Arabic pack… {percent}%', { percent: percent(progress.done, progress.total) }) : t('Downloading Arabic pack…');
+  } else if (progress.phase === 'translating' && progress.asking) {
     small = t('Translating… {done} of {total} lines', { done: progress.asked.toLocaleString(), total: progress.asking.toLocaleString() });
     share = progress.asked / progress.asking;
   } else if (progress.phase === 'translating') {
@@ -173,6 +196,8 @@ function wireArabic(button) {
     try {
       if (button.dataset.action === 'get') {
         await getArabic(button);
+      } else if (button.dataset.action === 'login') {
+        location.hash = '#/login';
       } else if (button.dataset.action === 'request') {
         paintRequested(button, await desktop.requestArabic(key));
         toast(t('Thanks! Your request for Arabic subtitles is counted.'));
@@ -192,7 +217,7 @@ function wireArabic(button) {
 }
 
 /** A game on the Home row, with a round Play button on its art. */
-export function installedTile({ key, launcher, game }) {
+export function installedTile({ key, launcher, game }, { badge = false } = {}) {
   // Games without a GameShelf page open a page of their own, with Play and the Arabic switch.
   const tile = game.id
     ? gameTile(game, { tag: t(launcher) })
@@ -200,8 +225,44 @@ export function installedTile({ key, launcher, game }) {
   return html`
     <div class="tile-wrap">
       ${tile}
+      ${badge ? html`<span class="arabic-badge" data-badge-for="${key}" hidden></span>` : ''}
       <button type="button" class="tile-play" data-launch="${key}" data-name="${game.name}"></button>
     </div>`;
+}
+
+// What each installed game's Arabic badge says (see arabicBadges in desktop/main.js).
+const BADGES = {
+  on: { text: 'Arabic on', title: 'Arabic subtitles are on for this game.' },
+  ready: { text: 'Arabic ready', title: 'Arabic subtitles are ready: turn them on beside Play.' },
+  request: { text: 'Arabic on request', title: 'GameShelf can make Arabic subtitles for this game: ask for them beside Play.' },
+};
+
+function paintBadge(el, badge) {
+  const shown = BADGES[badge];
+  el.hidden = !shown;
+  if (!shown) return;
+  el.className = `arabic-badge badge-${badge}`;
+  mount(el, html`<span aria-hidden="true">ع</span>${t(shown.text)}`);
+  el.title = t(shown.title);
+}
+
+/** Fills in the Arabic badges on installed games' tiles, and keeps them up to date until the page changes. */
+export function wireArabicBadges(root) {
+  if (!desktop?.arabicBadges) return () => {};
+  const paintKey = (key, badge) => root.querySelectorAll(`[data-badge-for="${CSS.escape(key)}"]`).forEach((el) => paintBadge(el, badge));
+  desktop.arabicBadges().then((known) => Object.entries(known).forEach(([key, badge]) => paintKey(key, badge))).catch(() => {});
+  return desktop.onArabicBadge(({ key, badge }) => paintKey(key, badge));
+}
+
+/** Puts the games on this PC on My games (the ones GameShelf knows, not already there). */
+export async function syncPcGames({ quiet = false } = {}) {
+  const { added, matched } = await desktop.syncLibrary();
+  await refreshLibrary();
+  if (quiet) return added;
+  if (added) toast(t('Added to My games: {count}', { count: added }));
+  else if (!matched) toast(t('GameShelf couldn\'t find the games on this PC in its game database.'));
+  else toast(t('My games already has every game on this PC that GameShelf knows ({count}).', { count: matched }));
+  return added;
 }
 
 /** The last card on the Home row: add a game that GameShelf didn't find. */
@@ -250,6 +311,8 @@ export function wireLaunchButtons(root, { onAdded } = {}) {
         } else {
           const started = await desktop.launch(key);
           const arabic = started?.arabic;
+          // A catalog pack may have downloaded on the way: show the switch as it is now.
+          document.querySelectorAll(`[data-arabic="${CSS.escape(key)}"]`).forEach((b) => desktop.arabicInfo(key).then((info) => paintArabic(b, info)).catch(() => {}));
           if (arabic && !arabic.ok && arabic.mode !== 'off') {
             toast(t('Starting {name} in English: {reason}', { name: button.dataset.name, reason: explain(arabic.error) }), { error: true });
           } else if (arabic?.mode === 'native' || arabic?.mode === 'overlay') {

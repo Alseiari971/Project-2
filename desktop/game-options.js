@@ -86,6 +86,7 @@ function gogUninstaller(dir) {
 }
 
 module.exports = {
+  HELPER,
   getGpuPreference,
   setGpuPreference,
   parseGpuPreference,

@@ -16,6 +16,7 @@ import { legalView } from './views/legal.js';
 import { applySeason } from './seasons.js';
 import { appSettingsView } from './views/app-settings.js';
 import { installedView } from './views/installed.js';
+import { adminView } from './views/admin.js';
 
 const app = document.getElementById('app');
 const SIDEBAR_GAMES = 12;
@@ -131,6 +132,7 @@ function renderSidebar() {
       ${link(state.user ? '#/library' : '#/login', 'Library', 'solid-library', 'library')}
       ${link('#/community', 'Community', 'solid-users', 'community')}
       ${state.user ? link('#/import', 'Steam import', 'solid-import', 'import', html`<span class="tag tag-new">${t('NEW')}</span>`) : ''}
+      ${state.user?.role === 'admin' ? link('#/admin', 'Admin Panel', 'shield', 'admin') : ''}
     </nav>
     ${state.user
       ? html`
@@ -181,7 +183,7 @@ async function route() {
   const parts = (path || '/').split('/').filter(Boolean).map(decodeURIComponent);
   const isMe = parts[0] === 'u' && state.user && parts[1]?.toLowerCase() === state.user.username.toLowerCase();
   current = {
-    section: { undefined: 'home', browse: 'browse', library: 'library', community: 'community', import: 'import', u: isMe ? 'library' : 'community' }[parts[0]] || '',
+    section: { undefined: 'home', browse: 'browse', library: 'library', community: 'community', import: 'import', admin: 'admin', u: isMe ? 'library' : 'community' }[parts[0]] || '',
     gameId: parts[0] === 'game' ? parts[1] : null,
   };
 
@@ -205,6 +207,7 @@ async function route() {
       case 'customize': await customizeView(app); break;
       case 'import': await importView(app); break;
       case 'legal': await legalView(app); break;
+      case 'admin': await adminView(app, params); break;
       case 'app-settings':
         if (!desktop) throw Object.assign(new Error(''), { status: 404 });
         await appSettingsView(app, params);
@@ -220,10 +223,21 @@ async function route() {
   }
 }
 
+// Desktop app: signing in looks for the PC's games again and, if the player
+// chose so, puts new ones on My games.
+async function pcGamesOnSignIn() {
+  if (!desktop?.rescanGames || !state.user) return;
+  try {
+    await desktop.rescanGames();
+    if ((await desktop.librarySyncSettings()).auto && (await desktop.syncLibrary()).added) await refreshLibrary();
+  } catch {}
+}
+
 window.addEventListener('hashchange', route);
 document.addEventListener('user-changed', async () => {
   await refreshLibrary();
   renderChrome();
+  pcGamesOnSignIn();
 });
 document.addEventListener('library-changed', renderSidebar);
 
@@ -238,6 +252,7 @@ document.addEventListener('library-changed', renderSidebar);
     state.user = null;
   }
   renderChrome();
+  pcGamesOnSignIn();
   api('/info').then(({ source }) => {
     const credit = {
       igdb: th('Game data from {igdb}. Prices from {cheapshark}.', {

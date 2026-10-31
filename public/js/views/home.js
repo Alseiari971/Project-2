@@ -3,7 +3,7 @@
 // sections between the regular rows.
 import { html, bdi, th, api, mount, state, year, gameHref, onLeave } from '../lib.js';
 import { gameTile, libraryTile, rankTile, posterTile, row, enableRows, titleArt, formatHours } from '../components.js';
-import { desktop, installedTile, addGameTile, wireLaunchButtons, playButton } from '../desktop.js';
+import { desktop, installedTile, addGameTile, wireLaunchButtons, wireArabicBadges, playButton } from '../desktop.js';
 import { icon } from '../icons.js';
 import { t, tn, locale } from '../i18n.js';
 import { SEASONS, currentSeason, seasonNote, seasonPreference, setSeasonPreference, applySeason } from '../seasons.js';
@@ -390,6 +390,7 @@ export async function homeView(app) {
   mount(app, html`
     <div class="page home">
       ${home.spotlight.length ? spotlight(home.spotlight, season) : ''}
+      ${desktop ? '' : getTheApp()}
       <div id="installed-row"></div>
       ${state.library.length
         ? row({ title: t('My games'), href: '#/library', cls: 'row-small', items: state.library.slice(0, 20).map(libraryTile) })
@@ -431,6 +432,7 @@ export async function homeView(app) {
   wireMoods(app);
   app.querySelector('#dq-start').addEventListener('click', openDiscovery);
   showInstalled();
+  if (!desktop) showDownload();
   app.querySelector('#season-select').addEventListener('change', (e) => {
     setSeasonPreference(e.target.value);
     // Load the page again, which also stops the old spotlight.
@@ -446,7 +448,42 @@ async function showInstalled() {
   const installed = await desktop.installedGames().catch(() => []);
   const slot = document.getElementById('installed-row');
   if (!slot) return;
-  mount(slot, row({ title: t('Installed on this PC'), items: [...installed.map(installedTile), addGameTile()] }));
+  mount(slot, row({ title: t('Installed on this PC'), items: [...installed.map((g) => installedTile(g, { badge: true })), addGameTile()] }));
   enableRows(slot);
   wireLaunchButtons(slot, { onAdded: showInstalled });
+  onLeave(wireArabicBadges(slot));
+}
+
+// The website: GameShelf for Windows, which finds your games and adds Arabic to them.
+function getTheApp() {
+  const step = (n, title, text) => html`<li><span class="step-n">${n}</span><div><strong>${title}</strong><p>${text}</p></div></li>`;
+  return html`
+    <section class="get-app" aria-labelledby="get-app-title">
+      <div class="get-app-text">
+        <span class="get-app-mark" aria-hidden="true">ع</span>
+        <h2 id="get-app-title">${t('GameShelf for Windows')}</h2>
+        <p>${t('Arabic subtitles for the games you already own, in one switch beside Play.')}</p>
+        <a class="pill-btn pill-light get-app-btn" id="get-app-btn" href="/download/windows">${icon('download')}<span>${t('Download GameShelf for Windows (.exe)')}</span></a>
+        <p class="muted small" id="get-app-note">${t('Windows 10 and 11. Free.')}</p>
+      </div>
+      <ol class="get-app-steps">
+        ${step(1, t('Download and log in'), t('Install the app and log in with your GameShelf account.'))}
+        ${step(2, t('It finds your games'), t('Games from Steam, Epic Games and GOG show up by themselves, each with how it stands for Arabic.'))}
+        ${step(3, t('Turn on Arabic and play'), t('Flip the Arabic subtitles switch beside Play. GameShelf gets the Arabic pack and puts it in.'))}
+      </ol>
+    </section>`;
+}
+
+async function showDownload() {
+  const info = await api('/download/info').catch(() => null);
+  const button = document.getElementById('get-app-btn');
+  if (!button || !info) return;
+  if (!info.available) {
+    button.removeAttribute('href');
+    button.setAttribute('aria-disabled', 'true');
+    button.classList.add('is-soon');
+    mount(button.querySelector('span'), html`${t('Windows app coming soon')}`);
+  } else if (info.size) {
+    document.getElementById('get-app-note').textContent = t('Windows 10 and 11. Free. {size} MB.', { size: Math.round(info.size / 1024 / 1024) });
+  }
 }

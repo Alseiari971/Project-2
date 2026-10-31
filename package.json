@@ -8,9 +8,10 @@
     "start": "node server.js",
     "dev": "node --watch server.js",
     "app": "electron desktop/main.js",
-    "dist": "python scripts/bundle-arabic-builder.py --if-missing && electron-builder --win",
+    "dist": "npm run dist:win",
     "test": "node --test",
-    "search-debug": "node scripts/search-debug.js"
+    "search-debug": "node scripts/search-debug.js",
+    "dist:win": "node scripts/prepare-dist.js && electron-builder --win nsis"
   },
   "engines": {
     "node": ">=22.13"
@@ -52,17 +53,32 @@
       {
         "from": "build-tools/arabic-builder",
         "to": "arabic-builder"
+      },
+      {
+        "from": "desktop/localization/ocr-helper.ps1",
+        "to": "ocr-helper.ps1"
       }
     ],
     "win": {
       "target": [
-        "nsis"
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "icon": "desktop/icon.png"
     },
     "nsis": {
-      "artifactName": "GameShelf-Setup-${version}.${ext}",
-      "shortcutName": "GameShelf"
+      "artifactName": "GameShelf-Setup.${ext}",
+      "shortcutName": "GameShelf",
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "runAfterFinish": true
     },
     "mac": {
       "icon": "desktop/icon.png",

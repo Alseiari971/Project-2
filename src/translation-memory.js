@@ -12,7 +12,7 @@
 //
 // Settings (environment): OPENAI_API_KEY, TRANSLATE_MODEL (default
 // gpt-4.1-mini), TRANSLATE_API_BASE (any OpenAI-compatible API),
-// TRANSLATE_DAILY_LINES (per user or desktop app, default 2000), TRANSLATE_MONTHLY_CHARS
+// TRANSLATE_DAILY_LINES (per user, default 2000), TRANSLATE_MONTHLY_CHARS
 // (whole server, default 3,000,000).
 const crypto = require('node:crypto');
 
@@ -77,14 +77,10 @@ function createTranslationMemory({ db, env = process.env, fetch = globalThis.fet
   const select = db.prepare('SELECT line_hash, arabic FROM translation_memory WHERE game = ? AND line_hash = ?');
   const insert = db.prepare(`INSERT INTO translation_memory (game, line_hash, arabic, origin, model) VALUES (?, ?, ?, 'machine', ?)
     ON CONFLICT (game, line_hash) DO NOTHING`);
-  // Users and desktop apps (devices) each have their own daily lines; the month counts both.
-  const usage = Object.fromEntries([['user', 'translation_usage', 'user_id'], ['device', 'device_usage', 'device_id']].map(([kind, table, column]) => [kind, {
-    today: db.prepare(`SELECT lines FROM ${table} WHERE ${column} = ? AND day = ?`),
-    add: db.prepare(`INSERT INTO ${table} (${column}, day, lines, chars) VALUES (?, ?, ?, ?)
-      ON CONFLICT (${column}, day) DO UPDATE SET lines = lines + excluded.lines, chars = chars + excluded.chars`),
-  }]));
-  const usageMonth = db.prepare(`SELECT (SELECT COALESCE(SUM(chars), 0) FROM translation_usage WHERE day LIKE ?1)
-    + (SELECT COALESCE(SUM(chars), 0) FROM device_usage WHERE day LIKE ?1) AS chars`);
+  const usageToday = db.prepare('SELECT lines FROM translation_usage WHERE user_id = ? AND day = ?');
+  const usageMonth = db.prepare('SELECT COALESCE(SUM(chars), 0) AS chars FROM translation_usage WHERE day LIKE ?');
+  const addUsage = db.prepare(`INSERT INTO translation_usage (user_id, day, lines, chars) VALUES (?, ?, ?, ?)
+    ON CONFLICT (user_id, day) DO UPDATE SET lines = lines + excluded.lines, chars = chars + excluded.chars`);
   // One game translated at a time, so two players asking at once don't pay twice.
   const busy = new Map();
 
@@ -154,12 +150,11 @@ function createTranslationMemory({ db, env = process.env, fetch = globalThis.fet
   }
 
   /**
-   * Translates the lines not stored yet, for `asker` ({ kind: 'user' | 'device', id }), within the limits.
+   * Translates the lines not stored yet, for `user`, within the limits.
    * `lines` is [{ hash, english }]; returns { arabic: { hash: text }, failed:
    * { hash: why }, limited: true when some weren't translated because of a limit }.
    */
-  async function translate(asker, game, lines, { context = '' } = {}) {
-    const spend = usage[asker.kind];
+  async function translate(user, game, lines, { context = '' } = {}) {
     checkGame(game);
     if (!apiKey) throw new TranslationLimit('Shared translation isn\'t set up on this server.');
     const arabic = {};
@@ -189,7 +184,7 @@ function createTranslationMemory({ db, env = process.env, fetch = globalThis.fet
         return !row;
       });
       const day = now().toISOString().slice(0, 10);
-      const leftToday = Math.max(0, dailyLines - (spend.today.get(asker.id, day)?.lines || 0));
+      const leftToday = Math.max(0, dailyLines - (usageToday.get(user.id, day)?.lines || 0));
       let leftMonth = Math.max(0, monthlyChars - usageMonth.get(`${day.slice(0, 7)}%`).chars);
       const allowed = [];
       for (const t of fresh) {
@@ -206,7 +201,7 @@ function createTranslationMemory({ db, env = process.env, fetch = globalThis.fet
           const lines = batches[next++].map((t, i) => [i, t.english, t.hash]);
           const { good, failed: bad } = await batch(lines.map(([i, english]) => [i, english]), String(context).slice(0, 300));
           const chars = lines.reduce((sum, [, english]) => sum + english.length, 0);
-          spend.add.run(asker.id, day, lines.length, chars);
+          addUsage.run(user.id, day, lines.length, chars);
           for (const [i, , hash] of lines) {
             if (i in good) {
               insert.run(game, hash, good[i], model);

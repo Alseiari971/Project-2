@@ -83,10 +83,11 @@ function createPackBuilder({ paths, outDir, keyFile, spawn = defaultSpawn, nodeP
 
   /**
    * Builds the pack for a game. `game` is { key, dir, tier, steamAppId, gameId,
-   * title }; `server` and `token` are GameShelf's server and this app's device
-   * token. Resolves to the final state (packDir set when a pack was made).
+   * title }; `server` is GameShelf's server and `auth` the signed-in player's
+   * sign-in for the builder ({ GAMESHELF_SESSION }, see online.js). Resolves to
+   * the final state (packDir set when a pack was made).
    */
-  function build(game, { server, token, onProgress = () => {} }) {
+  function build(game, { server, auth, onProgress = () => {} }) {
     if (running.has(game.key)) return running.get(game.key).promise;
     if (!canBuild(game.tier)) return Promise.reject(new Error('GameShelf can\'t make Arabic for this game on this PC.'));
     const id = `gameshelf-${game.steamAppId ? `steam-${game.steamAppId}` : game.gameId}-ar`;
@@ -99,7 +100,8 @@ function createPackBuilder({ paths, outDir, keyFile, spawn = defaultSpawn, nodeP
       windowsHide: true,
       env: {
         ...process.env,
-        GAMESHELF_TOKEN: token,
+        GAMESHELF_TOKEN: '',
+        ...auth,
         GAMESHELF_NODE: nodePath,
         GAMESHELF_SIGNER: paths.signer,
         ELECTRON_RUN_AS_NODE: '1',

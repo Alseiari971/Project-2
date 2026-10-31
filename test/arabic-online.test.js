@@ -1,7 +1,7 @@
-// "Request Arabic subtitles" in the desktop app: the app gets a device token
-// from GameShelf's server, the real pack builder makes the pack on this PC from
-// the game's own text with the server's Arabic, and the server then counts the
-// game as ready for the next player.
+// Arabic subtitles in the desktop app, as a signed-in player: catalog packs
+// downloaded when the switch goes on, "Request Arabic subtitles" (the real pack
+// builder makes the pack on this PC from the game's own text, with the server's
+// Arabic), and the app's pass-through to GameShelf's server.
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
@@ -13,7 +13,14 @@ const { openDatabase } = require('../src/db');
 const { createLocalProvider } = require('../src/games/local');
 const { createTranslationMemory } = require('../src/translation-memory');
 const { createArabicGames } = require('../src/arabic-games');
+const crypto = require('node:crypto');
 const { createArabicOnline, gameKey } = require('../desktop/localization/online');
+const { createCloudClient, createPassThrough } = require('../desktop/cloud');
+const { createArabicService } = require('../desktop/localization/service');
+const { createPackRegistry } = require('../src/pack-registry');
+const { writeZip } = require('../src/zip');
+const { writePack } = require('../desktop/localization/pack');
+const { KIND } = require('../desktop/localization/fingerprint');
 const { createPackBuilder, findBuilder, localPackKey, readLine } = require('../desktop/localization/builder');
 const { createPackLibrary } = require('../desktop/localization/library');
 
@@ -53,24 +60,43 @@ test('the app finds its own Python when installed, and RE Engine needs REMSG_Con
 });
 
 const python = ['python3', 'python'].find((p) => spawnSync(p, ['-c', 'import arabic_reshaper, bidi'], { stdio: 'ignore' }).status === 0);
+const keys = crypto.generateKeyPairSync('ed25519');
+const PUBLIC = keys.publicKey.export({ type: 'spki', format: 'pem' });
 
-test('Request Arabic subtitles: built on this PC with the server\'s Arabic, then ready for the next player', { skip: !python && 'the pack builder needs Python with its requirements' }, async (t) => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'gs-online-'));
-  t.after(() => fs.rm(tmp, { recursive: true, force: true }));
+/** A real GameShelf server (with a stand-in for OpenAI that counts the lines it's asked for). */
+async function startServer(t) {
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'gs-online-'));
   const db = openDatabase(':memory:');
-  let asked = 0;
+  const asked = { lines: 0 };
   const fetch = async (_url, init) => {
     const user = JSON.parse(init.body).messages[1].content;
     const lines = JSON.parse(user.slice(user.indexOf('[')));
-    asked += lines.length;
+    asked.lines += lines.length;
     const translations = lines.map(({ id, text }) => ({ id, arabic: `عربي ${text}` }));
     return { ok: true, status: 200, headers: new Map(), json: async () => ({ choices: [{ message: { content: JSON.stringify({ translations }) } }] }) };
   };
   const translations = createTranslationMemory({ db, env: { OPENAI_API_KEY: 'server-key' }, fetch });
-  const server = createApp({ db, games: createLocalProvider(), translations, arabicGames: createArabicGames({ db, translations, env: {} }) }).listen(0, '127.0.0.1');
+  const packs = createPackRegistry({ db, dir: path.join(dataDir, 'packs'), publicKeys: [PUBLIC] });
+  const server = createApp({ db, games: createLocalProvider(), translations, arabicGames: createArabicGames({ db, translations }), dataDir, packs }).listen(0, '127.0.0.1');
   await new Promise((resolve) => server.once('listening', resolve));
-  t.after(() => server.close());
-  const base = `http://127.0.0.1:${server.address().port}`;
+  t.after(async () => {
+    server.close();
+    await fs.rm(dataDir, { recursive: true, force: true });
+  });
+  return { db, packs, asked, base: `http://127.0.0.1:${server.address().port}`, dataDir };
+}
+
+/** Registers an account and returns its sign-in cookie's value. */
+async function signUp(base, username) {
+  const res = await fetch(`${base}/api/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password: 'correct horse' }) });
+  assert.equal(res.status, 201);
+  return /gs_session=([^;]+)/.exec(res.headers.get('set-cookie'))[1];
+}
+
+const cloudAs = (base, value) => createCloudClient({ server: () => base, session: async () => value });
+
+test('Request Arabic subtitles: built on this PC with the server\'s Arabic, then ready for the next player', { skip: !python && 'the pack builder needs Python with its requirements' }, async (t) => {
+  const { base, asked, dataDir: tmp } = await startServer(t);
 
   // A small Ren'Py game.
   const game = path.join(tmp, 'Question');
@@ -81,27 +107,27 @@ test('Request Arabic subtitles: built on this PC with the server\'s Arabic, then
   const player = async (name) => {
     const dataDir = path.join(tmp, name);
     const key = localPackKey(dataDir);
-    const online = createArabicOnline({ server: base, dataDir });
+    const cloud = cloudAs(base, await signUp(base, name));
+    const online = createArabicOnline({ cloud, cacheDir: path.join(dataDir, 'downloads') });
     const builder = createPackBuilder({
       paths: { ...findBuilder({ packaged: false, repoDir: REPO, env: { GAMESHELF_PYTHON: python } }), msgTool: null },
       outDir: path.join(dataDir, 'builds'),
       keyFile: key.keyFile,
     });
-    return { dataDir, key, online, builder };
+    return { dataDir, key, cloud, online, builder };
   };
 
   const first = await player('first');
   const steam = { steamAppId: 1234567 };
   assert.equal((await first.online.status(gameKey(steam))).status, 'none');
-  assert.match(await fs.readFile(path.join(first.dataDir, 'localization', 'online.json'), 'utf8'), /"token":"gsd_/);
 
   const seen = [];
   const result = await first.builder.build({ key: 'steam:1234567', dir: game, tier: 'renpy-tl', title: 'The Question', ...steam },
-    { server: first.online.server, token: await first.online.token(), onProgress: (p) => seen.push(p.phase) });
+    { server: base, auth: await first.online.builderEnv(), onProgress: (p) => seen.push(p.phase) });
   assert.equal(result.missing || 0, 0);
   assert.equal(result.translated, 3);
   assert.ok(seen.includes('translating') && seen.includes('done'));
-  assert.equal(asked, 3);
+  assert.equal(asked.lines, 3);
 
   // The pack is signed with this PC's own key, which the app trusts.
   const library = createPackLibrary({ dir: path.join(first.dataDir, 'packs'), publicKey: [null, first.key.publicKey] });
@@ -115,26 +141,114 @@ test('Request Arabic subtitles: built on this PC with the server\'s Arabic, then
   const status = await other.online.status(gameKey(steam));
   assert.deepEqual([status.status, status.total, status.translated], ['ready', 3, 3]);
   await other.builder.build({ key: 'steam:1234567', dir: game, tier: 'renpy-tl', title: 'The Question', ...steam },
-    { server: other.online.server, token: await other.online.token() });
-  assert.equal(asked, 3);
+    { server: base, auth: await other.online.builderEnv() });
+  assert.equal(asked.lines, 3);
+
+  // Signed out, the builder can't ask the server.
+  await assert.rejects(createArabicOnline({ cloud: cloudAs(base, null), cacheDir: tmp }).builderEnv(), /Log in/);
 });
 
-test('asking for a game the app can\'t build counts once per player', async (t) => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'gs-online-'));
-  t.after(() => fs.rm(tmp, { recursive: true, force: true }));
-  const db = openDatabase(':memory:');
-  const translations = createTranslationMemory({ db, env: {} });
-  const server = createApp({ db, games: createLocalProvider(), translations, arabicGames: createArabicGames({ db, translations, env: {} }) }).listen(0, '127.0.0.1');
-  await new Promise((resolve) => server.once('listening', resolve));
-  t.after(() => server.close());
-  const online = createArabicOnline({ server: `http://127.0.0.1:${server.address().port}`, dataDir: tmp });
+test('asking for a game the app can\'t build counts once per player, and needs a sign-in', async (t) => {
+  const { base } = await startServer(t);
+  const online = createArabicOnline({ cloud: cloudAs(base, await signUp(base, 'alice')), cacheDir: os.tmpdir() });
   assert.equal((await online.request('steam:952060', 'Resident Evil 3')).requests, 1);
   const again = await online.request('steam:952060', 'Resident Evil 3');
   assert.deepEqual([again.requests, again.asked], [1, true]);
-  // A token the server forgot is replaced without the player noticing.
-  db.prepare('DELETE FROM devices').run();
-  assert.equal((await online.status('steam:952060')).asked, false);
+  await assert.rejects(createArabicOnline({ cloud: cloudAs(base, null), cacheDir: os.tmpdir() }).request('steam:952060'), /Log in/);
+  await assert.rejects(createArabicOnline({ cloud: cloudAs('http://127.0.0.1:9', 'x'), cacheDir: os.tmpdir() }).status('steam:952060'), /couldn't reach its server/);
+});
 
-  const offline = createArabicOnline({ server: 'http://127.0.0.1:9', dataDir: tmp, timeoutMs: 2000 });
-  await assert.rejects(offline.status('steam:952060'), /couldn't reach its server/);
+/** A signed overlay pack for a Steam game, as a .zip. */
+async function overlayPack(version, steamAppId = 1173690) {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'gs-pack-'));
+  await fs.writeFile(path.join(dir, 'fingerprints.json'), JSON.stringify({ kind: KIND, format: 2, normalization: 1, entries: [] }));
+  await writePack(dir, { id: 're3-demo-ar', version, engine: 'overlay', title: 'Resident Evil 3 Demo', game: { steamAppId }, files: [{ source: 'fingerprints.json', target: 'fingerprints.json' }], privateKey: keys.privateKey });
+  const files = [];
+  for (const name of ['pack.json', 'pack.json.sig', 'fingerprints.json']) files.push({ name, data: await fs.readFile(path.join(dir, name)) });
+  await fs.rm(dir, { recursive: true, force: true });
+  return writeZip(files);
+}
+
+test('a catalog pack shows as available, and turning Arabic on downloads, checks and installs it', async (t) => {
+  const { base, packs } = await startServer(t);
+  await packs.publish(await overlayPack('1.0.0'));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'gs-player-'));
+  t.after(() => fs.rm(tmp, { recursive: true, force: true }));
+  const gameDir = path.join(tmp, 'RE3DEMO');
+  await fs.mkdir(gameDir);
+  await fs.writeFile(path.join(gameDir, 're3demo.exe'), 'MZ');
+  const game = { key: 'steam:1173690', dir: gameDir, steamAppId: 1173690, gameId: null };
+
+  const player = (session) => {
+    const online = createArabicOnline({ cloud: cloudAs(base, session), cacheDir: path.join(tmp, 'downloads') });
+    return createArabicService({ dataDir: path.join(tmp, 'data'), publicKey: PUBLIC, overlayAvailable: true, catalog: online.catalog });
+  };
+
+  // Signed out: it shows, but the download needs an account.
+  const stranger = player(null);
+  const shown = await stranger.info(game);
+  assert.deepEqual([shown.mode, shown.cloud?.version, shown.enabled], ['overlay', '1.0.0', false]);
+  const refused = await stranger.set(game, true);
+  assert.match(refused.error.text, /Log in/);
+  assert.deepEqual(await stranger.packs.list(), []);
+
+  const arabic = player(await signUp(base, 'alice'));
+  const progress = [];
+  const { info, error } = await arabic.set(game, true, { onProgress: (p) => progress.push(p.phase) });
+  assert.equal(error, null);
+  assert.deepEqual([info.mode, info.enabled, info.cloud, info.pack.version], ['overlay', true, undefined, '1.0.0']);
+  assert.ok(progress.includes('downloading') && progress.includes('checking'));
+  assert.deepEqual((await arabic.packs.list()).map((p) => [p.id, p.version]), [['re3-demo-ar', '1.0.0']]);
+  assert.deepEqual(await fs.readdir(path.join(tmp, 'downloads')), []); // nothing left behind
+
+  // A newer version in the catalog comes down when Play is pressed.
+  await packs.publish(await overlayPack('1.1.0'));
+  const fresh = player(await signUp(base, 'bob'));
+  assert.equal((await fresh.info(game)).update?.version, '1.1.0');
+  const ready = await fresh.prepareLaunch(game);
+  assert.deepEqual([ready.mode, ready.ok, ready.error], ['overlay', true, undefined]);
+  assert.deepEqual((await fresh.packs.list()).map((p) => p.version), ['1.1.0']);
+});
+
+test('a download that doesn\'t match the catalog\'s SHA-256 is thrown away', async (t) => {
+  const { base, packs, db } = await startServer(t);
+  await packs.publish(await overlayPack('1.0.0'));
+  db.prepare("UPDATE localization_packs SET sha256 = 'not-the-hash'").run();
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'gs-player-'));
+  t.after(() => fs.rm(tmp, { recursive: true, force: true }));
+  const online = createArabicOnline({ cloud: cloudAs(base, await signUp(base, 'alice')), cacheDir: path.join(tmp, 'downloads') });
+  const [entry] = await online.catalog.list();
+  await assert.rejects(online.catalog.fetch(entry), /didn't download correctly/);
+  assert.deepEqual(await fs.readdir(path.join(tmp, 'downloads')), []);
+});
+
+test('the app\'s pass-through: its own pages, the server\'s /api, and a sign-in that sticks on plain http', async (t) => {
+  const { base } = await startServer(t);
+  const saved = process.env.NODE_ENV;
+  process.env.NODE_ENV = 'production'; // the server marks its cookie Secure, as a real one does
+  t.after(() => { if (saved === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = saved; });
+  const local = createPassThrough({ target: base, publicDir: path.join(REPO, 'public') }).listen(0, '127.0.0.1');
+  await new Promise((resolve) => local.once('listening', resolve));
+  t.after(() => local.close());
+  const app = `http://127.0.0.1:${local.address().port}`;
+
+  const page = await fetch(`${app}/`);
+  assert.equal(page.status, 200);
+  assert.match(await page.text(), /<html/i);
+  assert.match(page.headers.get('content-security-policy'), /script-src 'self'/);
+
+  const reg = await fetch(`${app}/api/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: app }, body: JSON.stringify({ username: 'alice', password: 'correct horse' }) });
+  assert.equal(reg.status, 201);
+  const cookie = reg.headers.get('set-cookie');
+  assert.match(cookie, /gs_session=/);
+  assert.doesNotMatch(cookie, /Secure/i);
+  const me = await (await fetch(`${app}/api/me`, { headers: { Cookie: cookie.split(';')[0] } })).json();
+  assert.deepEqual([me.user.username, me.user.role], ['alice', 'user']);
+
+  const remote = createPassThrough({ target: 'http://127.0.0.1:9', publicDir: path.join(REPO, 'public') }).listen(0, '127.0.0.1');
+  await new Promise((resolve) => remote.once('listening', resolve));
+  t.after(() => remote.close());
+  const down = await fetch(`http://127.0.0.1:${remote.address().port}/api/me`);
+  assert.equal(down.status, 502);
+  assert.match((await down.json()).error, /couldn't reach its server/);
 });

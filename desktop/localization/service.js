@@ -4,7 +4,8 @@
 // Modes:
 // - 'native'      the game's engine takes an added patch (Unreal pak, Unity
 //                 mod, RE Engine patch file, Ren'Py translation, Godot
-//                 override) and there's a signed pack for it;
+//                 override) and there's a signed pack for it, on this PC or in
+//                 GameShelf's cloud catalog (downloaded when it's switched on);
 // - 'overlay'     otherwise, when there's a signed overlay pack (anti-cheat,
 //                 signed paks and custom engines all end up here);
 // - 'unavailable' no pack for this game, or no way to use it here.
@@ -21,7 +22,7 @@ const PREFLIGHT_TTL_MS = 60 * 1000;
 
 const why = (text, vars = {}) => ({ text, vars });
 
-function createArabicService({ dataDir, publicKey, overlayAvailable = process.platform === 'win32', localization, packs }) {
+function createArabicService({ dataDir, publicKey, overlayAvailable = process.platform === 'win32', localization, packs, catalog = null }) {
   localization ??= createLocalization({ dataDir });
   packs ??= createPackLibrary({ dir: path.join(dataDir, 'localization', 'packs'), publicKey });
   const prefsFile = path.join(dataDir, 'localization', 'arabic.json');
@@ -73,11 +74,18 @@ function createArabicService({ dataDir, publicKey, overlayAvailable = process.pl
     const summary = (p) => ({ id: p.id, version: p.version, engine: p.engine, title: p.title });
     const native = result.fileChanges && found.find((p) => p.engine === TIER_ENGINES[result.tier]);
     const overlayPack = found.find((p) => p.engine === 'overlay');
+    // GameShelf's cloud catalog: a pack not on this PC yet, or a newer version of one that is.
+    const cloud = catalog ? await catalog.forGame(game).catch(() => null) : null;
+    const fits = cloud && ((cloud.mode === 'native' && result.fileChanges && cloud.engine === TIER_ENGINES[result.tier]) || (cloud.mode === 'overlay' && overlayAvailable));
+    const local = native || (overlayAvailable && overlayPack);
+    const update = fits && local && cloud.id === local.id && cloud.version !== local.version ? cloud : null;
     let out;
     if (native) {
-      out = { ...base, mode: 'native', pack: summary(native) };
+      out = { ...base, mode: 'native', pack: summary(native), update };
     } else if (overlayPack && overlayAvailable) {
-      out = { ...base, mode: 'overlay', pack: summary(overlayPack), detail: result.why };
+      out = { ...base, mode: 'overlay', pack: summary(overlayPack), detail: result.why, update };
+    } else if (fits) {
+      out = { ...base, mode: cloud.mode, pack: summary(cloud), cloud, detail: cloud.mode === 'overlay' ? result.why : null };
     } else if (overlayPack) {
       out = { ...base, why: why('The subtitle overlay needs Windows 10 or newer.') };
     } else if (found.length) {
@@ -95,11 +103,18 @@ function createArabicService({ dataDir, publicKey, overlayAvailable = process.pl
    * when it couldn't be done. Turning off takes the patch back out (the game
    * must be closed); turning on checks the pack straight away.
    */
-  async function set(game, on, { isRunning } = {}) {
-    const now = await info(game);
+  async function set(game, on, { isRunning, onProgress } = {}) {
+    let now = await info(game);
     if (on) {
       if (now.mode === 'unavailable') return { info: now, error: now.why };
       try {
+        // From the cloud catalog: downloaded and checked now, so Play starts right away.
+        if (now.cloud || now.update) {
+          await install(now.cloud || now.update, onProgress).catch((err) => {
+            if (now.cloud) throw err; // an update that fails keeps the pack already here
+          });
+          now = await info(game);
+        }
         await packs.verify(now.pack.id);
       } catch (err) {
         return { info: now, error: why(err.message) };
@@ -133,11 +148,17 @@ function createArabicService({ dataDir, publicKey, overlayAvailable = process.pl
    * adds the pack's files (if they aren't in yet); for the overlay, checks the
    * pack and loads its table. Returns { mode, ok, error, matcher, profile }.
    */
-  async function prepareLaunch(game) {
+  async function prepareLaunch(game, { onProgress } = {}) {
     const prefs = await readPrefs();
     if (prefs[game.key] !== true) return { mode: 'off', ok: true };
-    const now = await info(game);
+    let now = await info(game);
     try {
+      if (now.cloud || now.update) {
+        await install(now.cloud || now.update, onProgress).catch((err) => {
+          if (now.cloud) throw err;
+        });
+        now = await info(game);
+      }
       if (now.mode === 'native') {
         const pack = (await packs.list()).find((p) => p.id === now.pack.id);
         await localization.enable({ root: game.dir, packDir: pack.dir, publicKey, steamAppId: game.steamAppId });
@@ -154,6 +175,19 @@ function createArabicService({ dataDir, publicKey, overlayAvailable = process.pl
     } catch (err) {
       return { mode: now.mode, ok: false, error: why(err.message) };
     }
+  }
+
+  /** Downloads a catalog pack, checks it (SHA-256, then its signature and files) and adds it to this PC's packs. */
+  async function install(entry, onProgress = () => {}) {
+    if (!catalog) throw new Error('There\'s no Arabic pack catalog in this copy of GameShelf.');
+    const got = await catalog.fetch(entry, { onProgress });
+    try {
+      onProgress({ phase: 'checking' });
+      await packs.add(got.dir);
+    } finally {
+      await got.done();
+    }
+    checks.clear();
   }
 
   /** How the overlay looks, for every game: 'floating' (outlined text, no box, the default) or 'box'. */
@@ -173,7 +207,7 @@ function createArabicService({ dataDir, publicKey, overlayAvailable = process.pl
     return style;
   }
 
-  return { info, set, prepareLaunch, overlayStyle, setOverlayStyle, packs, localization, recover: () => localization.recover(), fill };
+  return { info, set, prepareLaunch, install, overlayStyle, setOverlayStyle, packs, localization, recover: () => localization.recover(), fill };
 }
 
 module.exports = { createArabicService };

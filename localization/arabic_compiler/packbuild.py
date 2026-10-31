@@ -47,7 +47,7 @@ from . import reefont
 from .repak import GamePak, path_hashes, write_pak
 from .rtl import DEFAULT_MAX_LINE, ArabicCompiler, glyphs_needed
 from .sources import SourceError, msg_dump_source, read_source
-from .shared import SharedError, SharedMemory, game_key, line_hash
+from .shared import SharedError, SharedMemory, credentials, game_key, line_hash
 from .translate import _LETTERS, _TOKENS, Cache, Provider, TranslationError, Translator, problem_with
 from .xunity import write_translations
 
@@ -167,10 +167,10 @@ def read_glossary(path):
 
 def shared_translate(rows, args, log) -> dict:
     """Fills in Arabic from the shared memory, and (unless --no-translate) has the server translate the rest. Returns {source: why not}."""
-    token = os.environ.get('GAMESHELF_TOKEN')
-    if not token:
+    auth = credentials(os.environ)
+    if not auth:
         raise BuildError('Set GAMESHELF_TOKEN to an access token from your GameShelf account (Edit profile, Access tokens).')
-    memory = SharedMemory(args.shared, token)
+    memory = SharedMemory(args.shared, auth)
     game = game_key(args.steam_app_id, args.game_id)
     if getattr(args, 'resolved_kind', None) == 'reengine' and not args.font_targets and not args.pak_list:
         # The game's font names, as a GameShelf admin's build found them (they're checked against the game's paks).
@@ -210,7 +210,7 @@ def report_lines(rows, args, kind, log):
     desktop app can tell players when its Arabic is ready."""
     lines = {r.source for r in rows if _LETTERS.search(_TOKENS.sub('', r.source))}
     try:
-        status = SharedMemory(args.shared, os.environ['GAMESHELF_TOKEN']).report(
+        status = SharedMemory(args.shared, credentials(os.environ)).report(
             game_key(args.steam_app_id, args.game_id), total=len(lines), engine=kind, name=args.title or '',
             font_targets=getattr(args, 'fonts_used', None) or [])
         log(f'The shared memory has {status.get("translated", 0)} of this game\'s {len(lines)} lines in Arabic.')

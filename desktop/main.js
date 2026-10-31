@@ -1,14 +1,16 @@
-// GameShelf desktop app (Electron). It runs the same server as the website
-// inside the app, on this computer only, and shows it in a launcher-style
-// window: no browser bars, and the window buttons sit in GameShelf's top bar.
+// GameShelf desktop app (Electron). It serves the website's pages from inside
+// the app, on this computer only, and shows them in a launcher-style window: no
+// browser bars, and the window buttons sit in GameShelf's top bar. Accounts,
+// game data and Arabic packs come from GameShelf's server (config.json's
+// "server", see cloud.js); without one, the app runs the whole website itself.
 const path = require('node:path');
 const fs = require('node:fs');
 const http = require('node:http');
 const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
-const { app, BrowserWindow, Menu, dialog, ipcMain, shell, desktopCapturer, screen } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, shell, desktopCapturer, screen, session, safeStorage } = require('electron');
 const { SETTINGS_KEYS, readSettings, writeSettings } = require('./settings');
-const { LAUNCHER_NAMES, scanInstalledGames } = require('./installed');
+const { LAUNCHER_NAMES, scanInstalledGames, suggestedStatus } = require('./installed');
 const { processesOf, listProcesses, stopProcesses } = require('./processes');
 const { createCustomGames, suggestName } = require('./custom-games');
 const { getGpuPreference, setGpuPreference, pickMainProgram, createProgramStore, gogUninstaller } = require('./game-options');
@@ -18,6 +20,8 @@ const { createOcrHelper, defaultSpawn } = require('./localization/ocr');
 const { createOverlayManager } = require('./localization/overlay-manager');
 const { createArabicOnline, gameKey } = require('./localization/online');
 const { createPackBuilder, findBuilder, localPackKey } = require('./localization/builder');
+const { createPassThrough, createCloudClient, createRemoteGames, SESSION_COOKIE } = require('./cloud');
+const { createStudio } = require('./localization/studio');
 const config = require('./config.json');
 const { normalizeTitle } = require('../src/text');
 
@@ -79,8 +83,24 @@ function applySettings(values) {
 
 // ---- Server -----------------------------------------------------------------------
 
+// GameShelf's server: config.json's "server". When developing, GAMESHELF_SERVER
+// points the app at another one (http://127.0.0.1:3000, say), or "local" runs
+// the whole website inside the app, with its own accounts and keys.
+const cloudServer = (() => {
+  const chosen = !app.isPackaged && process.env.GAMESHELF_SERVER;
+  if (chosen === 'local') return null;
+  return (chosen || config.server || config.arabicServer || '').replace(/\/+$/, '') || null;
+})();
+
 let db;
 function buildApp() {
+  if (cloudServer) {
+    games = createRemoteGames(cloud);
+    handler = createPassThrough({ target: cloudServer, publicDir: path.join(__dirname, '..', 'public') });
+    matches.clear();
+    startPresence();
+    return;
+  }
   // Required here, after the settings are in process.env.
   const { createApp } = require('../server');
   const { openDatabase } = require('../src/db');
@@ -239,7 +259,7 @@ const customGames = createCustomGames(path.join(dataDir, 'custom-games.json'));
 const programs = createProgramStore(path.join(dataDir, 'game-programs.json'));
 // The game's program file: known for GOG games and games added by hand, learned
 // for Steam and Epic games the first time they're seen running.
-const programOf = (game) => game.exe || programs.get(game.key);
+const programOf = (game) => game.exe || programs.get(game.key) || game.mainExe || null;
 
 // Rescans at most every few seconds, so games installed while the app is open show up.
 function scannedGames() {
@@ -288,20 +308,48 @@ async function findGamePages(installed) {
 // Packs are signed with GameShelf's key (see scripts/localization-pack.js);
 // its public half goes in config.json. When developing, GAMESHELF_PACK_KEY_FILE
 // can point at a test key, and GAMESHELF_OCR_HELPER at a stand-in OCR helper.
-const packKey = config.localizationPackKey
-  || (!app.isPackaged && process.env.GAMESHELF_PACK_KEY_FILE ? fs.readFileSync(process.env.GAMESHELF_PACK_KEY_FILE, 'utf8') : null);
+// From source, GAMESHELF_PACK_KEY_FILE, or else ../gameshelf-keys/pack-signing.pub
+// beside the repository (where scripts/prepare-dist.js keeps the key pair).
+const packKey = config.localizationPackKey || (() => {
+  if (app.isPackaged) return null;
+  const file = process.env.GAMESHELF_PACK_KEY_FILE || path.join(__dirname, '..', '..', 'gameshelf-keys', 'pack-signing.pub');
+  try {
+    return fs.readFileSync(file, 'utf8');
+  } catch {
+    return null;
+  }
+})();
 const devOcrHelper = !app.isPackaged ? process.env.GAMESHELF_OCR_HELPER : null;
 const ocrHelper = createOcrHelper({ spawnHelper: defaultSpawn({ dataDir, devHelper: devOcrHelper }) });
+// The app's own requests to GameShelf's server, as the signed-in player (the
+// sign-in cookie the window keeps for the app's own address).
+const cloud = createCloudClient({
+  server: () => cloudServer || origin,
+  session: async () => (origin ? (await session.defaultSession.cookies.get({ url: origin, name: SESSION_COOKIE }))[0]?.value || null : null),
+});
+// Arabic packs from the cloud catalog, and the shared translations (see online.js).
+const online = createArabicOnline({ cloud, cacheDir: path.join(dataDir, 'localization', 'downloads') });
 // Packs this app builds itself (from GameShelf's server, see below) are signed with a key made on this PC.
 const localKey = localPackKey(dataDir);
-const arabic = createArabicService({ dataDir, publicKey: [packKey, localKey.publicKey].filter(Boolean), overlayAvailable: process.platform === 'win32' || Boolean(devOcrHelper) });
-// "Request Arabic subtitles": the Arabic comes from GameShelf's server (shared by
-// every player), and the pack is built here from the player's own copy of the game.
-const online = createArabicOnline({ server: (!app.isPackaged && process.env.GAMESHELF_ARABIC_SERVER) || config.arabicServer, dataDir });
+const arabic = createArabicService({ dataDir, publicKey: [packKey, localKey.publicKey].filter(Boolean), overlayAvailable: process.platform === 'win32' || Boolean(devOcrHelper), catalog: online.catalog });
+const builderPaths = findBuilder({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, repoDir: path.join(__dirname, '..') });
 const packBuilder = createPackBuilder({
-  paths: findBuilder({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, repoDir: path.join(__dirname, '..') }),
+  paths: builderPaths,
   outDir: path.join(dataDir, 'localization', 'builds'),
   keyFile: localKey.keyFile,
+});
+// The Admin Panel's Pack Studio: builds, signs and publishes packs (see studio.js).
+// API keys are kept encrypted by Windows (safeStorage), or for this session only.
+const studio = createStudio({
+  paths: builderPaths,
+  dataDir,
+  cloud,
+  appKeys: [packKey].filter(Boolean),
+  secure: {
+    available: () => app.isReady() && safeStorage.isEncryptionAvailable(),
+    encrypt: (text) => safeStorage.encryptString(text),
+    decrypt: (data) => safeStorage.decryptString(data),
+  },
 });
 // Most of a game's lines must have Arabic before its pack goes in.
 const ENOUGH_ARABIC = 0.9;
@@ -446,7 +494,64 @@ function updatePresence(installed) {
   });
 }
 
+// ---- Arabic at a glance, and My games -----------------------------------------------
+
+// For each installed game: 'on' (Arabic switched on), 'ready' (a pack here or in
+// the catalog, or the server's translations are ready), 'request' (GameShelf can
+// make it on request) or 'none'.
+const badges = new Map();
+let badgeJob = null;
+
+function arabicBadges() {
+  badgeJob ??= (async () => {
+    const send = (key, badge) => {
+      badges.set(key, badge);
+      if (win && !win.isDestroyed()) win.webContents.send('installed:arabic', { key, badge });
+    };
+    try {
+      const installed = await installedGames();
+      const buildable = [];
+      for (const game of installed) {
+        let badge = 'none';
+        try {
+          const info = await arabic.info(arabicGame(game));
+          if (info.enabled) badge = 'on';
+          else if (info.mode === 'native' || info.mode === 'overlay') badge = 'ready';
+          else if (info.missing && packBuilder.canBuild(info.tier)) badge = 'request';
+        } catch {}
+        if (badge === 'request') buildable.push(game);
+        send(game.key, badge);
+      }
+      // The server's shared translations: ready ones turn on in a moment.
+      const keys = buildable.map((g) => [g.key, gameKey(arabicGame(g))]).filter(([, k]) => k);
+      if (keys.length && (await online.signedIn())) {
+        const { games: statuses } = await cloud.json('/api/arabic/status', { method: 'POST', body: { games: keys.map(([, k]) => k) } }).catch(() => ({ games: {} }));
+        for (const [key, serverKey] of keys) if (statuses[serverKey]?.status === 'ready') send(key, 'ready');
+      }
+    } finally {
+      badgeJob = null;
+    }
+  })();
+  return badgeJob;
+}
+
+const librarySyncFile = path.join(dataDir, 'library-sync.json');
+/** { auto: true | false | null }: null until the player says whether games on this PC go on My games by themselves. */
+function readLibrarySync() {
+  try {
+    const { auto } = JSON.parse(fs.readFileSync(librarySyncFile, 'utf8'));
+    return { auto: typeof auto === 'boolean' ? auto : null };
+  } catch {
+    return { auto: null };
+  }
+}
+
 // ---- Bridge for the page (see preload.js) -----------------------------------------
+
+/** Sends a game's Arabic progress (building, downloading a pack) to the page. */
+const arabicProgress = (key) => (progress) => {
+  if (win && !win.isDestroyed()) win.webContents.send('arabic:progress', { key, ...progress });
+};
 
 function fromApp(event) {
   try {
@@ -480,6 +585,8 @@ function registerIpc() {
   handle('settings:get', async () => ({
     values: readSettings(settingsFile),
     source: games.name,
+    // Signed in to GameShelf's server: no game-database keys needed here.
+    cloud: cloudServer,
     dataDir: app.isPackaged ? dataDir : null,
     discord: Boolean(discordAppId()),
   }));
@@ -493,10 +600,42 @@ function registerIpc() {
   // Installed games for the home screen, with their GameShelf page when there
   // is one. Games without one (demos, games the database doesn't know) show
   // too: they can still be played, and get Arabic packs by their Steam ID.
-  handle('installed:list', async () => {
+  const listInstalled = async () => {
     const installed = await installedGames();
     await findGamePages(installed);
     return installed.map((g) => ({ ...describe(g), steamAppId: g.steamAppId || null, game: pageOf(g) || { id: null, name: g.name } }));
+  };
+  handle('installed:list', listInstalled);
+  // "Rescan PC games" (and signing in): looks at Steam, Epic and GOG again right away.
+  handle('installed:rescan', async () => {
+    scan.at = 0;
+    const list = await listInstalled();
+    arabicBadges().catch(() => {});
+    return list;
+  });
+  // Each installed game's Arabic at a glance, for the Library: what's known now; the rest comes as 'installed:arabic' events.
+  handle('installed:arabic', async () => {
+    arabicBadges().catch(() => {});
+    return Object.fromEntries(badges);
+  });
+  // Adding the games on this PC to My games: whether to do it by itself, and doing it.
+  handle('library:sync-settings', async () => readLibrarySync());
+  handle('library:set-sync', async (auto) => {
+    fs.mkdirSync(dataDir, { recursive: true });
+    fs.writeFileSync(librarySyncFile, JSON.stringify({ auto: Boolean(auto) }));
+    return readLibrarySync();
+  });
+  handle('library:sync', async () => {
+    const installed = await installedGames();
+    const list = installed.map((g) => ({ steamAppId: g.steamAppId || null, name: pageOf(g)?.name || g.name, status: suggestedStatus(g) }));
+    let added = 0;
+    let matched = 0;
+    for (let i = 0; i < list.length; i += 300) {
+      const result = await cloud.json('/api/me/library/installed', { method: 'POST', body: { games: list.slice(i, i + 300) }, timeout: 120000 });
+      added += result.added;
+      matched += result.matched;
+    }
+    return { added, matched, total: list.length };
   });
   // Whether the game on a game page is installed: a game added by hand for this
   // page, the same Steam ID, or else the exact name.
@@ -514,7 +653,7 @@ function registerIpc() {
   handle('installed:launch', async (key) => {
     const game = await installedGame(key);
     if (running.has(key)) return null;
-    const ready = await arabic.prepareLaunch(arabicGame(game)).catch((err) => ({ mode: 'error', ok: false, error: { text: err.message, vars: {} } }));
+    const ready = await arabic.prepareLaunch(arabicGame(game), { onProgress: arabicProgress(key) }).catch((err) => ({ mode: 'error', ok: false, error: { text: err.message, vars: {} } }));
     // Start the OCR helper now, so it's warm by the time the game shows anything.
     if (ready.mode === 'overlay' && ready.ok) ocrHelper.ready().catch(() => {});
     await launch(game);
@@ -628,7 +767,7 @@ function registerIpc() {
       await checkRunning();
       return running.has(key);
     };
-    const result = await arabic.set(arabicGame(game), Boolean(on), { isRunning });
+    const result = await arabic.set(arabicGame(game), Boolean(on), { isRunning, onProgress: arabicProgress(key) });
     // The overlay can come and go while the game runs.
     if (!on) overlays?.stop(key);
     else if (result.info.mode === 'overlay' && !result.error && running.has(key) && !overlays.has(key)) {
@@ -643,8 +782,9 @@ function registerIpc() {
     const game = await installedGame(key);
     const info = await arabic.info(arabicGame(game));
     const serverKey = gameKey(arabicGame(game));
-    const out = { configured: online.configured, missing: Boolean(info.missing), canBuild: packBuilder.canBuild(info.tier), building: packBuilder.progress(key), server: null, error: null };
-    if (!info.missing || !online.configured || !serverKey) return out;
+    const signedIn = await online.signedIn();
+    const out = { configured: online.configured, signedIn, missing: Boolean(info.missing), canBuild: packBuilder.canBuild(info.tier), building: packBuilder.progress(key), server: null, error: null };
+    if (!info.missing || !signedIn || !serverKey) return out;
     try {
       out.server = await online.status(serverKey);
     } catch (err) {
@@ -658,10 +798,9 @@ function registerIpc() {
     const game = await installedGame(key);
     const before = await arabic.info(arabicGame(game));
     if (!before.missing) return { done: true, info: before };
-    const send = (progress) => win && !win.isDestroyed() && win.webContents.send('arabic:progress', { key, ...progress });
     try {
       const result = await packBuilder.build({ ...arabicGame(game), tier: before.tier, title: pageOf(game)?.name || game.name },
-        { server: online.server, token: await online.token(), onProgress: send });
+        { server: cloud.server(), auth: await online.builderEnv(), onProgress: arabicProgress(key) });
       const have = result.total ? (result.total - result.missing) / result.total : 0;
       if (have < ENOUGH_ARABIC) return { done: false, result, info: before };
       await arabic.packs.add(result.packDir);
@@ -678,6 +817,64 @@ function registerIpc() {
     if (!serverKey) throw new Error('GameShelf doesn\'t know which game this is, so it can\'t ask for it.');
     return online.request(serverKey, pageOf(game)?.name || game.name);
   });
+  // ---- Pack Studio (admins only; the server checks again when a pack is published) ----
+  const requireAdmin = async () => {
+    if ((await cloud.me())?.role !== 'admin') throw new Error('Only admins can do this.');
+  };
+  const studioSend = (channel) => (payload) => {
+    if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
+  };
+  // Only folders the Studio built in can be published, added or opened from the page.
+  const inStudio = (target) => {
+    const resolved = path.resolve(String(target || ''));
+    if (!resolved.startsWith(path.resolve(studio.outDir) + path.sep)) throw new Error('Not allowed.');
+    return resolved;
+  };
+  handle('studio:settings', async () => {
+    await requireAdmin();
+    return studio.settings();
+  });
+  handle('studio:save-settings', async (input) => {
+    await requireAdmin();
+    return studio.saveSettings(input || {});
+  });
+  handle('studio:pick', async (kind) => {
+    await requireAdmin();
+    const choices = {
+      folder: { title: 'Choose the game\'s folder', properties: ['openDirectory'] },
+      file: { title: 'Choose a file with the game\'s text', properties: ['openFile'], filters: [{ name: 'Game text', extensions: ['locres', 'assets', 'rpy', 'rpa', 'csv', 'po', 'json', 'txt', 'msg', 'pck'] }, { name: 'All files', extensions: ['*'] }] },
+      key: { title: 'Choose pack-signing.key', properties: ['openFile'], filters: [{ name: 'Signing key', extensions: ['key', 'pem'] }] },
+      list: { title: 'Choose the game\'s file list', properties: ['openFile'], filters: [{ name: 'File lists', extensions: ['list', 'txt'] }] },
+      csv: { title: 'Choose your checked translations.csv', properties: ['openFile'], filters: [{ name: 'CSV', extensions: ['csv'] }] },
+      'keys-folder': { title: 'Choose a folder for the new signing key (keep it private)', properties: ['openDirectory', 'createDirectory'] },
+    }[kind];
+    if (!choices) throw new Error('Not allowed.');
+    const result = await dialog.showOpenDialog(win, choices);
+    return result.canceled ? null : result.filePaths[0] || null;
+  });
+  handle('studio:make-keys', async (folder) => {
+    await requireAdmin();
+    return studio.makeKeys(String(folder));
+  });
+  handle('studio:build', async (options) => {
+    await requireAdmin();
+    return studio.build(options || {}, { onLog: studioSend('studio:log'), onProgress: studioSend('studio:progress') });
+  });
+  handle('studio:cancel', async () => studio.cancel());
+  handle('studio:publish', async (packDir) => {
+    await requireAdmin();
+    return studio.publish(inStudio(packDir));
+  });
+  handle('studio:add-local', async (packDir) => {
+    await requireAdmin();
+    return arabic.packs.add(inStudio(packDir));
+  });
+  handle('studio:open', async (target) => {
+    await requireAdmin();
+    const error = await shell.openPath(inStudio(target));
+    if (error) throw new Error(error);
+  });
+
   handle('arabic:packs', async () => ({ ready: Boolean(packKey), packs: (await arabic.packs.list()).map(({ dir, ...p }) => p) }));
   handle('arabic:add-pack', async () => {
     const result = await dialog.showOpenDialog(win, { title: 'Choose an Arabic pack folder', buttonLabel: 'Add pack', properties: ['openDirectory'] });
@@ -726,8 +923,8 @@ async function start() {
   // Takes back any Arabic patch that was cut short by a crash.
   arabic.recover().catch((err) => console.error('Could not tidy up Arabic patches:', err.message));
   if (process.platform !== 'darwin') Menu.setApplicationMenu(null);
-  // The first time the installed app opens, it starts on App settings to add the free keys.
-  createWindow(firstRun && app.isPackaged ? '/#/app-settings?welcome=1' : '/');
+  // Run without GameShelf's server, the installed app starts on App settings the first time, to add the free keys.
+  createWindow(firstRun && app.isPackaged && !cloudServer ? '/#/app-settings?welcome=1' : '/');
   app.on('activate', () => {
     if (!win) createWindow('/');
   });
