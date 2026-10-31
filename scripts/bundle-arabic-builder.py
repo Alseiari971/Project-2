@@ -140,8 +140,10 @@ def add_tools(out: Path, version: str):
             (unity / f'{name}.part').replace(unity / name)
         except Exception as err:  # noqa: BLE001
             (unity / f'{name}.part').unlink(missing_ok=True)
-            print(f'WARNING: {name} wasn\'t added ({err}). Download it yourself from {url.rsplit("/download/", 1)[0]} '
-                  f'and save it as {unity / name}.')
+            browser_only = getattr(err, 'code', None) == 403
+            print(f'WARNING: {name} wasn\'t added ({err}). '
+                  + ('That server only allows downloads from a web browser: open ' if browser_only else 'Download it yourself from ')
+                  + f'{url} and save it as {unity / name}.')
     ready = lambda flag: 'ready' if flag else 'NOT ready (request-only)'  # noqa: E731
     print(f'Unreal games (repak): {ready((tools / "repak.exe").is_file())}')
     print(f'Unity Mono games: {ready((site / "UnityPy").is_dir() and all((unity / n).is_file() for n in ("bepinex-mono.zip", "xunity-mono.zip")))}')
