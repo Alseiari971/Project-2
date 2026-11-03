@@ -19,20 +19,21 @@ const { spawn: defaultSpawn } = require('node:child_process');
 
 const BUILDABLE = {
   're-patch': 'reengine', 'renpy-tl': 'renpy', 'godot-override': 'godot', 'unity-bepinex': 'unity', 'unreal-pak': 'unreal',
-  'bethesda-strings': 'bethesda', 'loose-files': 'loose', recipe: 'custom', overlay: 'overlay',
+  'bethesda-strings': 'bethesda', 'loose-files': 'loose', recipe: 'custom', 'native-runtime': 'runtime', overlay: 'overlay',
 };
 
 /**
  * Where the builder and its Python are. Installed, they're in the app's
  * resources (arabic-builder/); from source, the repository's own builder runs
  * with build-tools/arabic-builder's Python if there is one, else python on the PATH.
- * GAMESHELF_PYTHON, GAMESHELF_MSG_TOOL, GAMESHELF_REPAK, GAMESHELF_UNITY_TOOLS and GAMESHELF_TOOLS override, for development.
+ * GAMESHELF_PYTHON, GAMESHELF_MSG_TOOL, GAMESHELF_REPAK, GAMESHELF_RETOC, GAMESHELF_UNITY_TOOLS and GAMESHELF_TOOLS override, for development.
  */
 function findBuilder({ packaged, resourcesPath, repoDir, env = process.env, platform = process.platform, exists = fs.existsSync }) {
   const bundle = packaged ? path.join(resourcesPath, 'arabic-builder') : path.join(repoDir, 'build-tools', 'arabic-builder');
   const bundledPython = path.join(bundle, 'python', platform === 'win32' ? 'python.exe' : 'bin/python3');
   const bundledMsgTool = path.join(bundle, 'remsg', 'src', 'main.py');
   const bundledRepak = path.join(bundle, 'tools', platform === 'win32' ? 'repak.exe' : 'repak');
+  const bundledRetoc = path.join(bundle, 'tools', platform === 'win32' ? 'retoc.exe' : 'retoc');
   const bundledUnity = path.join(bundle, 'tools', 'unity');
   const python = env.GAMESHELF_PYTHON || (exists(bundledPython) ? bundledPython : packaged ? null : platform === 'win32' ? 'python' : 'python3');
   return {
@@ -40,10 +41,16 @@ function findBuilder({ packaged, resourcesPath, repoDir, env = process.env, plat
     script: packaged ? path.join(bundle, 'scripts', 'build-arabic-pack.py') : path.join(repoDir, 'scripts', 'build-arabic-pack.py'),
     msgTool: env.GAMESHELF_MSG_TOOL || (exists(bundledMsgTool) ? bundledMsgTool : null),
     repak: env.GAMESHELF_REPAK || (exists(bundledRepak) ? bundledRepak : null),
+    // UE5 IoStore containers (.utoc/.ucas): optional, repak alone reads the .pak files.
+    retoc: env.GAMESHELF_RETOC || (exists(bundledRetoc) ? bundledRetoc : null),
     // bepinex-mono.zip, bepinex-il2cpp.zip, xunity-mono.zip, xunity-il2cpp.zip
     unityTools: env.GAMESHELF_UNITY_TOOLS || (exists(path.join(bundledUnity, 'bepinex-mono.zip')) ? bundledUnity : null),
     // Engine recipes' tools (quickbms/, wolvenkit/...: see localization/custom_engines.json).
     tools: env.GAMESHELF_TOOLS || path.join(bundle, 'tools'),
+    // The native runtime adapter (version.dll, dinput8.dll), built from localization/runtime/.
+    runtimeHook: env.GAMESHELF_RUNTIME_HOOK
+      || (exists(path.join(bundle, 'tools', 'runtime', 'version.dll')) ? path.join(bundle, 'tools', 'runtime')
+        : !packaged && exists(path.join(repoDir, 'localization', 'runtime', 'prebuilt', 'version.dll')) ? path.join(repoDir, 'localization', 'runtime', 'prebuilt') : null),
     // Signing runs on the app's own Node (Electron); its script is kept outside app.asar (asarUnpack).
     signer: packaged ? path.join(resourcesPath, 'app.asar.unpacked', 'scripts', 'localization-pack.js') : path.join(repoDir, 'scripts', 'localization-pack.js'),
   };
@@ -94,7 +101,7 @@ function createPackBuilder({ paths, outDir, keyFile, spawn = defaultSpawn, nodeP
   const running = new Map(); // game key -> { promise, child, state }
 
   // What each engine needs besides Python and the builder, to change its files or (overlay) just to read its text.
-  const needs = { 're-patch': () => paths.msgTool, 'unity-bepinex': () => paths.unityTools, 'unreal-pak': () => paths.repak };
+  const needs = { 're-patch': () => paths.msgTool, 'unity-bepinex': () => paths.unityTools, 'unreal-pak': () => paths.repak, 'native-runtime': () => paths.runtimeHook };
   const readers = {
     unreal: () => paths.repak, unity: () => paths.unityTools, reengine: () => paths.msgTool, renpy: () => true, godot: () => true,
     bethesda: () => true, custom: () => true,
@@ -105,7 +112,9 @@ function createPackBuilder({ paths, outDir, keyFile, spawn = defaultSpawn, nodeP
 
   /**
    * Builds the pack for a game. `game` is { key, dir, tier, steamAppId, gameId,
-   * title, recipe } (`recipe`: the signed engine recipe's file, for tier 'recipe'). With `server` and `auth` (the signed-in player's sign-in, see
+   * title, recipe, proxy, extraLines } (`recipe`: the signed engine recipe's file, for tier 'recipe';
+   * `proxy`: the library the runtime adapter stands in for, and `extraLines` the strings it saw in the
+   * game without Arabic, for tier 'native-runtime'). With `server` and `auth` (the signed-in player's sign-in, see
    * online.js), the Arabic comes from GameShelf's shared translations; with
    * `set` (a signed Arabic set's file), from that, with nothing translated.
    * Resolves to the final state (packDir set when a pack was made; info: the
@@ -127,6 +136,10 @@ function createPackBuilder({ paths, outDir, keyFile, spawn = defaultSpawn, nodeP
     if (paths.msgTool && (game.tier === 're-patch' || game.engine === 'reengine')) args.push('--msg-tool', paths.msgTool);
     if (game.tier === 're-patch') args.push('--require-fonts');
     if (game.tier === 'recipe') args.push('--recipe', game.recipe, '--tools-dir', paths.tools);
+    if (game.tier === 'native-runtime') {
+      args.push('--runtime-hook', paths.runtimeHook, '--proxy', game.proxy || 'version.dll');
+      if (game.extraLines) args.push('--extra-lines', game.extraLines);
+    }
     const state = { phase: 'starting', total: 0, have: 0, asking: 0, asked: 0, missing: 0, translated: 0, lines: 0, limited: false, packDir: null };
     const child = spawn(paths.python, args, {
       windowsHide: true,
@@ -137,6 +150,7 @@ function createPackBuilder({ paths, outDir, keyFile, spawn = defaultSpawn, nodeP
         GAMESHELF_NODE: nodePath,
         GAMESHELF_SIGNER: paths.signer,
         ...(paths.repak ? { GAMESHELF_REPAK: paths.repak } : {}),
+        ...(paths.retoc ? { GAMESHELF_RETOC: paths.retoc } : {}),
         ...(paths.unityTools ? { GAMESHELF_UNITY_TOOLS: paths.unityTools } : {}),
         ELECTRON_RUN_AS_NODE: '1',
         PYTHONIOENCODING: 'utf-8',

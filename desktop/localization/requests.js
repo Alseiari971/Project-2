@@ -15,6 +15,13 @@
 // admins with the reason and the game folder's fingerprint (dirprint.js), so an
 // admin can write the game's engine recipe without owning the game. Once a
 // recipe is signed and attached, the same button makes the Arabic natively.
+//
+// The runtime adapter ('native-runtime', see index.js) is only ever put into a
+// game Steam lists as single-player and nothing else (no online or local
+// multiplayer, no co-op); when that can't be checked, it isn't used. A game
+// with no readable English gets the adapter with an empty table first: it
+// notes the game's text as it's played, and the next press of the button
+// translates what it saw.
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { gameKey } = require('./online');
@@ -22,6 +29,19 @@ const { gameKey } = require('./online');
 // Most of a game's lines must have Arabic before its pack goes in.
 const ENOUGH_ARABIC = 0.9;
 const NEEDS_RECIPE = 'This game keeps its text packed in its own files, and GameShelf has no engine recipe for it yet.';
+// Steam features that mean a game is played with others: the runtime adapter never goes into those.
+const PLAYED_WITH_OTHERS = ['Multi-player', 'Online PvP', 'PvP', 'Online Co-op', 'Co-op', 'Shared/Split Screen', 'Cross-Platform Multiplayer'];
+
+/** Whether a game is played alone, as its Steam store page says: { ok, why }. Fails closed. */
+async function playedAlone(online, game) {
+  if (!game.steamAppId) return { ok: false, why: 'The runtime adapter is only for Steam games, whose store page says they\'re played alone.' };
+  const features = await online.features?.(game.steamAppId).catch(() => null);
+  if (!features) return { ok: false, why: 'GameShelf couldn\'t check that this game is played alone, so it didn\'t use the runtime adapter.' };
+  if (features.some((f) => PLAYED_WITH_OTHERS.includes(f)) || !features.includes('Single-player')) {
+    return { ok: false, why: 'This game can be played online or with others, so GameShelf won\'t run its adapter in it.' };
+  }
+  return { ok: true, why: null };
+}
 
 /**
  * Why this PC can't make Arabic for a game (`info` from the Arabic service), or
@@ -60,13 +80,20 @@ function createArabicRequests({ arabic, packBuilder, online, server, recipes = n
     if (!consent) return { done: false, needsConsent: true };
     const serverKey = gameKey(game);
     const before = await arabic.info(game);
-    if (!before.missing) return { done: true, info: before, submitted: null };
+    // A game with the runtime adapter in: new lines it saw while the game was played get their Arabic too.
+    const refresh = before.tier === 'native-runtime' && before.mode === 'native' && before.runtime?.newLines > 0;
+    if (!before.missing && !refresh) return { done: true, info: before, submitted: null };
     const askAdmins = async (reason) => {
       if (serverKey) await ask(game, reason, before).catch(() => {});
       return { done: false, requested: true, reason, info: before };
     };
     const cant = cantMake(before, packBuilder, overlayAvailable);
     if (cant) return askAdmins(cant);
+    const runtime = before.tier === 'native-runtime';
+    if (runtime) {
+      const alone = await playedAlone(online, game);
+      if (!alone.ok) return askAdmins(alone.why);
+    }
     // Packed text: the game's engine recipe, signed by an admin, says how to read it.
     let recipe = null;
     if (before.tier === 'recipe') {
@@ -87,18 +114,28 @@ function createArabicRequests({ arabic, packBuilder, online, server, recipes = n
 
     let result;
     try {
-      result = await packBuilder.build({ ...game, tier: before.tier, engine: before.engine, recipe: recipe?.file }, { server: server(), auth, onProgress });
+      const seen = runtime && before.runtime?.newLines > 0 ? before.runtime.dump : null;
+      result = await packBuilder.build({
+        ...game, tier: before.tier, engine: before.engine, recipe: recipe?.file, proxy: before.runtime?.proxy, extraLines: seen,
+      }, { server: server(), auth, onProgress });
+      // What the adapter saw is in this build now; it starts a new list as the game is played again.
+      if (seen) await fs.rename(seen, seen.replace(/\.txt$/, '.sent.txt')).catch(() => {});
     } catch (err) {
       // The game's files couldn't be read here (encrypted, say): the admins hear about it.
       if (/encrypted|couldn't read|can't read|no text|no english|found no|engine recipe|recipe found/i.test(err.message)) return askAdmins(err.message);
       return { done: false, info: before, error: { text: err.message, vars: {} } };
     }
     const have = result.total ? (result.total - result.missing) / result.total : 0;
-    if (have < ENOUGH_ARABIC) return { done: false, partial: true, result, info: before };
+    // The runtime adapter goes in with what there is (even nothing yet): lines without Arabic stay in English, and
+    // it notes them as the game is played.
+    const learning = runtime && !result.total;
+    if (have < ENOUGH_ARABIC && !runtime) return { done: false, partial: true, result, info: before };
 
     // Playable here straight away, with this PC's own signature.
     await arabic.packs.add(result.packDir);
     const { info, error } = await arabic.set(game, true);
+
+    if (learning) return { done: true, learning: true, result, info, error, submitted: null };
 
     // Then off to GameShelf for review.
     onProgress({ ...result, phase: 'submitting' });
@@ -123,4 +160,4 @@ function createArabicRequests({ arabic, packBuilder, online, server, recipes = n
   return { run, ask };
 }
 
-module.exports = { createArabicRequests, cantMake, ENOUGH_ARABIC, NEEDS_RECIPE };
+module.exports = { createArabicRequests, cantMake, playedAlone, ENOUGH_ARABIC, NEEDS_RECIPE, PLAYED_WITH_OTHERS };

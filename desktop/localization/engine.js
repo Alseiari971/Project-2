@@ -18,11 +18,15 @@
 //   file scanner's quick look, see localization/arabic_compiler/loose.py), and
 //   which known packed engine it looks like (localization/custom_engines.json:
 //   God of War's exec/wad/pc_le, REDengine's archive/pc/content...), for an
-//   admin's engine recipe.
+//   admin's engine recipe; and `custom.runtime`, whether the native runtime
+//   adapter can reach its text: a 64-bit program whose modules import Windows'
+//   text functions (GDI, DirectWrite), and a system library (version.dll or
+//   dinput8.dll) it loads that the adapter can stand in for (see pe.js).
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { list, findEntry, findPath, programArch } = require('./files');
 const reengine = require('./reengine');
+const { peImports, importedFunctions, importedLibraries } = require('./pe');
 const registry = require('../../localization/custom_engines.json');
 
 // Bethesda games by their program. Older ones keep their text inside their
@@ -50,6 +54,19 @@ const SKIP_DIRS = new Set(['_commonredist', 'redist', 'redistributables', 'direc
   'python', 'node_modules', 'saves', 'savegames', 'logs', 'shadercache', 'gameshelf_arabic']);
 const ENGLISH = /(^|[_\-.\s])(en|eng|english|en[_-]?us|en[_-]?gb)$|^(en|eng|english|en[_-]?us|en[_-]?gb)([_\-.\s]|$)/i;
 const QUICK_LOOK = { maxEntries: 15000, maxDepth: 6, enough: 12 };
+// What the runtime adapter hooks (localization/runtime/gs_hook.c), and the libraries it can stand in for.
+const TEXT_FUNCTIONS = ['ExtTextOutW', 'TextOutW', 'DrawTextW', 'DrawTextExW', 'DWriteCreateFactory'];
+const RUNTIME_PROXIES = ['version.dll', 'dinput8.dll'];
+const MAX_MODULES = 64;
+
+// UE5 IoStore containers (.utoc): the header says whether one is encrypted (EIoContainerFlags.Encrypted).
+const TOC_MAGIC = '-==--==--==--==-';
+
+async function containerEncrypted(file) {
+  const head = await readHead(file, 84);
+  if (!head || head.length < 84 || head.toString('latin1', 0, 16) !== TOC_MAGIC) return null;
+  return Boolean(head[80] & 2);
+}
 
 async function findUnreal(base) {
   const entries = await list(base);
@@ -62,6 +79,9 @@ async function findUnreal(base) {
     const paks = (await list(paksDir)).filter((e) => e.isFile()).map((e) => e.name.toLowerCase());
     const pakCount = paks.filter((n) => n.endsWith('.pak')).length;
     const ioStore = paks.some((n) => n.endsWith('.utoc'));
+    const containers = (await list(paksDir)).filter((e) => e.isFile() && /\.utoc$/i.test(e.name) && !/arabiclocalization/i.test(e.name)).map((e) => e.name);
+    let encryptedContainers = 0;
+    for (const name of containers) if (await containerEncrypted(path.join(paksDir, name))) encryptedContainers += 1;
     if (!pakCount && !ioStore) continue;
 
     const binaries = await findPath(projectDir, 'Binaries', 'Win64');
@@ -78,6 +98,9 @@ async function findUnreal(base) {
         // UE5 (and late UE4) games pack assets in .utoc/.ucas; a replacement
         // asset then needs all three files, a .locres alone still loads from a .pak.
         ioStore,
+        containers: containers.length,
+        // Encrypted containers need the game's own key, which GameShelf never uses.
+        encryptedContainers,
         // Signed paks (.sig files) reject any pak the developer didn't sign, and
         // getting around that isn't something GameShelf will do.
         signedPaks: paks.some((n) => n.endsWith('.sig')),
@@ -364,6 +387,47 @@ async function looseText(root) {
 }
 
 /**
+ * Whether the native runtime adapter can reach a custom-engine game's text: its
+ * program (the biggest .exe in its folder, or in bin/, x64/ or Binaries/Win64),
+ * the Windows text functions it and the libraries beside it import, and which
+ * library the adapter would stand in for. Null when there's no program.
+ */
+async function runtimeInfo(root) {
+  let dir = null;
+  let exe = null;
+  for (const folder of [root, ...(await Promise.all(['bin', 'x64', 'Bin64', 'Binaries/Win64'].map((p) => findPath(root, ...p.split('/')))))]) {
+    if (!folder) continue;
+    let biggest = -1;
+    for (const entry of (await list(folder)).filter((e) => e.isFile() && /\.exe$/i.test(e.name) && !/unins|crash|setup|redist|launcher/i.test(e.name))) {
+      const size = (await fs.stat(path.join(folder, entry.name)).catch(() => null))?.size ?? -1;
+      if (size > biggest) [exe, biggest] = [path.join(folder, entry.name), size];
+    }
+    if (exe) {
+      dir = folder;
+      break;
+    }
+  }
+  if (!exe) return null;
+  const program = await peImports(exe);
+  const files = (await list(dir)).filter((e) => e.isFile()).map((e) => e.name);
+  const libraries = files.filter((n) => /\.dll$/i.test(n) && !RUNTIME_PROXIES.includes(n.toLowerCase())).slice(0, MAX_MODULES);
+  const modules = [program, ...(await Promise.all(libraries.map((n) => peImports(path.join(dir, n)))))];
+  const functions = new Set(modules.flatMap((m) => [...importedFunctions(m)]));
+  const loads = new Set(modules.flatMap((m) => [...importedLibraries(m)]));
+  // Libraries already in the game's folder with those names (another mod's, or GameShelf's own while Arabic is on).
+  const present = RUNTIME_PROXIES.filter((name) => files.some((n) => n.toLowerCase() === name));
+  return {
+    exe,
+    dir,
+    arch: program?.arch || null,
+    textApis: TEXT_FUNCTIONS.filter((f) => functions.has(f)),
+    // The library the adapter would stand in for: one the game loads by name.
+    proxy: RUNTIME_PROXIES.find((name) => loads.has(name)) || null,
+    present,
+  };
+}
+
+/**
  * Which engine the game in `root` uses. Looks in the folder itself, then one
  * folder down (some stores install into a subfolder).
  */
@@ -380,7 +444,10 @@ async function fingerprint(root) {
     family = await engineFamily(base);
     if (family) break;
   }
-  return { root: realRoot, engine: 'custom', base: realRoot, custom: { family, looseText: await looseText(realRoot) } };
+  return {
+    root: realRoot, engine: 'custom', base: realRoot,
+    custom: { family, looseText: await looseText(realRoot), runtime: await runtimeInfo(realRoot) },
+  };
 }
 
-module.exports = { fingerprint, unityVersion, renpyVersion, engineFamily, looseText, matches, BETHESDA_GAMES, UNITY_VERSION };
+module.exports = { fingerprint, unityVersion, renpyVersion, engineFamily, looseText, matches, runtimeInfo, BETHESDA_GAMES, UNITY_VERSION, TEXT_FUNCTIONS };

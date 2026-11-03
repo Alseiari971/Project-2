@@ -24,15 +24,23 @@
 //                   REDengine...): built with the game's engine recipe, which an
 //                   admin signed (see localization/arabic_compiler/recipes.py);
 //                   the repacked files replace the game's, kept and put back too.
+// - 'native-runtime' Other single-player 64-bit engines whose archives no tool
+//                   can repack, but whose UI text goes through Windows' text
+//                   functions (GDI, DirectWrite): GameShelf's runtime adapter
+//                   (localization/runtime/) stands in for a library the game
+//                   loads from its folder, and swaps each English string for its
+//                   Arabic right before Windows lays it out, so the game's own UI
+//                   draws it. Nothing in the game's files changes; only the
+//                   library this copy of GameShelf ships is ever installed.
 // - 'overlay'       Every game with anti-cheat (and packs made for the overlay):
 //                   subtitles drawn in GameShelf's own window, without touching the game.
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { scanAntiCheat } = require('./anticheat');
 const { fingerprint } = require('./engine');
-const { readPack } = require('./pack');
+const { readPack, RUNTIME_PROXIES, RUNTIME_SETTINGS } = require('./pack');
 const { createStager, StageError } = require('./stager');
-const { sha256 } = require('./files');
+const { sha256, fold } = require('./files');
 const { AUTO_TRANSLATOR_CONFIG, GENERATED, autoTranslatorConfig, unityMismatch } = require('./unity');
 const renpy = require('./renpy');
 const godot = require('./godot');
@@ -41,11 +49,11 @@ const reengine = require('./reengine');
 // The pack engine each tier takes.
 const TIER_ENGINES = {
   'unreal-pak': 'unreal', 'unity-bepinex': 'unity', 're-patch': 'reengine', 'renpy-tl': 'renpy', 'godot-override': 'godot',
-  'bethesda-strings': 'bethesda', 'loose-files': 'loose', recipe: 'custom',
+  'bethesda-strings': 'bethesda', 'loose-files': 'loose', recipe: 'custom', 'native-runtime': 'runtime',
 };
 const ENGINE_NAMES = {
   unreal: 'Unreal', unity: 'Unity', reengine: 'RE Engine', renpy: 'Ren\'Py', godot: 'Godot',
-  bethesda: 'Bethesda Creation Engine', loose: 'loose-file', custom: 'custom-engine',
+  bethesda: 'Bethesda Creation Engine', loose: 'loose-file', custom: 'custom-engine', runtime: 'runtime-adapter',
 };
 // Tiers whose packs replace some of the game's own files (kept aside, and put back when Arabic is turned off).
 const REPLACING_TIERS = new Set(['bethesda-strings', 'loose-files', 'recipe']);
@@ -115,11 +123,47 @@ async function preflight(root, { steamAppId, ownMods = false, maxEntries } = {})
     return { ...base, ...native('godot-override') };
   }
   if (engine.engine === 'bethesda') return { ...base, ...native('bethesda-strings') };
-  // Another engine: its own text files when it has readable ones; otherwise
-  // (and for engines known to pack their text) the game's engine recipe.
-  const { family, looseText } = engine.custom || {};
+  // Another engine: its own text files when it has readable ones; for engines
+  // known to pack their text, the game's engine recipe; otherwise the runtime
+  // adapter, when it can reach the game's text; else an engine recipe.
+  const { family, looseText, runtime } = engine.custom || {};
   if (looseText?.length && family?.needs !== 'recipe') return { ...base, ...native('loose-files') };
-  return { ...base, ...native('recipe') };
+  if (family?.needs === 'recipe') return { ...base, ...native('recipe') };
+  const adapter = runtimeCheck(runtime, ownMods);
+  if (adapter.ok) return { ...base, ...native('native-runtime'), adapter };
+  return { ...base, ...native('recipe'), adapter };
+}
+
+/** Whether the runtime adapter can serve a custom-engine game ({ ok, why }; `runtime` from engine.js). */
+function runtimeCheck(runtime, ownMods = false) {
+  if (!runtime) return { ok: false, why: 'GameShelf couldn\'t find the game\'s program.' };
+  if (runtime.arch !== 'x64') return { ok: false, why: 'The runtime adapter is for 64-bit games.' };
+  if (!runtime.textApis.length) return { ok: false, why: 'This game doesn\'t draw its text with Windows\' text functions (GDI or DirectWrite).' };
+  if (!runtime.proxy) return { ok: false, why: 'This game doesn\'t load a Windows library the runtime adapter can stand in for.' };
+  if (runtime.present.includes(runtime.proxy) && !ownMods) {
+    return { ok: false, why: `This game already has a ${runtime.proxy} in its folder (another mod's). GameShelf leaves it as it is.` };
+  }
+  return { ok: true, why: null };
+}
+
+/** Where the runtime adapter writes what it saw in a game (outside the game's folder). */
+function runtimeFolder(dataDir, root) {
+  return path.join(dataDir, 'localization', 'runtime', sha256(fold(path.resolve(root))).slice(0, 16));
+}
+
+/** The adapter's settings (gameshelf_arabic/gameshelf_runtime.ini), written by GameShelf when Arabic goes in. */
+function runtimeSettings({ exe, root, font, folder }) {
+  return [
+    '; GameShelf\'s runtime adapter settings. GameShelf writes this when Arabic is turned on and removes it when it\'s turned off.',
+    `exe=${exe}`,
+    `root=${root}`,
+    'strings=gameshelf_arabic\\gameshelf_strings.bin',
+    ...(font ? [`font=${font.replace(/\//g, '\\')}`] : []),
+    `dump=${path.join(folder, 'untranslated.txt')}`,
+    `status=${path.join(folder, 'status.txt')}`,
+    'rtl=1',
+    '',
+  ].join('\r\n');
 }
 
 async function isFile(file) {
@@ -127,9 +171,16 @@ async function isFile(file) {
 }
 
 /** The files to add for a checked pack, and where. */
-async function stagePlan(check, pack) {
+async function stagePlan(check, pack, { runtimeDir } = {}) {
   const { engine } = check;
   const files = pack.files.map((f) => ({ target: f.target, source: f.source, sha256: f.sha256 }));
+  if (check.tier === 'native-runtime') {
+    const { runtime } = engine.custom;
+    const font = files.find((f) => /^gameshelf_arabic\/[^/]+\.(ttf|otf)$/i.test(f.target));
+    const settings = runtimeSettings({ exe: path.basename(runtime.exe), root: check.root, font: font?.target, folder: runtimeDir });
+    files.push({ target: RUNTIME_SETTINGS, content: settings, sha256: sha256(settings), mutable: true });
+    return { anchor: runtime.dir, files, generated: [] };
+  }
   if (REPLACING_TIERS.has(check.tier)) {
     // Each file the game already has is replaced (the original kept aside); the rest are added.
     for (const file of files) file.replace = await isFile(path.join(engine.base, ...file.target.split(/[\\/]/)));
@@ -173,7 +224,7 @@ async function stagePlan(check, pack) {
  * 'running', 'blocked' (only the overlay is possible: see .reason), 'mismatch'
  * (the pack is for another build), or the pack's and stager's own errors.
  */
-async function enableArabic({ root, packDir, stager, publicKey, allowUnsigned = false, steamAppId, isRunning }) {
+async function enableArabic({ root, packDir, stager, publicKey, allowUnsigned = false, steamAppId, isRunning, runtimeHooks = null, runtimeDir = null }) {
   if (await isRunning?.()) throw new LocalizationError('Close the game first.', 'running');
   const pack = await readPack(packDir, { publicKey, allowUnsigned });
   let ours = await stager.status(root);
@@ -199,7 +250,8 @@ async function enableArabic({ root, packDir, stager, publicKey, allowUnsigned = 
     throw new LocalizationError(`This pack is for ${packEngine} games, and this game uses ${ENGINE_NAMES[wanted]}.`, 'mismatch');
   }
   const requires = pack.manifest.requires || {};
-  const arch = check.engine.unreal?.arch || check.engine.unity?.arch || check.engine.godot?.arch || check.engine.bethesda?.arch;
+  const arch = check.engine.unreal?.arch || check.engine.unity?.arch || check.engine.godot?.arch || check.engine.bethesda?.arch
+    || check.engine.custom?.runtime?.arch;
   if (requires.arch && arch && requires.arch !== arch) {
     throw new LocalizationError(`This pack is for ${requires.arch} games, and this game is ${arch}.`, 'mismatch');
   }
@@ -218,7 +270,20 @@ async function enableArabic({ root, packDir, stager, publicKey, allowUnsigned = 
     if (head.toString('latin1') !== reengine.PAK_MAGIC) throw new LocalizationError('The pack\'s file isn\'t an RE Engine .pak.', 'pack');
   }
 
-  const result = await stager.enable({ root: check.root, pack: pack.manifest, ...(await stagePlan(check, pack)) });
+  if (wanted === 'runtime') {
+    // The adapter runs inside the game: only the exact library this copy of GameShelf ships goes in.
+    const library = pack.files.find((f) => RUNTIME_PROXIES.includes(f.target.toLowerCase()));
+    if (!runtimeHooks || runtimeHooks[library.target.toLowerCase()] !== library.sha256) {
+      throw new LocalizationError('This pack\'s runtime adapter isn\'t the one this copy of GameShelf ships, so it wasn\'t added.', 'pack');
+    }
+    if (library.target.toLowerCase() !== check.engine.custom.runtime.proxy) {
+      throw new LocalizationError(`This pack stands in for ${library.target}, and this game loads ${check.engine.custom.runtime.proxy}.`, 'mismatch');
+    }
+    if (!runtimeDir) throw new LocalizationError('GameShelf has nowhere to keep what the runtime adapter sees.', 'pack');
+    await fs.mkdir(runtimeDir, { recursive: true });
+  }
+
+  const result = await stager.enable({ root: check.root, pack: pack.manifest, ...(await stagePlan(check, pack, { runtimeDir })) });
   return { ...result, tier: check.tier };
 }
 
@@ -228,17 +293,25 @@ async function disableArabic({ root, stager, isRunning }) {
   return stager.disable(root);
 }
 
-/** The stager for this computer: its records live in the app's data folder. */
-function createLocalization({ dataDir }) {
+/**
+ * The stager for this computer: its records live in the app's data folder.
+ * `runtimeHooks` is { 'version.dll': SHA-256, 'dinput8.dll': SHA-256 } of the
+ * runtime adapter this copy of GameShelf ships (none: no runtime packs go in).
+ */
+function createLocalization({ dataDir, runtimeHooks = null }) {
   const stager = createStager({ stateDir: path.join(dataDir, 'localization') });
   return {
     stager,
     preflight,
+    runtimeFolder: (root) => runtimeFolder(dataDir, root),
     recover: () => stager.recover(),
     status: (root) => stager.status(root),
-    enable: (options) => enableArabic({ ...options, stager }),
+    enable: (options) => enableArabic({ ...options, stager, runtimeHooks, runtimeDir: runtimeFolder(dataDir, options.root) }),
     disable: (options) => disableArabic({ ...options, stager }),
   };
 }
 
-module.exports = { preflight, enableArabic, disableArabic, createLocalization, LocalizationError, StageError, fill, TIER_ENGINES, REPLACING_TIERS, ENGINE_NAMES };
+module.exports = {
+  preflight, enableArabic, disableArabic, createLocalization, LocalizationError, StageError, fill, TIER_ENGINES, REPLACING_TIERS, ENGINE_NAMES,
+  runtimeCheck, runtimeFolder, runtimeSettings,
+};

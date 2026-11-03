@@ -21,7 +21,7 @@ const { GAME_RE, sha256 } = require('./translation-memory');
 
 const ENGINES = {
   reengine: 're-patch', renpy: 'renpy-tl', godot: 'godot-override', unity: 'unity-bepinex', unreal: 'unreal-pak',
-  bethesda: 'bethesda-strings', loose: 'loose-files', custom: 'recipe', overlay: 'overlay',
+  bethesda: 'bethesda-strings', loose: 'loose-files', custom: 'recipe', runtime: 'native-runtime', overlay: 'overlay',
 };
 const MAX_LINES = 200000;
 const MAX_LINE_CHARS = 2000;
@@ -111,7 +111,8 @@ function createSubmissions({ db, translations, publicKeys = [] }) {
     const pending = q.pendingFor.get(game);
     let id;
     if (pending) {
-      q.replace.run({ ...row, id: pending.id });
+      const { game: _game, ...changes } = row; // the pending submission is already this game's
+      q.replace.run({ ...changes, id: pending.id });
       id = pending.id;
     } else {
       id = Number(q.insert.run(row).lastInsertRowid);

@@ -132,3 +132,16 @@ test('a player\'s PC that can\'t read a game leaves a request with the reason; a
   assert.equal(status.fontTargets.length, 2);
   assert.equal((await hamad('/api/admin/games/steam:1173690/file-list', { method: 'PUT', raw: 'nothing useful' })).status, 400);
 });
+
+test('a newer submission for a game replaces the one still waiting', () => {
+  const db = openDatabase(':memory:');
+  const translations = createTranslationMemory({ db, env: {} });
+  const submissions = createSubmissions({ db, translations, publicKeys: [PUBLIC] });
+  db.prepare("INSERT INTO users (id, username, display_name, password_hash) VALUES (1, 'alice', 'Alice', 'x')").run();
+  const first = submissions.submit({ id: 1 }, { game: 'steam:4242', name: 'Lantern', engine: 'runtime', lines: ['Press any key to start'] });
+  const second = submissions.submit({ id: 1 }, { game: 'steam:4242', name: 'Lantern', engine: 'runtime', lines: ['Press any key to start', 'The gate opens at dawn'] });
+  assert.equal(second.id, first.id);
+  assert.equal(second.total, 2);
+  const [only] = submissions.list();
+  assert.deepEqual([only.id, only.tier, only.total], [first.id, 'native-runtime', 2]);
+});

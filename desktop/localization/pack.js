@@ -7,7 +7,7 @@
 //   {
 //     "format": 1, "id": "some-game-ar", "version": "1.0.0", "language": "ar",
 //     "title": "Some Game in Arabic",           (optional, shown in App settings)
-//     "engine": "unreal" | "unity" | "reengine" | "renpy" | "godot" | "bethesda" | "loose" | "custom" | "overlay",
+//     "engine": "unreal" | "unity" | "reengine" | "renpy" | "godot" | "bethesda" | "loose" | "custom" | "runtime" | "overlay",
 //     "game": { "steamAppId": 1245620, "gameId": "elden-ring" },   (which game it's for)
 //     "overlay": { "region": [0, 0.78, 1, 0.22], "textLuma": 170, "darkText": false, "threshold": 0.72 },
 //     "requires": { "arch": "x64", "unityBackend": "mono", "unityVersion": "2019.4", "godot": 4 },
@@ -21,7 +21,8 @@
 // folder (Unity, Ren'Py) or the folder of the game's program (Godot), and
 // only these may be added:
 // - Unreal: .pak/.utoc/.ucas files whose name ends in _P (patch files, loaded
-//   after the game's own, so they win without replacing anything).
+//   after the game's own, so they win without replacing anything). A .utoc
+//   (a UE5 IoStore container) comes with its .ucas and a .pak of the same name.
 // - Unity: BepInEx/ and dotnet/ (the mod loader), doorstop's files and the font
 //   bundle. The XUnity.AutoTranslator settings are written by GameShelf itself.
 // - RE Engine: a single .pak, re_chunk_000.pak.patch_XXX.pak; GameShelf puts
@@ -39,6 +40,11 @@
 //   and puts them back (stager.js, replace mode).
 // - Custom engines (built with an admin-signed engine recipe): any file but
 //   programs, libraries and scripts, also replacing the game's own.
+// - Runtime adapter (custom engines no tool can repack): one library, the
+//   adapter standing in for version.dll or dinput8.dll in the game's program
+//   folder, and gameshelf_strings.bin, fonts and license texts in
+//   gameshelf_arabic/. GameShelf writes the adapter's settings itself, and only
+//   installs a library whose SHA-256 is the one this copy of GameShelf ships.
 // - Overlay: only fingerprints.json, which never goes into the game's folder.
 const fs = require('node:fs/promises');
 const crypto = require('node:crypto');
@@ -57,7 +63,11 @@ const UNITY_RESERVED = 'bepinex/config/autotranslatorconfig.ini';
 const DATA_DIRS = { renpy: ['game', 'tl', 'arabic', 'gameshelf'], godot: ['gameshelf_arabic'] };
 const DATA_FILE = /^(strings\.json|[\w.\-]+\.(ttf|otf|txt))$/i;
 const RESERVED_NAMES = /^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$/i;
-const ENGINES = ['unreal', 'unity', 'reengine', 'renpy', 'godot', 'bethesda', 'loose', 'custom', 'overlay'];
+const ENGINES = ['unreal', 'unity', 'reengine', 'renpy', 'godot', 'bethesda', 'loose', 'custom', 'runtime', 'overlay'];
+// The runtime adapter: the Windows libraries it may stand in for, and what goes beside it.
+const RUNTIME_PROXIES = ['version.dll', 'dinput8.dll'];
+const RUNTIME_DATA = /^(gameshelf_strings\.bin|[\w.\-]+\.(ttf|otf|txt))$/i;
+const RUNTIME_SETTINGS = 'gameshelf_arabic/gameshelf_runtime.ini';
 // Bethesda string tables: skyrim_english.strings, Fallout4_en.DLSTRINGS, ccbgssse001-fish_english.ilstrings.
 const BETHESDA_TABLE = /^[\w .'()&+!\-]+_[a-z]+\.(strings|dlstrings|ilstrings)$/i;
 const BETHESDA_FILES = new Set(['data/interface/fontconfig.txt', 'data/interface/gameshelf_arabic.swf']);
@@ -111,6 +121,14 @@ function checkTarget(manifest, parts, target) {
     const license = parts.length === 4 && joined.startsWith('data/interface/gameshelf/') && /\.txt$/i.test(parts[3]);
     if (!table && !license && !BETHESDA_FILES.has(joined)) {
       throw new PackError(`"${target}" isn't allowed: Bethesda packs may only add string tables in Data/Strings, Data/Interface/fontconfig.txt, Data/Interface/gameshelf_arabic.swf and license texts.`);
+    }
+    return;
+  }
+  if (manifest.engine === 'runtime') {
+    const proxy = parts.length === 1 && RUNTIME_PROXIES.includes(lower[0]);
+    const data = parts.length === 2 && lower[0] === 'gameshelf_arabic' && RUNTIME_DATA.test(parts[1]);
+    if (!proxy && !data) {
+      throw new PackError(`"${target}" isn't allowed: runtime packs hold the adapter (${RUNTIME_PROXIES.join(' or ')}) and gameshelf_strings.bin, fonts and license texts in gameshelf_arabic.`);
     }
     return;
   }
@@ -185,6 +203,22 @@ function checkManifest(manifest) {
     if (!Number.isInteger(file.size) || file.size < 0) throw new PackError(`"${file.target}" has no valid size.`);
   }
   if (manifest.engine === 'reengine' && manifest.files.length !== 1) throw new PackError(`RE Engine packs hold one file, ${RE_TARGET}.`);
+  if (manifest.engine === 'runtime') {
+    const targets = manifest.files.map((f) => f.target.toLowerCase());
+    if (targets.filter((t) => RUNTIME_PROXIES.includes(t)).length !== 1 || !targets.includes('gameshelf_arabic/gameshelf_strings.bin')) {
+      throw new PackError('A runtime pack holds one adapter library and gameshelf_strings.bin.');
+    }
+  }
+  if (manifest.engine === 'unreal') {
+    // An IoStore container (UE5) only loads as a whole: its .utoc, .ucas and a .pak of the same name.
+    const names = new Set(manifest.files.map((f) => f.target.toLowerCase()));
+    for (const name of names) {
+      const stem = name.replace(/\.(utoc|ucas)$/, '');
+      if (stem !== name && !['.utoc', '.ucas', '.pak'].every((ext) => names.has(stem + ext))) {
+        throw new PackError(`"${stem}" needs its .utoc, .ucas and .pak together.`);
+      }
+    }
+  }
   if (DATA_DIRS[manifest.engine] && !manifest.files.some((f) => /(^|[\\/])strings\.json$/i.test(f.target))) {
     throw new PackError('The pack has no strings.json.');
   }
@@ -259,4 +293,4 @@ async function writePack(dir, { files, privateKey, ...details }) {
   return manifest;
 }
 
-module.exports = { readPack, writePack, PackError, MANIFEST, SIGNATURE, ENGINES, REPLACING_ENGINES, EXECUTABLE };
+module.exports = { readPack, writePack, PackError, MANIFEST, SIGNATURE, ENGINES, REPLACING_ENGINES, EXECUTABLE, RUNTIME_PROXIES, RUNTIME_SETTINGS };

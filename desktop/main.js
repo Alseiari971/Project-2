@@ -22,7 +22,7 @@ const { createArabicOnline, gameKey } = require('./localization/online');
 const { createPackBuilder, findBuilder, localPackKey } = require('./localization/builder');
 const { createPassThrough, createCloudClient, createRemoteGames, SESSION_COOKIE } = require('./cloud');
 const { createStudio } = require('./localization/studio');
-const { createArabicRequests, cantMake, NEEDS_RECIPE } = require('./localization/requests');
+const { createArabicRequests, cantMake, playedAlone, NEEDS_RECIPE } = require('./localization/requests');
 const { createRecipes, recipeTemplate } = require('./localization/recipes');
 const { directoryFingerprint } = require('./localization/dirprint');
 const config = require('./config.json');
@@ -336,8 +336,21 @@ const online = createArabicOnline({ cloud, cacheDir: path.join(dataDir, 'localiz
 const recipes = createRecipes({ cloud, cacheDir: path.join(dataDir, 'localization', 'recipes'), publicKeys: [packKey].filter(Boolean) });
 // Packs this app builds itself (from GameShelf's server, see below) are signed with a key made on this PC.
 const localKey = localPackKey(dataDir);
+const builderPaths = findBuilder({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, repoDir: path.join(__dirname, '..') });
+// The runtime adapter this copy of the app ships: only these exact libraries ever go into a game (see localization/index.js).
+const runtimeHooks = (() => {
+  if (!builderPaths.runtimeHook) return null;
+  const hashes = {};
+  for (const name of ['version.dll', 'dinput8.dll']) {
+    try {
+      hashes[name] = crypto.createHash('sha256').update(fs.readFileSync(path.join(builderPaths.runtimeHook, name))).digest('hex');
+    } catch {}
+  }
+  return Object.keys(hashes).length ? hashes : null;
+})();
 const arabic = createArabicService({
   dataDir,
+  runtimeHooks,
   publicKey: [packKey, localKey.publicKey].filter(Boolean),
   overlayAvailable: process.platform === 'win32' || Boolean(devOcrHelper),
   catalog: online.catalog,
@@ -348,12 +361,17 @@ const arabic = createArabicService({
       // Packed text: the game's signed engine recipe says how to read it and put the Arabic back.
       const recipe = tier === 'recipe' ? await recipes.forGame(gameKey(game)) : null;
       if (tier === 'recipe' && !recipe) throw new Error(NEEDS_RECIPE);
-      return (await packBuilder.build({ ...game, tier, title: entry.title || set.title, recipe: recipe?.file },
+      // The runtime adapter only goes into games played alone.
+      if (tier === 'native-runtime') {
+        const alone = await playedAlone(online, game);
+        if (!alone.ok) throw new Error(alone.why);
+      }
+      const seen = tier === 'native-runtime' && game.runtime?.newLines > 0 ? game.runtime.dump : null;
+      return (await packBuilder.build({ ...game, tier, title: entry.title || set.title, recipe: recipe?.file, proxy: game.runtime?.proxy, extraLines: seen },
         { set: setFile, fontTargets: set.fontTargets || [], version: entry.version, onProgress })).packDir;
     },
   },
 });
-const builderPaths = findBuilder({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, repoDir: path.join(__dirname, '..') });
 const packBuilder = createPackBuilder({
   paths: builderPaths,
   outDir: path.join(dataDir, 'localization', 'builds'),

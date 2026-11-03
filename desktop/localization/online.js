@@ -56,6 +56,16 @@ function createArabicOnline({ cloud, cacheDir, publicKeys = [] }) {
       return { GAMESHELF_SESSION: session };
     },
 
+    /** A Steam game's store features ("Single-player", "Online PvP"...), or null when they can't be had. */
+    async features(steamAppId) {
+      if (!steamAppId) return null;
+      try {
+        return (await cloud.json(`/api/steam/${encodeURIComponent(steamAppId)}/features`, { auth: false })).features || null;
+      } catch {
+        return null;
+      }
+    },
+
     /** { status: 'ready' | 'partial' | 'none', total, translated, requests, asked, fontTargets } */
     async status(key) {
       return (await cloud.json('/api/arabic/status', { method: 'POST', body: { games: [key] } })).games?.[key] || null;

@@ -8,11 +8,14 @@ resources; see "extraResources" in package.json):
   localization/ the builder (arabic_compiler) and its fonts
   scripts/      build-arabic-pack.py
   remsg/        REMSG_Converter (MIT), for RE Engine message files
-  tools/        repak (MIT or Apache-2.0), for Unreal games' .pak files; in
+  tools/        repak (MIT or Apache-2.0), for Unreal games' .pak files, and retoc
+                (MIT), for UE5 games' .utoc/.ucas IoStore containers; in
                 tools/unity/, BepInEx (LGPL-2.1) and XUnity.AutoTranslator (MIT)
                 for Unity games, Mono and IL2CPP (with UnityPy, MIT, in python/);
-                and in tools/quickbms/, QuickBMS (GPL-2.0, with its source), the
-                tool most engine recipes run (localization/custom_engines.json)
+                in tools/quickbms/, QuickBMS (GPL-2.0, with its source), the
+                tool most engine recipes run (localization/custom_engines.json);
+                and in tools/runtime/, GameShelf's own native runtime adapter
+                (version.dll, dinput8.dll, built from localization/runtime/)
 
 That's what the "Request Arabic subtitles" button runs, so players never need
 Python or a command prompt. Run it on any computer with Python 3 and internet:
@@ -47,6 +50,7 @@ REMSG_REQUIREMENTS = ['chardet>=5.2.0', 'mmh3>=4.0.1']
 # Tools for more engines. Each is optional: when one can't be fetched, the app
 # just can't make Arabic for that engine on players' PCs (it sends a request instead).
 REPAK_URL = 'https://github.com/trumank/repak/releases/download/v0.2.3/repak_cli-x86_64-pc-windows-msvc.zip'
+RETOC_URL = 'https://github.com/trumank/retoc/releases/download/v0.1.5/retoc_cli-x86_64-pc-windows-msvc.zip'
 # QuickBMS by Luigi Auriemma, for engine recipes; its source goes alongside (GPL-2.0).
 QUICKBMS_URL = 'https://aluigi.altervista.org/papers/quickbms.zip'
 QUICKBMS_SOURCE_URL = 'https://aluigi.altervista.org/papers/quickbms_src.zip'
@@ -129,6 +133,16 @@ def add_tools(out: Path, version: str):
                         (tools / f'repak-{Path(name).name}').write_bytes(archive.read(name))
         except Exception as err:  # noqa: BLE001 (any failure just leaves Unreal out)
             print(f'WARNING: repak wasn\'t added ({err}).')
+    if not (tools / 'retoc.exe').is_file():
+        try:
+            with zipfile.ZipFile(io.BytesIO(download(RETOC_URL))) as archive:
+                exe = next(n for n in archive.namelist() if n.lower().endswith('retoc.exe'))
+                (tools / 'retoc.exe').write_bytes(archive.read(exe))
+                for name in archive.namelist():
+                    if 'license' in name.lower() and not name.endswith('/'):
+                        (tools / f'retoc-{Path(name).name}').write_bytes(archive.read(name))
+        except Exception as err:  # noqa: BLE001 (UE5 containers are optional: repak reads the .pak files)
+            print(f'WARNING: retoc wasn\'t added ({err}). UE5 games\' .utoc/.ucas containers won\'t be read.')
     unity = tools / 'unity'
     unity.mkdir(exist_ok=True)
     site = out / 'python' / 'Lib' / 'site-packages'
@@ -149,6 +163,11 @@ def add_tools(out: Path, version: str):
             print(f'WARNING: {name} wasn\'t added ({err}). '
                   + ('That server only allows downloads from a web browser: open ' if browser_only else 'Download it yourself from ')
                   + f'{url} and save it as {unity / name}.')
+    # GameShelf's runtime adapter, as built from its sources (scripts/build-runtime-hook.py): the app only ever
+    # installs these exact files.
+    runtime = tools / 'runtime'
+    shutil.rmtree(runtime, ignore_errors=True)
+    shutil.copytree(REPO / 'localization' / 'runtime' / 'prebuilt', runtime)
     quickbms = tools / 'quickbms'
     quickbms.mkdir(exist_ok=True)
     if not (quickbms / 'quickbms.exe').is_file():
@@ -170,9 +189,11 @@ def add_tools(out: Path, version: str):
                   + f'{QUICKBMS_URL} (and its source, {QUICKBMS_SOURCE_URL}) and put quickbms.exe in {quickbms}.')
     ready = lambda flag: 'ready' if flag else 'NOT ready (request-only)'  # noqa: E731
     print(f'Unreal games (repak): {ready((tools / "repak.exe").is_file())}')
+    print(f'UE5 IoStore containers (retoc): {"ready" if (tools / "retoc.exe").is_file() else "NOT ready (the .pak files are still read)"}')
     print(f'Unity Mono games: {ready((site / "UnityPy").is_dir() and all((unity / n).is_file() for n in ("bepinex-mono.zip", "xunity-mono.zip")))}')
     print(f'Unity IL2CPP games: {ready((site / "UnityPy").is_dir() and all((unity / n).is_file() for n in ("bepinex-il2cpp.zip", "xunity-il2cpp.zip")))}')
     print('Bethesda games and games with readable text files: ready')
+    print(f'Runtime adapter: {ready((runtime / "version.dll").is_file() and (runtime / "dinput8.dll").is_file())}')
     print(f'Engine recipes that use QuickBMS: {ready((quickbms / "quickbms.exe").is_file())}')
 
 
@@ -191,6 +212,8 @@ def add_builder(out: Path):
         f'remsg/: REMSG_Converter by dtlnor, MIT License (remsg/LICENSE), commit {REMSG_COMMIT}.\n'
         'localization/assets/fonts/: IBM Plex Sans Arabic, SIL Open Font License (OFL.txt).\n'
         'tools/repak.exe: repak by trumank, MIT or Apache-2.0 (github.com/trumank/repak).\n'
+        'tools/retoc.exe: retoc by trumank, MIT (github.com/trumank/retoc).\n'
+        'tools/runtime/: GameShelf\'s runtime adapter, built from localization/runtime/ in GameShelf\'s source.\n'
         'tools/unity/: BepInEx (LGPL-2.1, github.com/BepInEx/BepInEx) and XUnity.AutoTranslator by bbepis\n'
         '  (MIT, github.com/bbepis/XUnity.AutoTranslator), installed into Unity games when a player turns Arabic on;\n'
         '  python/Lib/site-packages/UnityPy: UnityPy by K0lb3 (MIT).\n'

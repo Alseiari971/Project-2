@@ -73,9 +73,50 @@ function paintArabic(button, info) {
       mount(button.querySelector('small'), html`${t('Log in to turn on')}`);
     }
   }
+  if (info?.runtime && mode === 'native') {
+    notes.push(t('GameShelf\'s runtime adapter swaps the game\'s English for Arabic as Windows draws it. The game\'s files don\'t change.'));
+    const last = info.runtime.lastSession;
+    if (last && !last.calls) notes.push(t('Last time the game was played, none of its text went through Windows\' text functions, so the adapter couldn\'t reach it.'));
+    else if (last) notes.push(t('Last time the game was played: {translated} of {calls} texts drawn in Arabic.', { translated: last.translated.toLocaleString(), calls: last.calls.toLocaleString() }));
+  }
   button.title = notes.filter(Boolean).join('\n');
+  paintRefresh(button, info);
   // No pack on this PC yet: GameShelf's server may have the Arabic, or it can be asked for.
   if (mode === 'unavailable' && info?.missing) checkOnline(button);
+}
+
+/** Games with the runtime adapter: "Translate N new lines" for the text it saw in the game without Arabic. */
+function paintRefresh(button, info) {
+  let refresh = button.parentElement?.querySelector('[data-arabic-refresh]');
+  const count = (info?.mode === 'native' && info.runtime?.newLines) || 0;
+  if (!count) {
+    refresh?.remove();
+    return;
+  }
+  if (!refresh) {
+    refresh = document.createElement('button');
+    refresh.type = 'button';
+    refresh.className = 'pill-btn pill-light arabic-refresh';
+    refresh.dataset.arabicRefresh = button.dataset.arabic;
+    button.insertAdjacentElement('afterend', refresh);
+    refresh.addEventListener('click', async () => {
+      if (refresh.disabled || !(await askConsent(button.closest('.page')?.querySelector('h1')?.textContent?.trim() || ''))) return;
+      refresh.disabled = true;
+      try {
+        const { done, info: after, error, requested, reason } = await desktop.getArabic(button.dataset.arabic, { consent: true });
+        paintArabic(button, after);
+        if (requested) toast(t(reason), { error: true });
+        else if (error) toast(explain(error), { error: true });
+        else if (done) toast(t('The new lines are in Arabic. They show the next time you play.'));
+      } catch (err) {
+        toast(errorText(err), { error: true });
+      } finally {
+        refresh.disabled = false;
+      }
+    });
+  }
+  refresh.textContent = count === 1 ? t('Translate 1 new line') : t('Translate {count} new lines', { count: count.toLocaleString() });
+  refresh.title = t('Lines the game showed in English while you played. GameShelf translates them and adds them to the game\'s Arabic.');
 }
 
 /**
@@ -224,10 +265,11 @@ async function getArabic(button) {
   const request = button.classList.contains('is-request');
   if (request && !(await askConsent(button.closest('.page')?.querySelector('h1')?.textContent?.trim() || ''))) return;
   paintProgress(button, { phase: 'starting' });
-  const { done, result, info, error, submitted, requested, reason } = await desktop.getArabic(key, { consent: true });
+  const { done, result, info, error, submitted, requested, reason, learning } = await desktop.getArabic(key, { consent: true });
   paintArabic(button, info);
   if (done) {
     if (error) toast(explain(error), { error: !info.enabled });
+    else if (learning) toast(t('GameShelf\'s runtime adapter is in. Play the game for a while so it can see the game\'s text, then press Translate new lines beside this switch.'));
     else if (submitted?.id) toast(t('Arabic subtitles on. Your Arabic was sent to GameShelf for review: once it\'s approved, every player with this game gets it.'));
     else if (submitted?.error) toast(t('Arabic subtitles on. It couldn\'t be sent for review just now: {reason}', { reason: t(submitted.error) }));
     else toast(t('Arabic subtitles on. Press Play to start the game in Arabic.'));

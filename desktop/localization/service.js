@@ -30,8 +30,8 @@ const why = (text, vars = {}) => ({ text, vars });
  * patch on this PC from an approved Arabic set: { canBuild(tier), fromSet({ game,
  * tier, entry, set, setFile, onProgress }) -> pack folder } (see main.js).
  */
-function createArabicService({ dataDir, publicKey, overlayAvailable = process.platform === 'win32', localization, packs, catalog = null, builder = null }) {
-  localization ??= createLocalization({ dataDir });
+function createArabicService({ dataDir, publicKey, overlayAvailable = process.platform === 'win32', localization, packs, catalog = null, builder = null, runtimeHooks = null }) {
+  localization ??= createLocalization({ dataDir, runtimeHooks });
   packs ??= createPackLibrary({ dir: path.join(dataDir, 'localization', 'packs'), publicKey });
   const prefsFile = path.join(dataDir, 'localization', 'arabic.json');
   const overlayFile = path.join(dataDir, 'localization', 'overlay.json');
@@ -93,6 +93,8 @@ function createArabicService({ dataDir, publicKey, overlayAvailable = process.pl
       || (cloud.mode === 'build' && cloud.tier === tier && (tier !== 'overlay' || overlayAvailable) && Boolean(builder?.canBuild(tier, engine))));
     const local = native || (overlayAvailable && overlayPack);
     const update = fits && local && cloud.id === local.id && cloud.version !== local.version ? cloud : null;
+    // The runtime adapter: which library it stands in for, and what it saw in the game (see index.js, requests.js).
+    const runtime = tier === 'native-runtime' ? await runtimeInfo(game, result) : null;
     let out;
     if (native) {
       out = { ...base, mode: 'native', pack: summary(native), update, tier, engine };
@@ -113,7 +115,19 @@ function createArabicService({ dataDir, publicKey, overlayAvailable = process.pl
         why: why('There\'s no Arabic pack for this game yet.'),
       };
     }
-    return { ...out, enabled: out.mode !== 'unavailable' && prefs[game.key] === true };
+    return { ...out, ...(runtime ? { runtime } : {}), enabled: out.mode !== 'unavailable' && prefs[game.key] === true };
+  }
+
+  async function runtimeInfo(game, result) {
+    const folder = localization.runtimeFolder?.(game.dir);
+    const info = { proxy: result.engine?.custom?.runtime?.proxy || null, dump: folder ? path.join(folder, 'untranslated.txt') : null, newLines: 0, lastSession: null };
+    if (!folder) return info;
+    const dump = await fs.readFile(info.dump, 'utf8').catch(() => '');
+    info.newLines = dump.split('\n').filter((line) => line.trim()).length;
+    const status = await fs.readFile(path.join(folder, 'status.txt'), 'utf8').catch(() => '');
+    const numbers = Object.fromEntries([...status.matchAll(/^(\w+)=(\d+)$/gm)].map((m) => [m[1], Number(m[2])]));
+    if ('calls' in numbers) info.lastSession = { calls: numbers.calls, translated: numbers.translated || 0, missed: numbers.missed || 0, entries: numbers.entries || 0 };
+    return info;
   }
 
   /**
@@ -128,7 +142,7 @@ function createArabicService({ dataDir, publicKey, overlayAvailable = process.pl
       try {
         // From the cloud catalog: downloaded and checked now, so Play starts right away.
         if (now.cloud || now.update) {
-          await install(now.cloud || now.update, onProgress, { ...game, engine: now.engine }, now.tier).catch((err) => {
+          await install(now.cloud || now.update, onProgress, { ...game, engine: now.engine, runtime: now.runtime }, now.tier).catch((err) => {
             if (now.cloud) throw err; // an update that fails keeps the pack already here
           });
           now = await info(game);
@@ -172,7 +186,7 @@ function createArabicService({ dataDir, publicKey, overlayAvailable = process.pl
     let now = await info(game);
     try {
       if (now.cloud || now.update) {
-        await install(now.cloud || now.update, onProgress, { ...game, engine: now.engine }, now.tier).catch((err) => {
+        await install(now.cloud || now.update, onProgress, { ...game, engine: now.engine, runtime: now.runtime }, now.tier).catch((err) => {
           if (now.cloud) throw err;
         });
         now = await info(game);

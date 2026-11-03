@@ -12,6 +12,9 @@
        - unreal:  the game's .locres with the Arabic in it, and an Arabic font
                   in place of the game's own font files, packed into
                   pakchunk99-ArabicLocalization_P.pak (with repak or UnrealPak);
+                  UE5 games' .locres and font lists are read from their IoStore
+                  containers too, and cooked replacement font packages go into
+                  the same name's .utoc/.ucas with retoc to-zen (see retoc.py);
        - renpy:   strings.json and the Arabic font for game/tl/arabic/gameshelf;
        - godot:   strings.json and the Arabic fonts for gameshelf_arabic;
        - reengine: the game's message files with the Arabic in them, in an RE
@@ -22,6 +25,11 @@
        - loose:   the game's own text files (JSON, CSV, XML, .po/.mo, .txt/.ini...)
                   with the Arabic in place of the English, and the Arabic font in
                   place of its loose fonts (see loose.py);
+       - runtime: for engines no tool can repack, whose UI text goes through
+                  Windows' text APIs: the native runtime adapter (a stand-in
+                  version.dll or dinput8.dll) with gameshelf_strings.bin, the
+                  English it found in readable form mapped to its Arabic (see
+                  runtime.py and localization/runtime/);
        - custom:  for packed engines, an engine recipe (--recipe) takes the text
                   out with an allowlisted tool and puts the Arabic back into
                   copies of the game's archives (see recipes.py);
@@ -51,7 +59,10 @@ from pathlib import Path, PurePosixPath
 
 from . import bethesda
 from . import locres as locres_format
+from . import loose
 from . import recipes
+from . import retoc
+from . import runtime
 from . import remsg
 from . import swffont
 from .fingerprint import build_table
@@ -92,7 +103,7 @@ def parse_args(argv=None):
     p = argparse.ArgumentParser(prog='build-arabic-pack', description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('source', help='game folder, .locres, Unity .assets, Ren\'Py .rpy/.rpa, Godot CSV/.po, RE Engine message dump or '
                                   'extracted natives folder, CSV, JSON or XUnity .txt')
-    p.add_argument('--kind', '--engine', dest='kind', choices=['overlay', 'unity', 'unreal', 'reengine', 'renpy', 'godot', 'bethesda', 'loose', 'custom'],
+    p.add_argument('--kind', '--engine', dest='kind', choices=['overlay', 'unity', 'unreal', 'reengine', 'renpy', 'godot', 'bethesda', 'loose', 'custom', 'runtime'],
                    help='what pack to make (default: from the source; overlay otherwise)')
     p.add_argument('--id', required=True, help='pack id, e.g. my-game-ar')
     p.add_argument('--version', required=True, help='pack version, e.g. 1.0.0')
@@ -149,6 +160,11 @@ def parse_args(argv=None):
     c.add_argument('--packer-path', help='unreal: path to repak or UnrealPak')
     c.add_argument('--pak-version', default='V11', help='unreal (repak): the game\'s pak version (default V11)')
     c.add_argument('--mount-point', default='../../../', help='unreal: pak mount point (default ../../../)')
+    c.add_argument('--retoc', help='unreal (UE5): retoc, for IoStore .utoc/.ucas containers (default: GAMESHELF_RETOC, or retoc on the PATH)')
+    c.add_argument('--font-assets', help='unreal (UE5): a folder of cooked replacement font packages (.uasset with .uexp, at their paths '
+                                         'inside the game, <Project>/Content/...), cooked for the game\'s engine version; they go into '
+                                         'pakchunk99-ArabicLocalization_P.utoc/.ucas for the Zen loader')
+    c.add_argument('--ue-version', help='unreal (UE5): the game\'s engine version for retoc to-zen, e.g. UE5_4 (default: what the game\'s program says)')
     c.add_argument('--pak-list', help='unreal: the game\'s pak file list (from repak list, UnrealPak -List or FModel), to find its fonts; '
                                       'reengine: a list of the game\'s file names (such as REE.PAK.Tool\'s), whose .oft fonts get the Arabic font')
     c.add_argument('--extracted', help='unreal: a folder of the game\'s files you extracted from your own copy, to find its fonts')
@@ -169,6 +185,11 @@ def parse_args(argv=None):
                         'repeat with Arabic for games that have an Arabic option)')
     c.add_argument('--msg-prebuilt', action='store_true', help='reengine: the .msg files already hold the Arabic; pack them as they are')
     c.add_argument('--natives', help='reengine: a folder of other files to add to the pak as they are (natives/...), e.g. a font your tools made')
+    c.add_argument('--runtime-hook', help='runtime: the folder with GameShelf\'s built runtime adapter (version.dll, dinput8.dll; '
+                                          'default: GAMESHELF_RUNTIME_HOOK, or localization/runtime/prebuilt)')
+    c.add_argument('--proxy', choices=['version.dll', 'dinput8.dll'], default='version.dll',
+                   help='runtime: which Windows library the adapter stands in for, in the game\'s program folder (default version.dll)')
+    c.add_argument('--extra-lines', help='runtime: the strings the adapter saw in the game without Arabic (its untranslated.txt), to add')
     c.add_argument('--recipe', help='custom: an engine recipe (JSON, see arabic_compiler/recipes.py) for a game whose text is in archives')
     c.add_argument('--tools-dir', help='custom: GameShelf\'s tools folder, where the recipe\'s tool is (default: build-tools/arabic-builder/tools)')
     return p.parse_args(argv)
@@ -607,6 +628,63 @@ def build_loose(source, rows, args, payload: Path, log):
     log(f'Put {regular.stem} in place of the game\'s fonts: {", ".join(fonts)}.')
 
 
+RUNTIME_HOOKS = REPO / 'localization' / 'runtime' / 'prebuilt'
+
+
+def runtime_source(args, log) -> Source:
+    """English for the runtime adapter: readable text files (loose.py), text in the game's data files as they are,
+    and what the adapter saw in the game. Nothing is unpacked or decrypted. May be empty: the adapter then learns
+    the game's text while it's played."""
+    folder = Path(args.source)
+    if not folder.is_dir():
+        raise BuildError('A runtime pack is made from the game\'s folder.')
+    texts, notes = [], []
+    try:
+        found = loose.scan(folder)
+        texts += [text for f in found.files for _, text in f.entries]
+        if found.files:
+            notes.append(f'Read {len(found.files)} readable text files.')
+    except loose.LooseError:
+        pass
+    scanned = runtime.scan(folder)
+    texts += scanned.strings
+    notes.append(f'Found {len(scanned.strings)} lines of text in {len(scanned.read)} of the game\'s data files'
+                 + (f'; {len(scanned.skipped)} left as they are (compressed, encrypted or too big)' if scanned.skipped else '') + '.')
+    if args.extra_lines:
+        seen_in_game = runtime.read_dump(Path(args.extra_lines))
+        texts += seen_in_game
+        notes.append(f'{len(seen_in_game)} lines the adapter saw in the game.')
+    # One row per line as the adapter will look it up (normalized), translated as the game wrote it (line breaks kept).
+    rows, seen = [], set()
+    for text in texts:
+        key = runtime.normalize(text)
+        if key and key not in seen:
+            seen.add(key)
+            rows.append(Row(text.strip()))
+    return Source(rows, engine='runtime', notes=notes)
+
+
+def build_runtime(rows, args, payload: Path, log):
+    """The adapter, under the name of the library it stands in for, and gameshelf_strings.bin with the font, in gameshelf_arabic/."""
+    hooks = Path(args.runtime_hook or os.environ.get('GAMESHELF_RUNTIME_HOOK') or RUNTIME_HOOKS)
+    library = hooks / args.proxy
+    if not library.is_file():
+        raise BuildError(f'GameShelf\'s runtime adapter isn\'t in {hooks} ({args.proxy}): build it with scripts/build-runtime-hook.py.')
+    shutil.copyfile(library, payload / args.proxy)
+    folder = payload / 'gameshelf_arabic'
+    folder.mkdir()
+    pairs = [(r.source, r.arabic) for r in rows if r.arabic]
+    (folder / 'gameshelf_strings.bin').write_bytes(runtime.write_table(pairs))
+    regular, _, license_text = font_files(args)
+    shutil.copyfile(regular, folder / _pack_font_name(regular))
+    if license_text:
+        shutil.copyfile(license_text, folder / ('FONT-LICENSE-' + _pack_font_name(license_text)))
+    if pairs:
+        log(f'Wrote {len(pairs)} Arabic lines to gameshelf_strings.bin, with the runtime adapter as {args.proxy}.')
+    else:
+        log(f'No lines yet: the runtime adapter ({args.proxy}) goes in with an empty table, and notes the game\'s text as it\'s played.')
+
+
 def recipe_source(args, out: Path, log) -> Source:
     """Runs an engine recipe's extract steps and reads the English it names."""
     regular, bold, _ = font_files(args)
@@ -981,6 +1059,55 @@ def build_unreal(source, translations: dict, args, payload: Path, stage_root: Pa
     result = subprocess.run(command, capture_output=True, text=True)
     if result.returncode != 0 or not out_pak.exists():
         raise BuildError(f'{kind} failed: {(result.stderr or result.stdout).strip()[-500:]}')
+    iostore = source.extra.get('iostore') or {}
+    if not fonts and iostore.get('font_packages') and not args.font_assets and not args.no_fonts:
+        names = sorted({PurePosixPath(p).name for p in iostore['font_packages']})
+        log(f'This game\'s fonts are cooked packages in its IoStore containers ({", ".join(names[:6])}{"..." if len(names) > 6 else ""}). '
+            'For Arabic letters, cook replacements from the Arabic font with the game\'s Unreal Engine version and give them with --font-assets.')
+    if args.font_assets:
+        build_zen_fonts(args, iostore, payload, stage_root, log)
+
+
+def shipping_program(folder: Path) -> Path | None:
+    """An Unreal game's program (<Project>/Binaries/Win64/*-Shipping.exe, or its biggest .exe there)."""
+    root = Path(folder)
+    if not root.is_dir():
+        return None
+    programs = sorted(root.glob('*/Binaries/Win64/*.exe'), key=lambda p: (not p.name.lower().endswith('-shipping.exe'), -p.stat().st_size))
+    return programs[0] if programs else None
+
+
+def build_zen_fonts(args, iostore: dict, payload: Path, stage_root: Path, log):
+    """Cooked replacement font packages into pakchunk99-ArabicLocalization_P.utoc/.ucas, beside the Arabic .pak (retoc to-zen)."""
+    try:
+        assets = retoc.font_assets(Path(args.font_assets))
+        if not assets:
+            raise BuildError(f'{args.font_assets} has no cooked .uasset files.')
+        tool = retoc.find_tool(args.retoc) or iostore.get('tool')
+        if not tool:
+            raise BuildError('Putting cooked font packages into an IoStore container needs retoc (github.com/trumank/retoc): give --retoc.')
+        version = args.ue_version or retoc.engine_version(shipping_program(Path(args.source)))
+        if not version:
+            raise BuildError('Couldn\'t tell the game\'s Unreal Engine version from its program: give --ue-version (e.g. UE5_4).')
+        zen = stage_root / 'zen'
+        shutil.rmtree(zen, ignore_errors=True)
+        root = Path(args.font_assets)
+        for rel in assets:
+            for ext in ('.uasset', '.uexp', '.ubulk', '.uptnl'):
+                part = root.joinpath(*rel.with_suffix(ext).parts)
+                if part.is_file():
+                    target = zen.joinpath(*rel.with_suffix(ext).parts)
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(part, target)
+        pak = payload / PAK_NAME
+        before = pak.read_bytes()
+        made = retoc.to_zen(tool, zen, payload / PAK_NAME.replace('.pak', '.utoc'), version, log)
+        if pak.read_bytes() != before:
+            raise BuildError('retoc replaced the Arabic .pak; GameShelf expected it to keep the one already there.')
+    except retoc.RetocError as err:
+        raise BuildError(str(err)) from None
+    args.fonts_used = list(getattr(args, 'fonts_used', None) or []) + [a.as_posix() for a in assets]
+    log(f'Put {len(assets)} cooked font packages into {made[0].name} and {made[1].name} ({version}): ' + ', '.join(a.name for a in assets))
 
 
 def sign(pack_dir: Path, args, kind: str):
@@ -1018,6 +1145,8 @@ def build(args, log=print) -> Path:
     if args.recipe:
         args.kind = 'custom'
         source = recipe_source(args, out, log)
+    elif args.kind == 'runtime':
+        source = runtime_source(args, log)
     else:
         try:
             source = read_source(args.source, locres_path=args.locres_path, msg_path=args.msg_path, engine=args.kind)
@@ -1063,7 +1192,8 @@ def build(args, log=print) -> Path:
         apply_by_hash(rows, args.arabic_by_hash, log)
     if args.translations:
         apply_reviewed(rows, args.translations, log)
-    if not rows and not prebuilt:
+    learning = kind == 'runtime'  # the runtime adapter can start with no lines, and learn them in the game
+    if not rows and not prebuilt and not learning:
         raise BuildError('Found no English lines to translate.')
     failed = {}
     if rows:
@@ -1093,7 +1223,7 @@ def build(args, log=print) -> Path:
     pairs = [(r.source, r.arabic) for r in rows if r.arabic]
     if len(pairs) < len(rows):
         log(f'{len(rows) - len(pairs)} lines have no Arabic and are left out of the pack.')
-    if not pairs and not prebuilt:
+    if not pairs and not prebuilt and not learning:
         raise BuildError('No lines have Arabic, so there\'s nothing to pack.')
     pack_dir = out / 'pack'
     shutil.rmtree(pack_dir, ignore_errors=True)
@@ -1121,6 +1251,8 @@ def build(args, log=print) -> Path:
         build_loose(source, rows, args, payload, log)
     elif kind == 'custom':
         build_custom(source, rows, args, payload, log)
+    elif kind == 'runtime':
+        build_runtime(rows, args, payload, log)
     else:
         translations = {r.key: r.arabic for r in rows if r.arabic and r.key}
         build_unreal(source, translations, args, payload, out / 'stage', log)

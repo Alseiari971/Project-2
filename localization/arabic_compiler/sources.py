@@ -37,7 +37,7 @@ from struct import error as struct_error
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import bethesda, godotpck, loose
+from . import bethesda, godotpck, loose, retoc
 from . import locres as locres_format
 from . import remsg
 
@@ -145,14 +145,16 @@ def _repak(tool: str, *args, binary=False):
 
 
 def _unreal_paks(folder: Path) -> Source:
-    """An Unreal game's English .locres and its file list, read from its own .pak files with repak.
-    Paks with an encrypted index need the game's own key, which isn't looked for."""
+    """An Unreal game's English .locres and its file list, read from its own .pak files with repak and, in UE5
+    games, from its IoStore containers (.utoc/.ucas) with retoc. Encrypted paks and containers need the game's
+    own key, which isn't looked for."""
     tool = os.environ.get('GAMESHELF_REPAK') or shutil.which('repak')
     if not tool:
         raise SourceError('Reading this Unreal game\'s .pak files needs repak (github.com/trumank/repak). Extract its English '
                           'Game.locres from your own copy (with FModel), then run this on that file.')
     paks = sorted((p for p in folder.rglob('*.pak') if not _OUR_PAK.search(p.name)), key=lambda p: -p.stat().st_size)
-    if not paks:
+    containers = retoc.game_containers(folder)
+    if not paks and not containers:
         raise SourceError(f'Found no .pak files in {folder}.')
     listing, encrypted, found = [], [], None
     for pak in paks:
@@ -167,25 +169,70 @@ def _unreal_paks(folder: Path) -> Source:
         english = [n for n in names if _ENGLISH_LOCRES.search(n)]
         if english and not found:
             found = (pak, sorted(english, key=len)[0])
-    if not found:
-        if encrypted:
-            raise SourceError(f'The game\'s paks are encrypted ({", ".join(encrypted[:3])}); reading them needs the game\'s own key, which GameShelf won\'t look for.')
-        raise SourceError('Found no English Game.locres in the game\'s .pak files. The game may keep its text in its .utoc/.ucas '
-                          'files, which GameShelf can\'t read yet.')
-    pak, inside = found
-    data = _repak(tool, 'get', str(pak), inside, binary=True)
-    if data.returncode != 0 or not data.stdout:
-        raise SourceError(f'repak couldn\'t read {inside} from {pak.name}.')
+    # UE5: the cooked packages are in IoStore containers; their file lists name the game's font packages,
+    # and the odd game keeps its .locres there too.
+    iostore = {'containers': [], 'encrypted': [], 'font_packages': [], 'tool': None}
+    in_container = None
+    retoc_tool = retoc.find_tool()
+    for utoc in containers:
+        try:
+            header = retoc.toc_header(utoc)
+        except (OSError, retoc.RetocError):
+            continue
+        iostore['containers'].append(utoc.name)
+        if header.encrypted:
+            iostore['encrypted'].append(utoc.name)
+            continue
+        if not retoc_tool:
+            continue
+        iostore['tool'] = retoc_tool
+        try:
+            chunks = retoc.list_chunks(retoc_tool, utoc)
+        except retoc.RetocError:
+            continue
+        listing += [c.path for c in chunks]
+        iostore['font_packages'] += [c.path for c in chunks if retoc.FONT_PACKAGE.search(c.path)]
+        english = [c for c in chunks if _ENGLISH_LOCRES.search(c.path)]
+        if english and not found and not in_container:
+            in_container = sorted(english, key=lambda c: len(c.path))[0]
+    if not found and not in_container:
+        locked = encrypted + iostore['encrypted']
+        if locked:
+            raise SourceError(f'The game\'s paks are encrypted ({", ".join(locked[:3])}); reading them needs the game\'s own key, which GameShelf won\'t look for.')
+        if containers and not retoc_tool:
+            raise SourceError('Found no English Game.locres in the game\'s .pak files, and reading its .utoc/.ucas containers needs retoc '
+                              '(github.com/trumank/retoc).')
+        raise SourceError('Found no English Game.locres in the game\'s .pak files or its .utoc/.ucas containers.')
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / 'Game.locres'
-        target.write_bytes(data.stdout)
+        if found:
+            pak, inside = found
+            data = _repak(tool, 'get', str(pak), inside, binary=True)
+            if data.returncode != 0 or not data.stdout:
+                raise SourceError(f'repak couldn\'t read {inside} from {pak.name}.')
+            target.write_bytes(data.stdout)
+            origin = pak.name
+        else:
+            inside = in_container.path
+            try:
+                retoc.get_chunk(retoc_tool, in_container, target)
+            except retoc.RetocError as err:
+                raise SourceError(str(err)) from None
+            origin = in_container.container.name
         source = _locres(target, inside)
-    info = _repak(tool, 'info', str(pak))
-    version = re.search(r'version[^\n]*?\b(V\d+[AB]?)\b', info.stdout or '', re.I) if info.returncode == 0 else None
+    version = None
+    if paks:
+        info = _repak(tool, 'info', str(paks[0]))
+        version = re.search(r'version[^\n]*?\b(V\d+[AB]?)\b', info.stdout or '', re.I) if info.returncode == 0 else None
     source.pak_listing = '\n'.join(listing)
     source.pak_tool = tool
     source.pak_version = version.group(1).upper() if version else None
-    source.notes.append(f'Read {inside} from {pak.name}.')
+    source.extra['iostore'] = iostore
+    source.notes.append(f'Read {inside} from {origin}.')
+    if iostore['containers']:
+        source.notes.append(f'IoStore containers: {len(iostore["containers"])}'
+                            + (f', {len(iostore["encrypted"])} encrypted (left alone)' if iostore['encrypted'] else '')
+                            + ('' if iostore['tool'] else '; retoc isn\'t installed, so their file lists weren\'t read') + '.')
     return source
 
 
@@ -642,7 +689,7 @@ def _game_folder(folder: Path, engine: str | None = None) -> Source:
     pack = godotpck.find_pck(folder)
     if pack:
         return _godot_pck(pack)
-    if (folder / 'Engine').is_dir() or any(folder.rglob('*.pak')):
+    if (folder / 'Engine').is_dir() or any(folder.rglob('*.pak')) or any(folder.rglob('*.utoc')):
         return _unreal_paks(folder)
     try:
         return loose_source(folder)

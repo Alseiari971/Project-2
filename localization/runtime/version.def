@@ -1,0 +1,19 @@
+LIBRARY version.dll
+EXPORTS
+    GetFileVersionInfoA = GS_GetFileVersionInfoA
+    GetFileVersionInfoByHandle = GS_GetFileVersionInfoByHandle
+    GetFileVersionInfoExA = GS_GetFileVersionInfoExA
+    GetFileVersionInfoExW = GS_GetFileVersionInfoExW
+    GetFileVersionInfoSizeA = GS_GetFileVersionInfoSizeA
+    GetFileVersionInfoSizeExA = GS_GetFileVersionInfoSizeExA
+    GetFileVersionInfoSizeExW = GS_GetFileVersionInfoSizeExW
+    GetFileVersionInfoSizeW = GS_GetFileVersionInfoSizeW
+    GetFileVersionInfoW = GS_GetFileVersionInfoW
+    VerFindFileA = GS_VerFindFileA
+    VerFindFileW = GS_VerFindFileW
+    VerInstallFileA = GS_VerInstallFileA
+    VerInstallFileW = GS_VerInstallFileW
+    VerLanguageNameA = GS_VerLanguageNameA
+    VerLanguageNameW = GS_VerLanguageNameW
+    VerQueryValueA = GS_VerQueryValueA
+    VerQueryValueW = GS_VerQueryValueW

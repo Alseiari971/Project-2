@@ -1639,6 +1639,7 @@ label { display: grid; gap: 8px; font-size: 13px; font-weight: 700; color: var(-
 .review-ar { min-height: 42px; resize: vertical; font: 15px/1.5 "Thmanyah Local", "Alexandria", sans-serif; }
 .font-list-form { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 .font-list-form .input { max-width: 240px; }
+.arabic-refresh { margin-inline-start: 8px; }
 .admin-request { grid-template-columns: minmax(0, 1fr) auto auto auto; }
 .admin-row-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 .recipe-tag { display: inline-block; padding: 1px 8px; border-radius: 999px; font-weight: 600; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }

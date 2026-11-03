@@ -298,6 +298,16 @@ function createApi({ db, games, prices, steam, steamStore, translations, arabicG
   }));
 
   // Steam's short silent preview loop for the home page spotlight.
+  // A Steam game's store features (Single-player, Online PvP...): the desktop app checks a game is played
+  // alone before it puts its runtime adapter in.
+  api.get('/steam/:appId/features', asyncRoute(async (req, res) => {
+    const appId = Number(req.params.appId);
+    if (!Number.isInteger(appId) || appId <= 0) return res.status(400).json({ error: 'That isn\'t a Steam app ID.' });
+    const details = steamStore ? await steamStore.details(appId).catch(() => null) : null;
+    if (!details) return res.status(404).json({ error: 'Steam has no store page for that game.' });
+    res.set('Cache-Control', 'public, max-age=86400');
+    res.json({ features: details.features || [] });
+  }));
   api.get('/steam/:appId/microtrailer', asyncRoute(async (req, res) => {
     const appId = Number(req.params.appId);
     if (!Number.isInteger(appId) || appId <= 0 || appId > 1e8) return res.status(404).json({ error: 'Not found.' });
