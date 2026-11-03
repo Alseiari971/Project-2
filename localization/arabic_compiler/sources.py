@@ -12,7 +12,9 @@
   or a folder of message files extracted from your own copy (natives/...);
 - a game folder: loose .locres files, a Unity game's data folder, a Ren'Py
   game, or a Godot project (the game's source, or one you recovered from your
-  own copy with GDRE Tools).
+  own copy with GDRE Tools); a Bethesda game's string tables (bethesda.py);
+  or, for other engines, readable text files found by the loose-file scanner
+  (loose.py).
 
 Text inside encrypted or packed game archives is out of reach on purpose:
 extract it from your own copy with the engine's tools first. This never looks
@@ -35,7 +37,7 @@ from struct import error as struct_error
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import godotpck
+from . import bethesda, godotpck, loose
 from . import locres as locres_format
 from . import remsg
 
@@ -74,6 +76,8 @@ class Source:
     pak_listing: str | None = None
     pak_tool: str | None = None
     pak_version: str | None = None
+    # Bethesda: the string tables and fontconfig.txt (bethesda.Tables); loose files: loose.Found.
+    extra: dict = field(default_factory=dict)
 
 
 def _csv(path: Path) -> Source:
@@ -562,7 +566,48 @@ def _reengine_folder(folder: Path) -> Source:
     return Source([], engine='reengine', msg_files=found)
 
 
-def _game_folder(folder: Path) -> Source:
+def bethesda_source(folder: Path) -> Source:
+    """A Bethesda game's English string tables (see bethesda.py). Each row's key is "<table>#<string ID>"."""
+    try:
+        found = bethesda.read_game(folder)
+    except (OSError, bethesda.BethesdaError) as err:
+        raise SourceError(str(err)) from None
+    rows, shaped = [], 0
+    for name, (_, entries) in found.tables.items():
+        for string_id, text in entries:
+            if loose.SHAPED_ARABIC.search(text):
+                shaped += 1
+            elif re.search(r'[^\W\d_]', text):
+                rows.append(Row(text, None, f'{name}#{string_id}'))
+    total = shaped + len(rows)
+    if total and shaped * 2 > total:
+        raise SourceError('GameShelf\'s Arabic is in this game right now. Turn Arabic off for it in GameShelf first, so the English is read.')
+    notes = [f'Read {len(found.tables)} English string tables ({", ".join(sorted(n for n, _ in found.origins.values())[:6])}'
+             f'{"..." if len(found.tables) > 6 else ""}).']
+    if found.fontconfig_from:
+        notes.append(f'The game\'s font settings: {found.fontconfig_from}.')
+    return Source(rows, engine='bethesda', notes=notes, extra={'bethesda': found})
+
+
+def loose_source(folder: Path) -> Source:
+    """English from readable text files in the game's folder (see loose.py). Each row's key is "<file>#<place in it>"."""
+    try:
+        found = loose.scan(folder)
+    except (OSError, loose.LooseError) as err:
+        raise SourceError(str(err)) from None
+    if not found.files:
+        raise SourceError('Found no text files with English in this game\'s folder (localization, lang, text... folders, '
+                          'or files marked English). Its text is packed in its own archives: GameShelf needs an engine recipe for it.')
+    rows = [Row(text, None, f'{f.rel}#{key}') for f in found.files for key, text in f.entries]
+    notes = [f'Found English in {len(found.files)} files: {", ".join(f.rel for f in found.files[:5])}{"..." if len(found.files) > 5 else ""}.']
+    return Source(rows, engine='loose', notes=notes, extra={'loose': found})
+
+
+def _game_folder(folder: Path, engine: str | None = None) -> Source:
+    if engine == 'bethesda' or (engine is None and bethesda.is_game(folder)):
+        return bethesda_source(folder)
+    if engine == 'loose':
+        return loose_source(folder)
     if (folder / 're_chunk_000.pak').is_file():
         # An RE Engine game: its message files are taken out of its paks (base first, then each patch in order).
         patches = sorted((int(m.group(1)), p) for p in folder.iterdir()
@@ -599,13 +644,16 @@ def _game_folder(folder: Path) -> Source:
         return _godot_pck(pack)
     if (folder / 'Engine').is_dir() or any(folder.rglob('*.pak')):
         return _unreal_paks(folder)
-    raise SourceError(f'Found no game text in {folder}. Give a .locres, Unity .assets, Ren\'Py .rpy/.rpa, CSV, .po, JSON or XUnity .txt file instead.')
+    try:
+        return loose_source(folder)
+    except SourceError:
+        raise SourceError(f'Found no game text in {folder}. Give a .locres, Unity .assets, Ren\'Py .rpy/.rpa, CSV, .po, JSON or XUnity .txt file instead.') from None
 
 
-def read_source(path: str | Path, *, locres_path: str | None = None, msg_path: str | None = None) -> Source:
+def read_source(path: str | Path, *, locres_path: str | None = None, msg_path: str | None = None, engine: str | None = None) -> Source:
     path = Path(path)
     if path.is_dir():
-        return _game_folder(path)
+        return _game_folder(path, engine if engine in ('bethesda', 'loose') else None)
     if not path.is_file():
         raise SourceError(f'{path} doesn\'t exist.')
     suffix = path.suffix.lower()

@@ -18,6 +18,7 @@ const { createTranslationMemory } = require('./src/translation-memory');
 const { createArabicGames } = require('./src/arabic-games');
 const { createPackRegistry, packKeys } = require('./src/pack-registry');
 const { createSubmissions } = require('./src/submissions');
+const { createEngineRecipes } = require('./src/engine-recipes');
 
 // Where uploaded Arabic packs and the Windows installer are kept: beside the database.
 const defaultDataDir = () => process.env.DATA_DIR || path.dirname(path.resolve(process.env.DB_FILE || path.join(__dirname, 'data', 'gameshelf.db')));
@@ -46,6 +47,7 @@ function createApp({
   dataDir = defaultDataDir(),
   packs = createPackRegistry({ db, dir: path.join(dataDir, 'packs') }),
   submissions = createSubmissions({ db, translations, publicKeys: packKeys() }),
+  recipes = createEngineRecipes({ db, publicKeys: packKeys() }),
 } = {}) {
   const downloadsDir = path.join(dataDir, 'downloads');
   const app = express();
@@ -57,7 +59,7 @@ function createApp({
   // Large enough for a resized avatar image.
   app.use(express.json({ limit: '500kb' }));
   app.use(loadUser(db));
-  app.use('/api', createApi({ db, games, prices, steam, steamStore, translations, arabicGames, packs, submissions, downloadsDir }));
+  app.use('/api', createApi({ db, games, prices, steam, steamStore, translations, arabicGames, packs, submissions, recipes, downloadsDir }));
   // The website's "Download GameShelf for Windows" button: the installer an admin
   // uploaded in the Admin Panel, or else DOWNLOAD_URL (a GitHub release, say).
   app.get('/download/windows', (_req, res) => {

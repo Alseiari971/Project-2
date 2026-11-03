@@ -10,11 +10,46 @@
 // - Ren'Py: a renpy folder next to a game folder of .rpa/.rpyc/.rpy scripts.
 // - Godot 3/4: the engine's program with a .pck of the same name next to it,
 //   or with the .pck added to the end of the program.
-// - Anything else is a custom engine, which only the overlay can serve.
+// - Bethesda Creation Engine (Skyrim Special Edition, Fallout 4, Starfield): a
+//   Data folder with .esm plugins and string tables (loose in Data/Strings, or
+//   in .bsa/.ba2 archives).
+// - Anything else is a custom engine. Its `custom` says what GameShelf found:
+//   readable text files (localization/en.json, lang/english.txt...: the loose-
+//   file scanner's quick look, see localization/arabic_compiler/loose.py), and
+//   which known packed engine it looks like (localization/custom_engines.json:
+//   God of War's exec/wad/pc_le, REDengine's archive/pc/content...), for an
+//   admin's engine recipe.
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { list, findEntry, findPath, programArch } = require('./files');
 const reengine = require('./reengine');
+const registry = require('../../localization/custom_engines.json');
+
+// Bethesda games by their program. Older ones keep their text inside their
+// plugins (Fallout 3, New Vegas, Oblivion) or can't show UTF-8 text (Skyrim
+// 2011), so only the newer ones take Arabic string tables.
+const BETHESDA_GAMES = {
+  'skyrimse.exe': { name: 'Skyrim Special Edition', tables: true },
+  'skyrimvr.exe': { name: 'Skyrim VR', tables: true },
+  'fallout4.exe': { name: 'Fallout 4', tables: true },
+  'fallout4vr.exe': { name: 'Fallout 4 VR', tables: true },
+  'starfield.exe': { name: 'Starfield', tables: true },
+  'tesv.exe': { name: 'Skyrim (2011)', tables: false },
+  'fallout3.exe': { name: 'Fallout 3', tables: false },
+  'falloutnv.exe': { name: 'Fallout: New Vegas', tables: false },
+  'oblivion.exe': { name: 'Oblivion', tables: false },
+  'morrowind.exe': { name: 'Morrowind', tables: false },
+};
+
+// The loose-file scanner's quick look (the pack builder's loose.py looks properly).
+const TEXT_FILE = /\.(json|csv|tsv|xml|po|mo|txt|ini|cfg|lang|loc|yaml|yml|strings)$/i;
+const TEXT_DIRS = new Set(['localization', 'localisation', 'locale', 'locales', 'lang', 'langs', 'language', 'languages', 'i18n', 'l10n',
+  'loc', 'text', 'texts', 'strings', 'string', 'dialog', 'dialogs', 'dialogue', 'dialogues', 'subtitles', 'subs', 'translation', 'translations', 'messages']);
+const SKIP_DIRS = new Set(['_commonredist', 'redist', 'redistributables', 'directx', 'vcredist', '.git', 'crashreporter', 'crashpad',
+  'easyanticheat', 'battleye', 'licenses', 'license', 'legal', 'eula', 'manual', 'docs', 'mono', 'monobleedingedge', 'jre', 'java',
+  'python', 'node_modules', 'saves', 'savegames', 'logs', 'shadercache', 'gameshelf_arabic']);
+const ENGLISH = /(^|[_\-.\s])(en|eng|english|en[_-]?us|en[_-]?gb)$|^(en|eng|english|en[_-]?us|en[_-]?gb)([_\-.\s]|$)/i;
+const QUICK_LOOK = { maxEntries: 15000, maxDepth: 6, enough: 12 };
 
 async function findUnreal(base) {
   const entries = await list(base);
@@ -244,6 +279,90 @@ async function godotFound(base, program, pck, header) {
   };
 }
 
+async function findBethesda(base) {
+  const data = await findEntry(base, 'Data', 'dir');
+  if (!data) return null;
+  const names = (await list(data)).map((e) => e.name.toLowerCase());
+  if (!names.some((n) => n.endsWith('.esm')) || !(names.includes('strings') || names.some((n) => /\.(bsa|ba2)$/.test(n)))) return null;
+  const programs = (await list(base)).filter((e) => e.isFile() && /\.exe$/i.test(e.name)).map((e) => e.name);
+  const exe = programs.find((n) => BETHESDA_GAMES[n.toLowerCase()]);
+  const game = exe ? BETHESDA_GAMES[exe.toLowerCase()] : null;
+  if (game && !game.tables) return null; // a packed engine for an admin's recipe, below
+  const interfaceDir = await findEntry(data, 'Interface', 'dir');
+  return {
+    engine: 'bethesda',
+    base,
+    bethesda: {
+      dataDir: data,
+      exe: exe ? path.join(base, exe) : null,
+      arch: exe ? await programArch(path.join(base, exe)) : null,
+      game: game?.name || null,
+      // String tables and font settings already loose in the game (a mod's, or the player's): GameShelf keeps them aside while Arabic is on.
+      looseStrings: Boolean(await findEntry(data, 'Strings', 'dir')),
+      looseFontConfig: Boolean(interfaceDir && await findEntry(interfaceDir, 'fontconfig.txt', 'file')),
+    },
+  };
+}
+
+/** Does `pattern` ("exec/wad/pc_le", "Data/*.toc", "* /*.psarc") match something in `base`? Names are matched without regard to case. */
+async function matches(base, pattern) {
+  const parts = pattern.split('/').filter(Boolean);
+  let current = [base];
+  for (const [i, part] of parts.entries()) {
+    const last = i === parts.length - 1;
+    const re = new RegExp(`^${part.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`, 'i');
+    const next = [];
+    for (const dir of current.slice(0, 200)) {
+      for (const entry of await list(dir)) {
+        if (re.test(entry.name) && (last || entry.isDirectory())) next.push(path.join(dir, entry.name));
+      }
+    }
+    if (!next.length) return false;
+    current = next;
+  }
+  return true;
+}
+
+/** Which known engine (custom_engines.json) a game looks like, or null. */
+async function engineFamily(base) {
+  for (const recipe of registry.recipes) {
+    const { all = [], any = [] } = recipe.detect || {};
+    let ok = true;
+    for (const pattern of all) ok = ok && await matches(base, pattern);
+    if (ok && any.length) {
+      ok = false;
+      for (const pattern of any) if (!ok) ok = await matches(base, pattern);
+    }
+    if (ok && (all.length || any.length)) return { id: recipe.id, name: recipe.name, needs: recipe.needs || null, parser: recipe.parser || null };
+  }
+  return null;
+}
+
+/** Text files that may hold the game's English: in folders named for text, or marked English. Up to QUICK_LOOK.enough of them. */
+async function looseText(root) {
+  const found = [];
+  let seen = 0;
+  const stack = [[root, 0]];
+  while (stack.length && found.length < QUICK_LOOK.enough) {
+    const [dir, depth] = stack.pop();
+    for (const entry of await list(dir)) {
+      if (++seen > QUICK_LOOK.maxEntries) return found;
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (depth < QUICK_LOOK.maxDepth && !SKIP_DIRS.has(entry.name.toLowerCase())) stack.push([full, depth + 1]);
+        continue;
+      }
+      if (!entry.isFile() || !TEXT_FILE.test(entry.name)) continue;
+      const rel = path.relative(root, full).split(path.sep);
+      const folders = rel.slice(0, -1).map((p) => p.toLowerCase());
+      const stem = entry.name.replace(/\.[^.]+$/, '');
+      const english = [...rel.slice(0, -1), stem].some((p) => ENGLISH.test(p));
+      if (english || folders.some((p) => TEXT_DIRS.has(p))) found.push(rel.join('/'));
+    }
+  }
+  return found;
+}
+
 /**
  * Which engine the game in `root` uses. Looks in the folder itself, then one
  * folder down (some stores install into a subfolder).
@@ -253,10 +372,15 @@ async function fingerprint(root) {
   const bases = [realRoot, ...(await list(realRoot)).filter((e) => e.isDirectory()).map((e) => path.join(realRoot, e.name))];
   for (const base of bases) {
     const found = (await findUnreal(base)) || (await findUnity(base)) || (await findReEngine(base))
-      || (await findRenpy(base)) || (await findGodot(base));
+      || (await findRenpy(base)) || (await findGodot(base)) || (await findBethesda(base));
     if (found) return { root: realRoot, ...found };
   }
-  return { root: realRoot, engine: 'custom', base: realRoot };
+  let family = null;
+  for (const base of bases) {
+    family = await engineFamily(base);
+    if (family) break;
+  }
+  return { root: realRoot, engine: 'custom', base: realRoot, custom: { family, looseText: await looseText(realRoot) } };
 }
 
-module.exports = { fingerprint, unityVersion, renpyVersion, UNITY_VERSION };
+module.exports = { fingerprint, unityVersion, renpyVersion, engineFamily, looseText, matches, BETHESDA_GAMES, UNITY_VERSION };

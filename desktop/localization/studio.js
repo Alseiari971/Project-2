@@ -11,11 +11,12 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { checkRecipe } = require('./recipes');
 const { spawn: defaultSpawn } = require('node:child_process');
 const { readLine } = require('./builder');
 const { writeZip } = require('../../src/zip');
 
-const ENGINES = ['auto', 'unreal', 'unity', 'reengine', 'godot', 'renpy', 'overlay'];
+const ENGINES = ['auto', 'unreal', 'unity', 'reengine', 'godot', 'renpy', 'bethesda', 'loose', 'overlay'];
 const PROVIDERS = { openai: 'OPENAI_API_KEY', gemini: 'GEMINI_API_KEY' };
 const TRANSLATE = ['shared', 'provider', 'none'];
 const ID_RE = /^[\w.\-]{1,80}$/;
@@ -271,6 +272,33 @@ function createStudio({ paths, dataDir, cloud, appKeys = [], secure = null, spaw
       const signature = crypto.sign(null, Buffer.from(set, 'utf8'), crypto.createPrivateKey(fs.readFileSync(s.keyFile, 'utf8'))).toString('base64');
       const { pack } = await cloud.json(`/api/admin/submissions/${id}/approve`, { method: 'POST', raw: JSON.stringify({ set, signature }), type: 'application/octet-stream', timeout: 5 * 60 * 1000 });
       return pack;
+    },
+    /**
+     * Attaches an engine recipe to a game (`game`: "steam:<id>"): checked with the
+     * pack builder's rules, signed here with GameShelf's pack key, then sent to the
+     * server, which checks the signature again. Every player's app can then build
+     * the game's Arabic natively. Resolves to the server's { recipe } summary.
+     */
+    async attachRecipe(game, text) {
+      const s = readSettings();
+      const keyPublic = s.keyFile ? publicKeyOf(s.keyFile) : null;
+      if (!keyPublic) throw new StudioError('Pick GameShelf\'s pack-signing.key in the Pack Studio first.');
+      if (!appKeys.some((k) => samePem(k, keyPublic))) throw new StudioError('That signing key isn\'t GameShelf\'s, so players\' apps wouldn\'t accept it. Pick GameShelf\'s pack-signing.key in the Pack Studio.');
+      let recipe;
+      try {
+        recipe = JSON.parse(text);
+      } catch (err) {
+        throw new StudioError(`The recipe isn't valid JSON: ${err.message}`);
+      }
+      try {
+        checkRecipe(recipe, game);
+      } catch (err) {
+        throw new StudioError(err.message);
+      }
+      // The exact text that's signed is the text that's kept and sent to players.
+      const body = JSON.stringify(recipe);
+      const signature = crypto.sign(null, Buffer.from(body, 'utf8'), crypto.createPrivateKey(fs.readFileSync(s.keyFile, 'utf8'))).toString('base64');
+      return cloud.json(`/api/admin/recipes/${encodeURIComponent(game)}`, { method: 'PUT', body: { recipe: body, signature } });
     },
     /** Publishes a built pack to the cloud catalog (admins only; the server checks). */
     async publish(packDir) {

@@ -10,14 +10,18 @@
 //    the English lines, the engine and the font names go to GameShelf as a
 //    submission, for an admin to check and approve for every player.
 //
-// When this PC can't read the game (an engine GameShelf can't patch here, or
-// encrypted files), the request goes to the admins with the reason instead.
+// When this PC can't read the game (encrypted files, or a game whose text is
+// packed in archives and has no engine recipe yet), the request goes to the
+// admins with the reason and the game folder's fingerprint (dirprint.js), so an
+// admin can write the game's engine recipe without owning the game. Once a
+// recipe is signed and attached, the same button makes the Arabic natively.
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { gameKey } = require('./online');
 
 // Most of a game's lines must have Arabic before its pack goes in.
 const ENOUGH_ARABIC = 0.9;
+const NEEDS_RECIPE = 'This game keeps its text packed in its own files, and GameShelf has no engine recipe for it yet.';
 
 /**
  * Why this PC can't make Arabic for a game (`info` from the Arabic service), or
@@ -31,8 +35,20 @@ function cantMake(info, packBuilder, overlayAvailable) {
   return 'This copy of GameShelf can\'t read this kind of game\'s text yet.';
 }
 
-/** `server()` is GameShelf's server, where the shared translations are. */
-function createArabicRequests({ arabic, packBuilder, online, server, overlayAvailable = process.platform === 'win32' }) {
+/**
+ * `server()` is GameShelf's server, where the shared translations are; `recipes`
+ * fetches games' signed engine recipes (recipes.js); `fingerprint(game, info)`
+ * describes a game's folder for the admins (dirprint.js).
+ */
+function createArabicRequests({ arabic, packBuilder, online, server, recipes = null, fingerprint = null, overlayAvailable = process.platform === 'win32' }) {
+  /** Asks the admins for Arabic in a game, with why this PC can't make it and the folder's fingerprint. Resolves to the game's status. */
+  async function ask(game, reason = '', info = null) {
+    const serverKey = gameKey(game);
+    if (!serverKey) throw new Error('GameShelf doesn\'t know which game this is, so it can\'t ask for it.');
+    const print = reason && fingerprint && game.dir ? await fingerprint(game, info).catch(() => null) : null;
+    return online.request(serverKey, game.title, reason, print);
+  }
+
   /**
    * `game` is { key, dir, steamAppId, gameId, title }. Resolves to one of:
    * - { done: true, info, submitted }: Arabic is on here, and sent for review (submitted: { id, total } or null);
@@ -46,11 +62,22 @@ function createArabicRequests({ arabic, packBuilder, online, server, overlayAvai
     const before = await arabic.info(game);
     if (!before.missing) return { done: true, info: before, submitted: null };
     const askAdmins = async (reason) => {
-      if (serverKey) await online.request(serverKey, game.title, reason).catch(() => {});
+      if (serverKey) await ask(game, reason, before).catch(() => {});
       return { done: false, requested: true, reason, info: before };
     };
     const cant = cantMake(before, packBuilder, overlayAvailable);
     if (cant) return askAdmins(cant);
+    // Packed text: the game's engine recipe, signed by an admin, says how to read it.
+    let recipe = null;
+    if (before.tier === 'recipe') {
+      if (!recipes || !serverKey) return askAdmins(NEEDS_RECIPE);
+      try {
+        recipe = await recipes.forGame(serverKey);
+      } catch (err) {
+        return { done: false, info: before, error: { text: err.message, vars: {} } };
+      }
+      if (!recipe) return askAdmins(NEEDS_RECIPE);
+    }
     let auth;
     try {
       auth = await online.builderEnv();
@@ -60,10 +87,10 @@ function createArabicRequests({ arabic, packBuilder, online, server, overlayAvai
 
     let result;
     try {
-      result = await packBuilder.build({ ...game, tier: before.tier, engine: before.engine }, { server: server(), auth, onProgress });
+      result = await packBuilder.build({ ...game, tier: before.tier, engine: before.engine, recipe: recipe?.file }, { server: server(), auth, onProgress });
     } catch (err) {
       // The game's files couldn't be read here (encrypted, say): the admins hear about it.
-      if (/encrypted|couldn't read|can't read|no text|no english|found no/i.test(err.message)) return askAdmins(err.message);
+      if (/encrypted|couldn't read|can't read|no text|no english|found no|engine recipe|recipe found/i.test(err.message)) return askAdmins(err.message);
       return { done: false, info: before, error: { text: err.message, vars: {} } };
     }
     const have = result.total ? (result.total - result.missing) / result.total : 0;
@@ -93,7 +120,7 @@ function createArabicRequests({ arabic, packBuilder, online, server, overlayAvai
     return { done: true, result, info, error, submitted };
   }
 
-  return { run };
+  return { run, ask };
 }
 
-module.exports = { createArabicRequests, cantMake, ENOUGH_ARABIC };
+module.exports = { createArabicRequests, cantMake, ENOUGH_ARABIC, NEEDS_RECIPE };

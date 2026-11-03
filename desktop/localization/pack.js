@@ -7,7 +7,7 @@
 //   {
 //     "format": 1, "id": "some-game-ar", "version": "1.0.0", "language": "ar",
 //     "title": "Some Game in Arabic",           (optional, shown in App settings)
-//     "engine": "unreal" | "unity" | "reengine" | "renpy" | "godot" | "overlay",
+//     "engine": "unreal" | "unity" | "reengine" | "renpy" | "godot" | "bethesda" | "loose" | "custom" | "overlay",
 //     "game": { "steamAppId": 1245620, "gameId": "elden-ring" },   (which game it's for)
 //     "overlay": { "region": [0, 0.78, 1, 0.22], "textLuma": 170, "darkText": false, "threshold": 0.72 },
 //     "requires": { "arch": "x64", "unityBackend": "mono", "unityVersion": "2019.4", "godot": 4 },
@@ -29,6 +29,16 @@
 // - Ren'Py: strings.json, fonts (.ttf, .otf) and license texts (.txt) in
 //   game/tl/arabic/gameshelf; Godot: the same in gameshelf_arabic. Data only:
 //   the scripts that read them are GameShelf's own (renpy.js, godot.js).
+// - Bethesda (Skyrim Special Edition, Fallout 4, Starfield): string tables in
+//   Data/Strings (<plugin>_<language>.strings, .dlstrings, .ilstrings),
+//   Data/Interface/fontconfig.txt, Data/Interface/gameshelf_arabic.swf and
+//   license texts in Data/Interface/GameShelf.
+// - Loose files (games whose text is in plain files): text and data files
+//   (.json, .csv, .xml, .po, .txt, .ini...) and fonts, anywhere in the game's
+//   folder. These replace the game's own files: GameShelf keeps the originals
+//   and puts them back (stager.js, replace mode).
+// - Custom engines (built with an admin-signed engine recipe): any file but
+//   programs, libraries and scripts, also replacing the game's own.
 // - Overlay: only fingerprints.json, which never goes into the game's folder.
 const fs = require('node:fs/promises');
 const crypto = require('node:crypto');
@@ -47,6 +57,16 @@ const UNITY_RESERVED = 'bepinex/config/autotranslatorconfig.ini';
 const DATA_DIRS = { renpy: ['game', 'tl', 'arabic', 'gameshelf'], godot: ['gameshelf_arabic'] };
 const DATA_FILE = /^(strings\.json|[\w.\-]+\.(ttf|otf|txt))$/i;
 const RESERVED_NAMES = /^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$/i;
+const ENGINES = ['unreal', 'unity', 'reengine', 'renpy', 'godot', 'bethesda', 'loose', 'custom', 'overlay'];
+// Bethesda string tables: skyrim_english.strings, Fallout4_en.DLSTRINGS, ccbgssse001-fish_english.ilstrings.
+const BETHESDA_TABLE = /^[\w .'()&+!\-]+_[a-z]+\.(strings|dlstrings|ilstrings)$/i;
+const BETHESDA_FILES = new Set(['data/interface/fontconfig.txt', 'data/interface/gameshelf_arabic.swf']);
+// What a loose-file pack may hold: text, data and fonts.
+const LOOSE_FILE = /\.(json|csv|tsv|xml|po|mo|txt|ini|cfg|loc|lang|yaml|yml|strings|ttf|otf)$/i;
+// What no pack may put into a game: programs, libraries and scripts.
+const EXECUTABLE = /\.(exe|dll|bat|cmd|ps1|psm1|vbs|vbe|js|jse|wsf|wsh|hta|msi|msp|scr|com|cpl|lnk|url|sys|drv|ocx|so|dylib|jar|py|pyw|sh|reg)$/i;
+/** Engines whose packs replace the game's own files (the originals are kept and put back). */
+const REPLACING_ENGINES = new Set(['bethesda', 'loose', 'custom']);
 
 class PackError extends Error {
   constructor(message) {
@@ -85,6 +105,23 @@ function checkTarget(manifest, parts, target) {
     }
     return;
   }
+  if (manifest.engine === 'bethesda') {
+    const joined = lower.join('/');
+    const table = parts.length === 3 && lower[0] === 'data' && lower[1] === 'strings' && BETHESDA_TABLE.test(parts[2]);
+    const license = parts.length === 4 && joined.startsWith('data/interface/gameshelf/') && /\.txt$/i.test(parts[3]);
+    if (!table && !license && !BETHESDA_FILES.has(joined)) {
+      throw new PackError(`"${target}" isn't allowed: Bethesda packs may only add string tables in Data/Strings, Data/Interface/fontconfig.txt, Data/Interface/gameshelf_arabic.swf and license texts.`);
+    }
+    return;
+  }
+  if (manifest.engine === 'loose' || manifest.engine === 'custom') {
+    const name = parts[parts.length - 1];
+    if (EXECUTABLE.test(name)) throw new PackError(`"${target}" isn't allowed: packs can't put programs, libraries or scripts into a game.`);
+    if (manifest.engine === 'loose' && !LOOSE_FILE.test(name)) {
+      throw new PackError(`"${target}" isn't allowed: loose-file packs may only hold text, data and font files.`);
+    }
+    return;
+  }
   if (manifest.engine === 'reengine') {
     if (parts.length !== 1 || lower[0] !== RE_TARGET.toLowerCase()) {
       throw new PackError(`"${target}" isn't allowed: RE Engine packs hold one file, ${RE_TARGET}.`);
@@ -109,7 +146,7 @@ function checkManifest(manifest) {
   for (const key of ['id', 'version']) {
     if (typeof manifest[key] !== 'string' || !/^[\w.\-]{1,80}$/.test(manifest[key])) throw new PackError(`The pack's ${key} is missing or invalid.`);
   }
-  if (!['unreal', 'unity', 'reengine', 'renpy', 'godot', 'overlay'].includes(manifest.engine)) throw new PackError('The pack is for an engine GameShelf doesn\'t support.');
+  if (!ENGINES.includes(manifest.engine)) throw new PackError('The pack is for an engine GameShelf doesn\'t support.');
   if (manifest.title !== undefined && (typeof manifest.title !== 'string' || manifest.title.length > 120)) throw new PackError('The pack\'s title is invalid.');
   const { game, overlay } = manifest;
   if (game !== undefined) {
@@ -222,4 +259,4 @@ async function writePack(dir, { files, privateKey, ...details }) {
   return manifest;
 }
 
-module.exports = { readPack, writePack, PackError, MANIFEST, SIGNATURE };
+module.exports = { readPack, writePack, PackError, MANIFEST, SIGNATURE, ENGINES, REPLACING_ENGINES, EXECUTABLE };

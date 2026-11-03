@@ -1639,6 +1639,17 @@ label { display: grid; gap: 8px; font-size: 13px; font-weight: 700; color: var(-
 .review-ar { min-height: 42px; resize: vertical; font: 15px/1.5 "Thmanyah Local", "Alexandria", sans-serif; }
 .font-list-form { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 .font-list-form .input { max-width: 240px; }
+.admin-request { grid-template-columns: minmax(0, 1fr) auto auto auto; }
+.admin-row-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.recipe-tag { display: inline-block; padding: 1px 8px; border-radius: 999px; font-weight: 600; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.folder-print { margin-top: 4px; }
+.folder-print summary { cursor: pointer; color: var(--muted); }
+.folder-print-body { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 18px; margin-top: 8px; font: 12px/1.5 ui-monospace, Consolas, monospace; text-align: left; }
+.folder-print-kinds td { padding: 0 10px 0 0; white-space: nowrap; }
+.folder-print-tree { margin: 0; padding: 0; list-style: none; max-height: 220px; overflow: auto; overflow-wrap: anywhere; }
+.recipe-text { width: 100%; min-height: 320px; resize: vertical; font: 13px/1.5 ui-monospace, Consolas, monospace; text-align: left; tab-size: 2; }
+.recipe-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+@media (max-width: 720px) { .folder-print-body { grid-template-columns: 1fr; } }
 @media (max-width: 720px) { .review-row { grid-template-columns: 1fr; } }
 
 /* ---- Website: GameShelf for Windows ---- */

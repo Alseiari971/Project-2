@@ -16,6 +16,15 @@
        - godot:   strings.json and the Arabic fonts for gameshelf_arabic;
        - reengine: the game's message files with the Arabic in them, in an RE
                   Engine .pak that GameShelf adds as the game's next patch file;
+       - bethesda: Arabic copies of the game's English string tables for
+                  Data/Strings, and an Arabic font library with the game's own
+                  fontconfig.txt pointed at it (see bethesda.py, swffont.py);
+       - loose:   the game's own text files (JSON, CSV, XML, .po/.mo, .txt/.ini...)
+                  with the Arabic in place of the English, and the Arabic font in
+                  place of its loose fonts (see loose.py);
+       - custom:  for packed engines, an engine recipe (--recipe) takes the text
+                  out with an allowlisted tool and puts the Arabic back into
+                  copies of the game's archives (see recipes.py);
     5. sign it with scripts/localization-pack.js.
 
 Unreal Engine, Ren'Py and Godot 4 shape Arabic and lay it out right to left
@@ -40,13 +49,16 @@ import time
 import zipfile
 from pathlib import Path, PurePosixPath
 
+from . import bethesda
 from . import locres as locres_format
+from . import recipes
 from . import remsg
+from . import swffont
 from .fingerprint import build_table
 from . import reefont
 from .repak import GamePak, path_hashes, write_pak
 from .rtl import DEFAULT_MAX_LINE, ArabicCompiler, glyphs_needed
-from .sources import SourceError, msg_dump_source, read_source
+from .sources import Row, Source, SourceError, msg_dump_source, read_source
 from .shared import SharedError, SharedMemory, credentials, game_key, line_hash
 from .translate import _LETTERS, _TOKENS, Cache, Provider, TranslationError, Translator, problem_with
 from .xunity import write_translations
@@ -80,7 +92,7 @@ def parse_args(argv=None):
     p = argparse.ArgumentParser(prog='build-arabic-pack', description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('source', help='game folder, .locres, Unity .assets, Ren\'Py .rpy/.rpa, Godot CSV/.po, RE Engine message dump or '
                                   'extracted natives folder, CSV, JSON or XUnity .txt')
-    p.add_argument('--kind', '--engine', dest='kind', choices=['overlay', 'unity', 'unreal', 'reengine', 'renpy', 'godot'],
+    p.add_argument('--kind', '--engine', dest='kind', choices=['overlay', 'unity', 'unreal', 'reengine', 'renpy', 'godot', 'bethesda', 'loose', 'custom'],
                    help='what pack to make (default: from the source; overlay otherwise)')
     p.add_argument('--id', required=True, help='pack id, e.g. my-game-ar')
     p.add_argument('--version', required=True, help='pack version, e.g. 1.0.0')
@@ -148,7 +160,7 @@ def parse_args(argv=None):
                    help='reengine: stop when no game font can get the Arabic font, rather than make a pack that shows boxes')
     c.add_argument('--font-converter-cmd', help='reengine: an installed tool that makes .oft fonts, with {input} and {output}, '
                                                 'e.g. "REE.Fonts.Cryptor.exe {input} {output}" (GameShelf makes them itself otherwise)')
-    c.add_argument('--no-fonts', action='store_true', help='unreal, reengine: leave the game\'s fonts as they are')
+    c.add_argument('--no-fonts', action='store_true', help='unreal, reengine, bethesda, loose: leave the game\'s fonts as they are')
     c.add_argument('--godot', type=int, choices=[3, 4], help='godot: the game\'s Godot version (default: what its .pck says, else 4)')
     c.add_argument('--msg-tool', help='reengine: REMSG_Converter (its src/main.py, or the .exe), to read and write .msg files')
     c.add_argument('--msg-path', help='reengine: where a single dump\'s message file sits in the game, e.g. natives/stm/message/x.msg.22')
@@ -157,6 +169,8 @@ def parse_args(argv=None):
                         'repeat with Arabic for games that have an Arabic option)')
     c.add_argument('--msg-prebuilt', action='store_true', help='reengine: the .msg files already hold the Arabic; pack them as they are')
     c.add_argument('--natives', help='reengine: a folder of other files to add to the pak as they are (natives/...), e.g. a font your tools made')
+    c.add_argument('--recipe', help='custom: an engine recipe (JSON, see arabic_compiler/recipes.py) for a game whose text is in archives')
+    c.add_argument('--tools-dir', help='custom: GameShelf\'s tools folder, where the recipe\'s tool is (default: build-tools/arabic-builder/tools)')
     return p.parse_args(argv)
 
 
@@ -493,6 +507,135 @@ def build_godot(rows, source, args, payload: Path, log):
         message = row.key if source.keyed and row.key else row.source
         lines[message] = compiler(row.arabic) if compiler else row.arabic
     write_data_pack(lines, args, payload, GODOT_DIR, 'fonts', log)
+
+
+def make_shaper(args, default=True, max_line=None):
+    """shape(text, breaks): the Arabic joined and in screen order (rtl.py), wrapped where line breaks can go in the file."""
+    if not (default if args.shape is None else args.shape):
+        return lambda text, breaks=True: text
+    wrapping = ArabicCompiler(max_line=max_line or args.max_line)
+    single = ArabicCompiler(max_line=10000)
+
+    def shape(text, breaks=True):
+        return wrapping(text) if breaks or '\\n' in text else single(text)
+    return shape
+
+
+def arabic_by_file(rows, shape, files) -> dict:
+    """{file: {place in the file: shaped Arabic}} from rows keyed "<file>#<place>"."""
+    breaks = {f.rel: f.breaks for f in files}
+    out = {}
+    for row in rows:
+        if row.arabic and row.key and '#' in row.key:
+            rel, _, key = row.key.partition('#')
+            out.setdefault(rel, {})[key] = shape(row.arabic, breaks.get(rel, True))
+    return out
+
+
+def build_bethesda(source, rows, args, payload: Path, log):
+    """Arabic string tables for Data/Strings, and (unless --no-fonts) the Arabic font library and fontconfig.txt."""
+    found = source.extra['bethesda']
+    shape = make_shaper(args)
+    arabic = {row.key: shape(row.arabic) for row in rows if row.arabic and row.key}
+    strings = payload / 'Data' / 'Strings'
+    strings.mkdir(parents=True)
+    used, written = set(), 0
+    for key, (kind, entries) in found.tables.items():
+        table = [(string_id, arabic.get(f'{key}#{string_id}') or text) for string_id, text in entries]
+        if not any(f'{key}#{string_id}' in arabic for string_id, _ in entries):
+            continue
+        for _, text in table:
+            used.update(text)
+        (strings / found.origins[key][0]).write_bytes(bethesda.write_table(table, kind))
+        written += 1
+    if not written:
+        raise BuildError('No lines have Arabic, so there\'s nothing to pack.')
+    log(f'Wrote {written} Arabic string tables for Data/Strings.')
+    if args.no_fonts:
+        return
+    if not found.fontconfig:
+        raise BuildError('Couldn\'t find the game\'s Interface/fontconfig.txt (loose, or in its Interface archive), so its fonts '
+                         'can\'t be pointed at the Arabic font. Run with --no-fonts to pack the text alone.')
+    regular, bold, license_text = font_files(args)
+    chars = ''.join(sorted(c for c in used if not c.isspace() or c == ' '))
+    swf, have = swffont.make_swf([(regular, False), (bold, True)], chars, bethesda.FONT_NAME,
+                                 f'{regular.stem}, SIL Open Font License' if not args.font else regular.stem)
+    missing = sorted({c for c in chars if c not in have and ord(c) > 0x7E and c.isprintable() and not c.isspace()})
+    if missing:
+        log(f'The Arabic font has no glyph for {len(missing)} characters the text uses ({"".join(missing[:20])}).')
+    interface = payload / 'Data' / 'Interface'
+    interface.mkdir(parents=True)
+    (interface / 'gameshelf_arabic.swf').write_bytes(swf)
+    # Bytes, so the game's own line endings stay as they are on every system.
+    (interface / 'fontconfig.txt').write_bytes(bethesda.rewrite_fontconfig(found.fontconfig).encode('utf-8'))
+    if license_text:
+        (interface / 'GameShelf').mkdir()
+        shutil.copyfile(license_text, interface / 'GameShelf' / ('FONT-LICENSE-' + _pack_font_name(license_text)))
+    mapped = bethesda.fonts_mapped(found.fontconfig)
+    log(f'Put {regular.stem} ({len(have)} characters) in Data/Interface/gameshelf_arabic.swf, for {len(mapped)} of the '
+        f'game\'s fonts ({", ".join(mapped[:8])}{"..." if len(mapped) > 8 else ""}).')
+
+
+def build_loose(source, rows, args, payload: Path, log):
+    """The game's text files with the Arabic in them, at their own paths; the Arabic font in place of its loose fonts."""
+    found = source.extra['loose']
+    by_file = arabic_by_file(rows, make_shaper(args), found.files)
+    written = 0
+    for text_file in found.files:
+        if by_file.get(text_file.rel):
+            target = payload.joinpath(*text_file.rel.split('/'))
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(text_file.write(by_file[text_file.rel]))
+            written += 1
+    if not written:
+        raise BuildError('No lines have Arabic, so there\'s nothing to pack.')
+    log(f'Wrote the Arabic into {written} of the game\'s text files ({", ".join(sorted(by_file)[:5])}{"..." if len(by_file) > 5 else ""}).')
+    fonts = [] if args.no_fonts else found.fonts
+    if not fonts:
+        log('The game has no loose font files GameShelf can put the Arabic font in place of; if Arabic letters show as boxes, '
+            'its fonts are inside its archives (an engine recipe can replace them).')
+        return
+    regular, bold, license_text = font_files(args)
+    for rel in fonts:
+        target = payload.joinpath(*rel.split('/'))
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(bold if BOLD_NAME.search(Path(rel).stem) else regular, target)
+    if license_text:
+        (payload / 'gameshelf_arabic').mkdir(exist_ok=True)
+        shutil.copyfile(license_text, payload / 'gameshelf_arabic' / ('FONT-LICENSE-' + _pack_font_name(license_text)))
+    args.fonts_used = fonts
+    log(f'Put {regular.stem} in place of the game\'s fonts: {", ".join(fonts)}.')
+
+
+def recipe_source(args, out: Path, log) -> Source:
+    """Runs an engine recipe's extract steps and reads the English it names."""
+    regular, bold, _ = font_files(args)
+    try:
+        run = recipes.RecipeRun(recipes.read_recipe(args.recipe), Path(args.source), out / 'recipe-work',
+                                tools_dir=args.tools_dir, fonts=(regular, bold), log=log)
+        files = run.extract()
+    except (recipes.RecipeError, OSError) as err:
+        raise BuildError(str(err)) from None
+    rows = [Row(text, None, f'{f.rel}#{key}') for f in files for key, text in f.entries]
+    return Source(rows, engine='custom', extra={'recipe': run}, notes=[f'Engine recipe for {run.recipe["engine"]}.'])
+
+
+def build_custom(source, rows, args, payload: Path, log):
+    """Puts the Arabic back with the recipe, and packs what the recipe says goes into the game."""
+    run = source.extra['recipe']
+    shape = make_shaper(args, default=run.recipe.get('shape', True), max_line=run.recipe.get('maxLine'))
+    try:
+        if not run.write(arabic_by_file(rows, shape, run.files)):
+            raise BuildError('No lines have Arabic, so there\'s nothing to put back.')
+        outputs = run.repack()
+    except recipes.RecipeError as err:
+        raise BuildError(str(err)) from None
+    for made, target in outputs:
+        destination = payload.joinpath(*target.split('/'))
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(made), destination)
+    log(f'The recipe made {len(outputs)} files for the game: {", ".join(t for _, t in outputs[:5])}{"..." if len(outputs) > 5 else ""}.')
+    shutil.rmtree(run.work, ignore_errors=True)
 
 
 def unreal_font_targets(args, log) -> list:
@@ -872,10 +1015,16 @@ def sign(pack_dir: Path, args, kind: str):
 def build(args, log=print) -> Path:
     out = Path(args.out or REPO / 'build' / 'arabic-packs' / args.id)
     out.mkdir(parents=True, exist_ok=True)
-    try:
-        source = read_source(args.source, locres_path=args.locres_path, msg_path=args.msg_path)
-    except (SourceError, locres_format.LocResError) as err:
-        raise BuildError(str(err)) from None
+    if args.recipe:
+        args.kind = 'custom'
+        source = recipe_source(args, out, log)
+    else:
+        try:
+            source = read_source(args.source, locres_path=args.locres_path, msg_path=args.msg_path, engine=args.kind)
+        except (SourceError, locres_format.LocResError) as err:
+            raise BuildError(str(err)) from None
+    if args.kind == 'custom' and not args.recipe:
+        raise BuildError('A custom engine\'s pack needs its engine recipe (--recipe).')
     for note in source.notes:
         log(note)
     kind = args.kind or source.engine or 'overlay'
@@ -966,6 +1115,12 @@ def build(args, log=print) -> Path:
         build_godot(rows, source, args, payload, log)
     elif kind == 'reengine':
         build_reengine(source, rows, args, out, payload, log)
+    elif kind == 'bethesda':
+        build_bethesda(source, rows, args, payload, log)
+    elif kind == 'loose':
+        build_loose(source, rows, args, payload, log)
+    elif kind == 'custom':
+        build_custom(source, rows, args, payload, log)
     else:
         translations = {r.key: r.arabic for r in rows if r.arabic and r.key}
         build_unreal(source, translations, args, payload, out / 'stage', log)

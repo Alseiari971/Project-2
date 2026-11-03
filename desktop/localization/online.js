@@ -60,9 +60,12 @@ function createArabicOnline({ cloud, cacheDir, publicKeys = [] }) {
     async status(key) {
       return (await cloud.json('/api/arabic/status', { method: 'POST', body: { games: [key] } })).games?.[key] || null;
     },
-    /** Asks for Arabic in a game; `reason` says why this PC couldn't make it (for the admins). */
-    async request(key, name, reason = '') {
-      return cloud.json('/api/arabic/requests', { method: 'POST', body: { game: key, name, reason } });
+    /**
+     * Asks for Arabic in a game; `reason` says why this PC couldn't make it, and
+     * `fingerprint` what's in the game's folder (dirprint.js), for the admins.
+     */
+    async request(key, name, reason = '', fingerprint = null) {
+      return cloud.json('/api/arabic/requests', { method: 'POST', body: { game: key, name, reason, ...(fingerprint ? { fingerprint } : {}) } });
     },
 
     /**

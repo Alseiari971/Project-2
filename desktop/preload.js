@@ -43,6 +43,8 @@ contextBridge.exposeInMainWorld('gameshelfDesktop', {
   arabicOnline: (key) => ipcRenderer.invoke('arabic:online', key),
   getArabic: (key, options) => ipcRenderer.invoke('arabic:get', key, options),
   approveSubmission: (id) => ipcRenderer.invoke('admin:approve', id),
+  attachRecipe: (game, text) => ipcRenderer.invoke('admin:attachRecipe', game, text),
+  recipeTemplate: (game, family) => ipcRenderer.invoke('admin:recipeTemplate', game, family),
   requestArabic: (key) => ipcRenderer.invoke('arabic:request', key),
   onArabicProgress: (fn) => {
     const listener = (_event, progress) => fn(progress);

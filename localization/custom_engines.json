@@ -1,0 +1,80 @@
+{
+  "format": 1,
+  "about": "Engines beyond Unreal, Unity, RE Engine, Ren'Py and Godot. The desktop app (desktop/localization/engine.js) recognises a game by `detect` (paths in the game's folder, * matches within one name, letter case ignored; `all` must all be there, and one of `any`), and the pack builder (localization/arabic_compiler/recipes.py) reads its text with `parser` (built into GameShelf) or, for packed formats, with a game recipe an admin signed (see README, Engine recipes). `tools` are the only programs a recipe may run: GameShelf finds them in its own tools folder, never at a path a recipe gives.",
+  "tools": {
+    "quickbms": { "name": "QuickBMS", "exe": ["quickbms.exe", "quickbms_4gb_files.exe"], "home": "https://aluigi.altervista.org/quickbms.htm" },
+    "wolvenkit": { "name": "WolvenKit.CLI", "exe": ["WolvenKit.CLI.exe"], "home": "https://github.com/WolvenKit/WolvenKit" },
+    "repak": { "name": "repak", "exe": ["repak.exe", "repak"], "home": "https://github.com/trumank/repak" }
+  },
+  "recipes": [
+    {
+      "id": "bethesda-creation",
+      "name": "Bethesda Creation Engine (Skyrim, Fallout 4, Starfield)",
+      "detect": { "all": ["Data/*.esm"], "any": ["Data/Strings", "Data/*.bsa", "Data/*.ba2"] },
+      "parser": "bethesda"
+    },
+    {
+      "id": "santa-monica",
+      "name": "Santa Monica Studio engine (God of War)",
+      "detect": { "any": ["exec/wad/pc_le", "exec/wad/pc"] },
+      "archives": [".wad"],
+      "needs": "recipe"
+    },
+    {
+      "id": "redengine4",
+      "name": "REDengine 4 (Cyberpunk 2077)",
+      "detect": { "any": ["archive/pc/content/*.archive"] },
+      "archives": [".archive"],
+      "needs": "recipe"
+    },
+    {
+      "id": "redengine3",
+      "name": "REDengine 3 (The Witcher 3)",
+      "detect": { "any": ["content/content0/*.bundle"] },
+      "archives": [".bundle"],
+      "needs": "recipe"
+    },
+    {
+      "id": "psarc",
+      "name": "PlayStation archives (.psarc) in a PC port",
+      "detect": { "any": ["*.psarc", "*/*.psarc"] },
+      "archives": [".psarc"],
+      "needs": "recipe"
+    },
+    {
+      "id": "anvil",
+      "name": "Ubisoft Anvil (.forge)",
+      "detect": { "any": ["*.forge"] },
+      "archives": [".forge"],
+      "needs": "recipe"
+    },
+    {
+      "id": "frostbite",
+      "name": "EA Frostbite (.toc and .cas)",
+      "detect": { "any": ["Data/Win32/*.toc", "Data/*.toc"] },
+      "archives": [".toc", ".cas"],
+      "needs": "recipe"
+    },
+    {
+      "id": "rage",
+      "name": "Rockstar RAGE (.rpf)",
+      "detect": { "any": ["*.rpf", "*/*.rpf"] },
+      "archives": [".rpf"],
+      "needs": "recipe"
+    },
+    {
+      "id": "source",
+      "name": "Valve Source (.vpk)",
+      "detect": { "any": ["*/*_dir.vpk"] },
+      "archives": [".vpk"],
+      "needs": "recipe"
+    },
+    {
+      "id": "decima",
+      "name": "Decima (Horizon, Death Stranding)",
+      "detect": { "any": ["LocalCacheWinGame/package/*.bin", "LocalCacheDX12/*.bin"] },
+      "archives": [".bin"],
+      "needs": "recipe"
+    }
+  ]
+}

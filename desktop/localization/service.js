@@ -4,10 +4,12 @@
 // Modes:
 // - 'native'      the game's engine takes an added patch (Unreal pak, Unity
 //                 mod, RE Engine patch file, Ren'Py translation, Godot
-//                 override) and there's a signed pack for it, on this PC or in
-//                 GameShelf's cloud catalog (downloaded when it's switched on);
-// - 'overlay'     otherwise, when there's a signed overlay pack (anti-cheat,
-//                 signed paks and custom engines all end up here);
+//                 override, Bethesda string tables, the game's own text files,
+//                 or an engine recipe's repacked files) and there's a signed
+//                 pack for it, on this PC or in GameShelf's cloud catalog
+//                 (downloaded, or built here, when it's switched on);
+// - 'overlay'     otherwise, when there's a signed overlay pack (anti-cheat and
+//                 signed paks end up here);
 // - 'unavailable' no pack for this game, or no way to use it here.
 //
 // Messages come as { text, vars } so the page can translate them.
@@ -17,6 +19,7 @@ const { createMatcher } = require('./fingerprint');
 const { createLocalization, fill, TIER_ENGINES } = require('./index');
 const { createPackLibrary } = require('./library');
 const { OVERLAY_STYLES, DEFAULT_STYLE } = require('./overlay-manager');
+const { engineOf } = require('./dirprint');
 
 const PREFLIGHT_TTL_MS = 60 * 1000;
 
@@ -105,7 +108,10 @@ function createArabicService({ dataDir, publicKey, overlayAvailable = process.pl
       out = { ...base, why: result.why || why('There\'s no Arabic pack for this version of the game.') };
     } else {
       // Nothing on this PC yet: the app can get it from GameShelf's server (see online.js and builder.js).
-      out = { ...base, missing: true, tier, engine, overlayOnly: !result.fileChanges, detail: result.why, why: why('There\'s no Arabic pack for this game yet.') };
+      out = {
+        ...base, missing: true, tier, engine, engineInfo: engineOf(result.engine), overlayOnly: !result.fileChanges, detail: result.why,
+        why: why('There\'s no Arabic pack for this game yet.'),
+      };
     }
     return { ...out, enabled: out.mode !== 'unavailable' && prefs[game.key] === true };
   }

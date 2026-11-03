@@ -6,6 +6,9 @@
 //   builds that report it (the desktop app's, or the pack builder's --shared);
 //   how many are translated is counted here, from the memory itself.
 // - Players ask for a game with "Request Arabic subtitles"; each asker counts once.
+//   When their PC can't make the Arabic, the request says why, with the game
+//   folder's fingerprint (names, file kinds and sizes), so an admin can write
+//   the game's engine recipe (src/engine-recipes.js) without owning the game.
 // - The font files a game's Arabic patch replaces (RE Engine games keep theirs
 //   as .oft files the patch puts the Arabic font in place of) are kept per game,
 //   so the desktop app can build the patch without a list of the game's files.
@@ -13,6 +16,7 @@
 const { GAME_RE } = require('./translation-memory');
 
 const READY = 0.95;
+const MAX_FINGERPRINT_CHARS = 64 * 1024;
 const MAX_FONT_TARGETS = 300;
 // name.oft.1, and the copies games keep beside it (name.oft.1.stm, name.oft.1.x64).
 const FONT_TARGET_RE = /^natives\/[\w\-./]{1,200}\.oft(?:\.\d{1,3})?(?:\.(?:stm|x64))?$/i;
@@ -22,8 +26,10 @@ function createArabicGames({ db, translations }) {
   const countRequests = db.prepare('SELECT COUNT(*) AS n FROM arabic_requests WHERE game = ?');
   const askedBy = db.prepare('SELECT 1 FROM arabic_requests WHERE game = ? AND asker = ?');
   const pendingFor = db.prepare("SELECT 1 FROM arabic_submissions WHERE game = ? AND status = 'pending'");
-  const addRequest = db.prepare(`INSERT INTO arabic_requests (game, asker, name, reason) VALUES (?, ?, ?, ?)
-    ON CONFLICT (game, asker) DO UPDATE SET reason = CASE WHEN excluded.reason <> '' THEN excluded.reason ELSE reason END`);
+  const addRequest = db.prepare(`INSERT INTO arabic_requests (game, asker, name, reason, fingerprint) VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT (game, asker) DO UPDATE SET reason = CASE WHEN excluded.reason <> '' THEN excluded.reason ELSE reason END,
+      fingerprint = CASE WHEN excluded.fingerprint <> '' THEN excluded.fingerprint ELSE fingerprint END`);
+  const hasRecipe = db.prepare('SELECT 1 FROM engine_recipes WHERE game = ?');
   const saveGame = db.prepare(`INSERT INTO arabic_games (game, name, engine, total_lines) VALUES (?, ?, ?, ?)
     ON CONFLICT (game) DO UPDATE SET name = CASE WHEN excluded.name <> '' THEN excluded.name ELSE name END,
       engine = excluded.engine, total_lines = excluded.total_lines, updated_at = datetime('now')`);
@@ -50,14 +56,20 @@ function createArabicGames({ db, translations }) {
       asked: Boolean(asker && askedBy.get(game, asker.key)),
       // A player's Arabic for it is waiting for an admin.
       pending: Boolean(pendingFor.get(game)),
+      // An admin attached an engine recipe: players' apps can read its packed text.
+      recipe: Boolean(hasRecipe.get(game)),
       fontTargets: row ? JSON.parse(row.font_targets) : [],
     };
   }
 
-  /** A player asks for Arabic in a game; `reason` says why their PC couldn't make it. Returns the game's status. */
-  function request(asker, game, name = '', reason = '') {
+  /**
+   * A player asks for Arabic in a game; `reason` says why their PC couldn't make
+   * it, and `fingerprint` what's in the game's folder. Returns the game's status.
+   */
+  function request(asker, game, name = '', reason = '', fingerprint = null) {
     checkGame(game);
-    addRequest.run(game, asker.key, String(name || '').slice(0, 200), String(reason || '').slice(0, 300));
+    const print = cleanFingerprint(fingerprint);
+    addRequest.run(game, asker.key, String(name || '').slice(0, 200), String(reason || '').slice(0, 300), print ? JSON.stringify(print) : '');
     return status(game, asker);
   }
 
@@ -92,12 +104,37 @@ function createArabicGames({ db, translations }) {
   /** The most asked-for games, for admins. */
   function requests(limit = 100) {
     return db.prepare(`SELECT r.game, MAX(r.name) AS name, COUNT(*) AS requests, MIN(r.created_at) AS first, MAX(r.created_at) AS last,
-        MAX(r.reason) AS reason
+        MAX(r.reason) AS reason,
+        (SELECT f.fingerprint FROM arabic_requests f WHERE f.game = r.game AND f.fingerprint <> '' ORDER BY f.created_at DESC LIMIT 1) AS fingerprint
       FROM arabic_requests r GROUP BY r.game ORDER BY requests DESC, last DESC LIMIT ?`).all(limit)
-      .map((r) => ({ ...r, ...status(r.game) }));
+      .map((r) => ({ ...r, fingerprint: r.fingerprint ? JSON.parse(r.fingerprint) : null, ...status(r.game) }));
   }
 
   return { status, request, report, requests, setFontList, isAdmin };
 }
 
-module.exports = { createArabicGames, READY };
+const text = (value, max) => String(value ?? '').replace(/[\x00-\x1f\x7f]/g, '').slice(0, max);
+const count = (value) => (Number.isFinite(Number(value)) && Number(value) >= 0 ? Math.min(Math.trunc(Number(value)), Number.MAX_SAFE_INTEGER) : 0);
+const names = (list, most, max = 160) => (Array.isArray(list) ? list.slice(0, most).map((n) => text(n, max)).filter(Boolean) : []);
+
+/**
+ * A game folder's fingerprint as players' apps send it (desktop/localization/dirprint.js),
+ * kept to its known fields and sizes; null when there's none.
+ */
+function cleanFingerprint(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const engine = value.engine && typeof value.engine === 'object' ? { id: text(value.engine.id, 60), name: text(value.engine.name, 120) } : null;
+  const print = {
+    folders: names(value.folders, 200),
+    top: { folders: names(value.top?.folders, 80), files: names(value.top?.files, 80) },
+    extensions: (Array.isArray(value.extensions) ? value.extensions.slice(0, 40) : [])
+      .map((e) => ({ ext: text(e?.ext, 24), count: count(e?.count), bytes: count(e?.bytes) })).filter((e) => e.ext),
+    files: count(value.files),
+    bytes: count(value.bytes),
+    truncated: Boolean(value.truncated),
+    engine: engine?.id ? engine : null,
+  };
+  return JSON.stringify(print).length <= MAX_FINGERPRINT_CHARS ? print : null;
+}
+
+module.exports = { createArabicGames, cleanFingerprint, READY };

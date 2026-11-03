@@ -8,9 +8,11 @@ resources; see "extraResources" in package.json):
   localization/ the builder (arabic_compiler) and its fonts
   scripts/      build-arabic-pack.py
   remsg/        REMSG_Converter (MIT), for RE Engine message files
-  tools/        repak (MIT or Apache-2.0), for Unreal games' .pak files; and in
+  tools/        repak (MIT or Apache-2.0), for Unreal games' .pak files; in
                 tools/unity/, BepInEx (LGPL-2.1) and XUnity.AutoTranslator (MIT)
-                for Unity games, Mono and IL2CPP (with UnityPy, MIT, in python/)
+                for Unity games, Mono and IL2CPP (with UnityPy, MIT, in python/);
+                and in tools/quickbms/, QuickBMS (GPL-2.0, with its source), the
+                tool most engine recipes run (localization/custom_engines.json)
 
 That's what the "Request Arabic subtitles" button runs, so players never need
 Python or a command prompt. Run it on any computer with Python 3 and internet:
@@ -45,6 +47,9 @@ REMSG_REQUIREMENTS = ['chardet>=5.2.0', 'mmh3>=4.0.1']
 # Tools for more engines. Each is optional: when one can't be fetched, the app
 # just can't make Arabic for that engine on players' PCs (it sends a request instead).
 REPAK_URL = 'https://github.com/trumank/repak/releases/download/v0.2.3/repak_cli-x86_64-pc-windows-msvc.zip'
+# QuickBMS by Luigi Auriemma, for engine recipes; its source goes alongside (GPL-2.0).
+QUICKBMS_URL = 'https://aluigi.altervista.org/papers/quickbms.zip'
+QUICKBMS_SOURCE_URL = 'https://aluigi.altervista.org/papers/quickbms_src.zip'
 UNITY_TOOLS = {
     'bepinex-mono.zip': 'https://github.com/BepInEx/BepInEx/releases/download/v5.4.23.6/BepInEx_win_x64_5.4.23.6.zip',
     'bepinex-il2cpp.zip': 'https://builds.bepinex.dev/projects/bepinex_be/791/BepInEx-Unity.IL2CPP-win-x64-6.0.0-be.791%2Bb782da4.zip',
@@ -144,16 +149,39 @@ def add_tools(out: Path, version: str):
             print(f'WARNING: {name} wasn\'t added ({err}). '
                   + ('That server only allows downloads from a web browser: open ' if browser_only else 'Download it yourself from ')
                   + f'{url} and save it as {unity / name}.')
+    quickbms = tools / 'quickbms'
+    quickbms.mkdir(exist_ok=True)
+    if not (quickbms / 'quickbms.exe').is_file():
+        try:
+            with zipfile.ZipFile(io.BytesIO(download(QUICKBMS_URL))) as archive:
+                names = {Path(n).name.lower(): n for n in archive.namelist() if not n.endswith('/')}
+                if 'quickbms.exe' not in names:
+                    raise ValueError('no quickbms.exe in the download')
+                for name in ('quickbms.exe', 'quickbms_4gb_files.exe', 'quickbms.txt'):
+                    if name in names:
+                        (quickbms / name).write_bytes(archive.read(names[name]))
+            (quickbms / 'quickbms-source.zip').write_bytes(download(QUICKBMS_SOURCE_URL))
+        except Exception as err:  # noqa: BLE001 (any failure just leaves engine recipes that need it out)
+            for name in ('quickbms.exe', 'quickbms_4gb_files.exe'):
+                (quickbms / name).unlink(missing_ok=True)
+            browser_only = getattr(err, 'code', None) == 403
+            print(f'WARNING: QuickBMS wasn\'t added ({err}). '
+                  + ('That server only allows downloads from a web browser: open ' if browser_only else 'Download it yourself from ')
+                  + f'{QUICKBMS_URL} (and its source, {QUICKBMS_SOURCE_URL}) and put quickbms.exe in {quickbms}.')
     ready = lambda flag: 'ready' if flag else 'NOT ready (request-only)'  # noqa: E731
     print(f'Unreal games (repak): {ready((tools / "repak.exe").is_file())}')
     print(f'Unity Mono games: {ready((site / "UnityPy").is_dir() and all((unity / n).is_file() for n in ("bepinex-mono.zip", "xunity-mono.zip")))}')
     print(f'Unity IL2CPP games: {ready((site / "UnityPy").is_dir() and all((unity / n).is_file() for n in ("bepinex-il2cpp.zip", "xunity-il2cpp.zip")))}')
+    print('Bethesda games and games with readable text files: ready')
+    print(f'Engine recipes that use QuickBMS: {ready((quickbms / "quickbms.exe").is_file())}')
 
 
 def add_builder(out: Path):
     ignore = shutil.ignore_patterns('__pycache__', '*.pyc')
     shutil.copytree(REPO / 'localization' / 'arabic_compiler', out / 'localization' / 'arabic_compiler', ignore=ignore)
     shutil.copytree(REPO / 'localization' / 'assets' / 'fonts', out / 'localization' / 'assets' / 'fonts', ignore=ignore)
+    # The engines and the only tools engine recipes may run (recipes.py reads it from here).
+    shutil.copy2(REPO / 'localization' / 'custom_engines.json', out / 'localization' / 'custom_engines.json')
     (out / 'scripts').mkdir(parents=True, exist_ok=True)
     shutil.copy2(REPO / 'scripts' / 'build-arabic-pack.py', out / 'scripts' / 'build-arabic-pack.py')
     (out / 'README.txt').write_text(
@@ -165,7 +193,9 @@ def add_builder(out: Path):
         'tools/repak.exe: repak by trumank, MIT or Apache-2.0 (github.com/trumank/repak).\n'
         'tools/unity/: BepInEx (LGPL-2.1, github.com/BepInEx/BepInEx) and XUnity.AutoTranslator by bbepis\n'
         '  (MIT, github.com/bbepis/XUnity.AutoTranslator), installed into Unity games when a player turns Arabic on;\n'
-        '  python/Lib/site-packages/UnityPy: UnityPy by K0lb3 (MIT).\n', encoding='utf-8')
+        '  python/Lib/site-packages/UnityPy: UnityPy by K0lb3 (MIT).\n'
+        'tools/quickbms/: QuickBMS by Luigi Auriemma (GPL-2.0, aluigi.altervista.org/quickbms.htm), run only by engine\n'
+        '  recipes an admin signed; its source code is tools/quickbms/quickbms-source.zip.\n', encoding='utf-8')
 
 
 def main(argv=None) -> int:

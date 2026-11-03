@@ -12,8 +12,20 @@
 //                   in the game's own dialogue box (see renpy.js).
 // - 'godot-override' Godot 3/4: an Arabic translation and fallback font the
 //                   game loads through override.cfg (see godot.js).
-// - 'overlay'       Everything else, and every game with anti-cheat: subtitles
-//                   drawn in GameShelf's own window, without touching the game.
+// - 'bethesda-strings' Bethesda Creation Engine (Skyrim Special Edition, Fallout
+//                   4, Starfield): Arabic string tables in Data/Strings, which the
+//                   game loads over its archives, and an Arabic font library
+//                   named in Data/Interface/fontconfig.txt.
+// - 'loose-files'   Other engines whose text is in readable files (JSON, CSV,
+//                   XML, .po, .txt...): those files, with the Arabic in place of
+//                   the English, and the Arabic font in place of the game's loose
+//                   fonts. The originals are kept and put back (stager.js).
+// - 'recipe'        Other engines whose text is packed in archives (God of War,
+//                   REDengine...): built with the game's engine recipe, which an
+//                   admin signed (see localization/arabic_compiler/recipes.py);
+//                   the repacked files replace the game's, kept and put back too.
+// - 'overlay'       Every game with anti-cheat (and packs made for the overlay):
+//                   subtitles drawn in GameShelf's own window, without touching the game.
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { scanAntiCheat } = require('./anticheat');
@@ -27,8 +39,16 @@ const godot = require('./godot');
 const reengine = require('./reengine');
 
 // The pack engine each tier takes.
-const TIER_ENGINES = { 'unreal-pak': 'unreal', 'unity-bepinex': 'unity', 're-patch': 'reengine', 'renpy-tl': 'renpy', 'godot-override': 'godot' };
-const ENGINE_NAMES = { unreal: 'Unreal', unity: 'Unity', reengine: 'RE Engine', renpy: 'Ren\'Py', godot: 'Godot' };
+const TIER_ENGINES = {
+  'unreal-pak': 'unreal', 'unity-bepinex': 'unity', 're-patch': 'reengine', 'renpy-tl': 'renpy', 'godot-override': 'godot',
+  'bethesda-strings': 'bethesda', 'loose-files': 'loose', recipe: 'custom',
+};
+const ENGINE_NAMES = {
+  unreal: 'Unreal', unity: 'Unity', reengine: 'RE Engine', renpy: 'Ren\'Py', godot: 'Godot',
+  bethesda: 'Bethesda Creation Engine', loose: 'loose-file', custom: 'custom-engine',
+};
+// Tiers whose packs replace some of the game's own files (kept aside, and put back when Arabic is turned off).
+const REPLACING_TIERS = new Set(['bethesda-strings', 'loose-files', 'recipe']);
 // RE Engine patch numbers have three digits.
 const MAX_RE_PATCH = 999;
 const native = (tier) => ({ tier, fileChanges: true, reason: null, why: null });
@@ -94,13 +114,27 @@ async function preflight(root, { steamAppId, ownMods = false, maxEntries } = {})
     }
     return { ...base, ...native('godot-override') };
   }
-  return { ...base, ...overlay('This game\'s engine can\'t take added text, so the overlay is used.') };
+  if (engine.engine === 'bethesda') return { ...base, ...native('bethesda-strings') };
+  // Another engine: its own text files when it has readable ones; otherwise
+  // (and for engines known to pack their text) the game's engine recipe.
+  const { family, looseText } = engine.custom || {};
+  if (looseText?.length && family?.needs !== 'recipe') return { ...base, ...native('loose-files') };
+  return { ...base, ...native('recipe') };
+}
+
+async function isFile(file) {
+  return Boolean((await fs.lstat(file).catch(() => null))?.isFile());
 }
 
 /** The files to add for a checked pack, and where. */
-function stagePlan(check, pack) {
+async function stagePlan(check, pack) {
   const { engine } = check;
   const files = pack.files.map((f) => ({ target: f.target, source: f.source, sha256: f.sha256 }));
+  if (REPLACING_TIERS.has(check.tier)) {
+    // Each file the game already has is replaced (the original kept aside); the rest are added.
+    for (const file of files) file.replace = await isFile(path.join(engine.base, ...file.target.split(/[\\/]/)));
+    return { anchor: engine.base, files, generated: [] };
+  }
   if (check.tier === 'unreal-pak') {
     return { anchor: engine.unreal.paksDir, files, generated: [] };
   }
@@ -165,7 +199,7 @@ async function enableArabic({ root, packDir, stager, publicKey, allowUnsigned = 
     throw new LocalizationError(`This pack is for ${packEngine} games, and this game uses ${ENGINE_NAMES[wanted]}.`, 'mismatch');
   }
   const requires = pack.manifest.requires || {};
-  const arch = check.engine.unreal?.arch || check.engine.unity?.arch || check.engine.godot?.arch;
+  const arch = check.engine.unreal?.arch || check.engine.unity?.arch || check.engine.godot?.arch || check.engine.bethesda?.arch;
   if (requires.arch && arch && requires.arch !== arch) {
     throw new LocalizationError(`This pack is for ${requires.arch} games, and this game is ${arch}.`, 'mismatch');
   }
@@ -184,7 +218,7 @@ async function enableArabic({ root, packDir, stager, publicKey, allowUnsigned = 
     if (head.toString('latin1') !== reengine.PAK_MAGIC) throw new LocalizationError('The pack\'s file isn\'t an RE Engine .pak.', 'pack');
   }
 
-  const result = await stager.enable({ root: check.root, pack: pack.manifest, ...stagePlan(check, pack) });
+  const result = await stager.enable({ root: check.root, pack: pack.manifest, ...(await stagePlan(check, pack)) });
   return { ...result, tier: check.tier };
 }
 
@@ -207,4 +241,4 @@ function createLocalization({ dataDir }) {
   };
 }
 
-module.exports = { preflight, enableArabic, disableArabic, createLocalization, LocalizationError, StageError, fill, TIER_ENGINES };
+module.exports = { preflight, enableArabic, disableArabic, createLocalization, LocalizationError, StageError, fill, TIER_ENGINES, REPLACING_TIERS, ENGINE_NAMES };

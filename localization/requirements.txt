@@ -8,3 +8,6 @@ fonttools>=4.40
 # Optional, for RE Engine games that compress their files with zstd
 # (scripts/build-arabic-pack.py reading a game's own paks). Python 3.14 has it built in.
 # zstandard
+# Optional: faster LZ4 for Skyrim Special Edition .bsa and Starfield .ba2 archives
+# (arabic_compiler/lz4codec.py decodes them in pure Python without it).
+# lz4

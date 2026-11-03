@@ -132,7 +132,7 @@ test('a check that can\'t finish counts as protected', async () => {
   assert.match(check.reason, /couldn't check all/);
 });
 
-test('preflight picks a tier, and only the overlay for protected or unsupported games', async () => {
+test('preflight picks a tier, and the overlay only for protected games', async () => {
   assert.equal((await preflight(await unrealGame())).tier, 'unreal-pak');
   assert.equal((await preflight(await unityGame())).tier, 'unity-bepinex');
   const eac = await preflight(await unrealGame({ 'EasyAntiCheat/x.txt': 'x' }));
@@ -140,7 +140,11 @@ test('preflight picks a tier, and only the overlay for protected or unsupported 
   assert.match(eac.reason, /Easy Anti-Cheat/);
   assert.equal((await preflight(await unrealGame({ 'MyGame/Content/Paks/pakchunk0-Windows.sig': 'sig' }))).tier, 'overlay');
   assert.equal((await preflight(await unityGame({ 'BepInEx/core/BepInEx.dll': 'theirs' }))).tier, 'overlay');
-  assert.equal((await preflight(await tree({ 'game.exe': program() }))).tier, 'overlay');
+  // Custom engines stay native: their own text files, or else an engine recipe.
+  const custom = await preflight(await tree({ 'game.exe': program() }));
+  assert.equal(custom.tier, 'recipe');
+  assert.equal(custom.fileChanges, true);
+  assert.equal((await preflight(await tree({ 'game.exe': program(), 'data/lang/en.json': '{}' }))).tier, 'loose-files');
 });
 
 // ---- Packs -----------------------------------------------------------------------

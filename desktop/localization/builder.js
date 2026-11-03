@@ -7,20 +7,26 @@
 // prompt. The game's own files never leave the PC.
 //
 // Engines, with what the app brings for them: RE Engine (REMSG_Converter),
-// Ren'Py, Godot, Unity (UnityPy, BepInEx and XUnity.AutoTranslator) and Unreal
-// (repak, for games whose paks aren't encrypted).
+// Ren'Py, Godot, Unity (UnityPy, BepInEx and XUnity.AutoTranslator), Unreal
+// (repak, for games whose paks aren't encrypted), Bethesda's Creation Engine,
+// games whose text is in readable files (the loose-file scanner), and packed
+// engines with an admin-signed engine recipe, run with an allowlisted tool from
+// the app's tools folder (QuickBMS...).
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawn: defaultSpawn } = require('node:child_process');
 
-const BUILDABLE = { 're-patch': 'reengine', 'renpy-tl': 'renpy', 'godot-override': 'godot', 'unity-bepinex': 'unity', 'unreal-pak': 'unreal', overlay: 'overlay' };
+const BUILDABLE = {
+  're-patch': 'reengine', 'renpy-tl': 'renpy', 'godot-override': 'godot', 'unity-bepinex': 'unity', 'unreal-pak': 'unreal',
+  'bethesda-strings': 'bethesda', 'loose-files': 'loose', recipe: 'custom', overlay: 'overlay',
+};
 
 /**
  * Where the builder and its Python are. Installed, they're in the app's
  * resources (arabic-builder/); from source, the repository's own builder runs
  * with build-tools/arabic-builder's Python if there is one, else python on the PATH.
- * GAMESHELF_PYTHON, GAMESHELF_MSG_TOOL, GAMESHELF_REPAK and GAMESHELF_UNITY_TOOLS override, for development.
+ * GAMESHELF_PYTHON, GAMESHELF_MSG_TOOL, GAMESHELF_REPAK, GAMESHELF_UNITY_TOOLS and GAMESHELF_TOOLS override, for development.
  */
 function findBuilder({ packaged, resourcesPath, repoDir, env = process.env, platform = process.platform, exists = fs.existsSync }) {
   const bundle = packaged ? path.join(resourcesPath, 'arabic-builder') : path.join(repoDir, 'build-tools', 'arabic-builder');
@@ -36,6 +42,8 @@ function findBuilder({ packaged, resourcesPath, repoDir, env = process.env, plat
     repak: env.GAMESHELF_REPAK || (exists(bundledRepak) ? bundledRepak : null),
     // bepinex-mono.zip, bepinex-il2cpp.zip, xunity-mono.zip, xunity-il2cpp.zip
     unityTools: env.GAMESHELF_UNITY_TOOLS || (exists(path.join(bundledUnity, 'bepinex-mono.zip')) ? bundledUnity : null),
+    // Engine recipes' tools (quickbms/, wolvenkit/...: see localization/custom_engines.json).
+    tools: env.GAMESHELF_TOOLS || path.join(bundle, 'tools'),
     // Signing runs on the app's own Node (Electron); its script is kept outside app.asar (asarUnpack).
     signer: packaged ? path.join(resourcesPath, 'app.asar.unpacked', 'scripts', 'localization-pack.js') : path.join(repoDir, 'scripts', 'localization-pack.js'),
   };
@@ -87,14 +95,17 @@ function createPackBuilder({ paths, outDir, keyFile, spawn = defaultSpawn, nodeP
 
   // What each engine needs besides Python and the builder, to change its files or (overlay) just to read its text.
   const needs = { 're-patch': () => paths.msgTool, 'unity-bepinex': () => paths.unityTools, 'unreal-pak': () => paths.repak };
-  const readers = { unreal: () => paths.repak, unity: () => paths.unityTools, reengine: () => paths.msgTool, renpy: () => true, godot: () => true };
+  const readers = {
+    unreal: () => paths.repak, unity: () => paths.unityTools, reengine: () => paths.msgTool, renpy: () => true, godot: () => true,
+    bethesda: () => true, custom: () => true,
+  };
   /** Whether this PC can make Arabic for a game: `tier` from the game check, `engine` its engine (for the overlay). */
   const canBuild = (tier, engine) => Boolean(BUILDABLE[tier] && paths.python
     && (tier === 'overlay' ? Boolean(readers[engine]?.()) : (!needs[tier] || needs[tier]())));
 
   /**
    * Builds the pack for a game. `game` is { key, dir, tier, steamAppId, gameId,
-   * title }. With `server` and `auth` (the signed-in player's sign-in, see
+   * title, recipe } (`recipe`: the signed engine recipe's file, for tier 'recipe'). With `server` and `auth` (the signed-in player's sign-in, see
    * online.js), the Arabic comes from GameShelf's shared translations; with
    * `set` (a signed Arabic set's file), from that, with nothing translated.
    * Resolves to the final state (packDir set when a pack was made; info: the
@@ -103,6 +114,7 @@ function createPackBuilder({ paths, outDir, keyFile, spawn = defaultSpawn, nodeP
   function build(game, { server, auth = {}, set = null, fontTargets = [], version = null, onProgress = () => {} }) {
     if (running.has(game.key)) return running.get(game.key).promise;
     if (!canBuild(game.tier, game.engine)) return Promise.reject(new Error('GameShelf can\'t make Arabic for this game on this PC.'));
+    if (game.tier === 'recipe' && !game.recipe) return Promise.reject(new Error('This game needs an engine recipe from GameShelf first.'));
     const id = `gameshelf-${game.steamAppId ? `steam-${game.steamAppId}` : game.gameId}-ar`;
     const out = path.join(outDir, id);
     const args = [paths.script, game.dir, '--id', id, '--version', version || `1.0.${Math.floor(Date.now() / 1000)}`,
@@ -114,6 +126,7 @@ function createPackBuilder({ paths, outDir, keyFile, spawn = defaultSpawn, nodeP
     if (fontTargets.length) args.push('--font-targets', fontTargets.join(','));
     if (paths.msgTool && (game.tier === 're-patch' || game.engine === 'reengine')) args.push('--msg-tool', paths.msgTool);
     if (game.tier === 're-patch') args.push('--require-fonts');
+    if (game.tier === 'recipe') args.push('--recipe', game.recipe, '--tools-dir', paths.tools);
     const state = { phase: 'starting', total: 0, have: 0, asking: 0, asked: 0, missing: 0, translated: 0, lines: 0, limited: false, packDir: null };
     const child = spawn(paths.python, args, {
       windowsHide: true,

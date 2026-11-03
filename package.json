@@ -41,6 +41,7 @@
       "public/**/*",
       "data/games.json",
       "desktop/**/*",
+      "localization/custom_engines.json",
       "scripts/localization-pack.js"
     ],
     "asarUnpack": [

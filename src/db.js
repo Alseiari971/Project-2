@@ -41,6 +41,8 @@ const ADDED_COLUMNS = {
   // Why a player's PC couldn't make the Arabic itself (encrypted files, say), for admins.
   arabic_requests: {
     reason: "TEXT NOT NULL DEFAULT ''",
+    // What's in the game's folder (names, file kinds and sizes; see desktop/localization/dirprint.js), as JSON.
+    fingerprint: "TEXT NOT NULL DEFAULT ''",
   },
   library: {
     game_backdrop: 'TEXT',
@@ -211,6 +213,18 @@ function openDatabase(file = process.env.DB_FILE || path.join(__dirname, '..', '
       approved_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
       created_at   TEXT NOT NULL DEFAULT (datetime('now')),
       PRIMARY KEY (id, version)
+    );
+
+    -- Engine recipes (see src/engine-recipes.js): how players' apps read a game
+    -- whose text is packed in archives, signed by an admin with GameShelf's pack key.
+    CREATE TABLE IF NOT EXISTS engine_recipes (
+      game        TEXT PRIMARY KEY,
+      recipe      TEXT NOT NULL,
+      signature   TEXT NOT NULL,
+      engine      TEXT NOT NULL DEFAULT '',
+      tool        TEXT NOT NULL DEFAULT '',
+      attached_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
     -- Personal access tokens, for tools such as the pack builder. Only a hash is kept.

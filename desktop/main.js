@@ -22,7 +22,9 @@ const { createArabicOnline, gameKey } = require('./localization/online');
 const { createPackBuilder, findBuilder, localPackKey } = require('./localization/builder');
 const { createPassThrough, createCloudClient, createRemoteGames, SESSION_COOKIE } = require('./cloud');
 const { createStudio } = require('./localization/studio');
-const { createArabicRequests, cantMake } = require('./localization/requests');
+const { createArabicRequests, cantMake, NEEDS_RECIPE } = require('./localization/requests');
+const { createRecipes, recipeTemplate } = require('./localization/recipes');
+const { directoryFingerprint } = require('./localization/dirprint');
 const config = require('./config.json');
 const { normalizeTitle } = require('../src/text');
 
@@ -330,6 +332,8 @@ const cloud = createCloudClient({
 });
 // Arabic packs from the cloud catalog, and the shared translations (see online.js).
 const online = createArabicOnline({ cloud, cacheDir: path.join(dataDir, 'localization', 'downloads'), publicKeys: [packKey].filter(Boolean) });
+// Engine recipes for games whose text is packed (signed by an admin with GameShelf's key, see recipes.js).
+const recipes = createRecipes({ cloud, cacheDir: path.join(dataDir, 'localization', 'recipes'), publicKeys: [packKey].filter(Boolean) });
 // Packs this app builds itself (from GameShelf's server, see below) are signed with a key made on this PC.
 const localKey = localPackKey(dataDir);
 const arabic = createArabicService({
@@ -340,8 +344,13 @@ const arabic = createArabicService({
   // Approved Arabic sets: the patch is built here, from the player's own copy of the game.
   builder: {
     canBuild: (tier, engine) => packBuilder.canBuild(tier, engine),
-    fromSet: async ({ game, tier, entry, set, setFile, onProgress }) => (await packBuilder.build(
-      { ...game, tier, title: entry.title || set.title }, { set: setFile, fontTargets: set.fontTargets || [], version: entry.version, onProgress })).packDir,
+    fromSet: async ({ game, tier, entry, set, setFile, onProgress }) => {
+      // Packed text: the game's signed engine recipe says how to read it and put the Arabic back.
+      const recipe = tier === 'recipe' ? await recipes.forGame(gameKey(game)) : null;
+      if (tier === 'recipe' && !recipe) throw new Error(NEEDS_RECIPE);
+      return (await packBuilder.build({ ...game, tier, title: entry.title || set.title, recipe: recipe?.file },
+        { set: setFile, fontTargets: set.fontTargets || [], version: entry.version, onProgress })).packDir;
+    },
   },
 });
 const builderPaths = findBuilder({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, repoDir: path.join(__dirname, '..') });
@@ -365,7 +374,11 @@ const studio = createStudio({
 });
 // "Request Arabic subtitles", after the player agrees (see requests.js).
 const overlayAvailable = process.platform === 'win32' || Boolean(devOcrHelper);
-const requests = createArabicRequests({ arabic, packBuilder, online, server: () => cloud.server(), overlayAvailable });
+const requests = createArabicRequests({
+  arabic, packBuilder, online, recipes, server: () => cloud.server(), overlayAvailable,
+  // What's in the game's folder, for the admins (names only, see dirprint.js).
+  fingerprint: (game, info) => directoryFingerprint(game.dir, { engine: info?.engineInfo || null }),
+});
 let overlays = null; // created once the app is ready
 
 const arabicGame = (g) => ({ key: g.key, dir: g.dir, steamAppId: g.steamAppId || null, gameId: pageOf(g)?.id || null });
@@ -805,6 +818,11 @@ function registerIpc() {
     if (!info.missing || !signedIn || !serverKey) return out;
     try {
       out.server = await online.status(serverKey);
+      // Packed text with no engine recipe yet: the button asks the admins (with the folder's fingerprint) instead.
+      if (info.tier === 'recipe' && !out.server?.recipe && out.canBuild) {
+        out.canBuild = false;
+        out.cantBuild = { text: NEEDS_RECIPE, vars: {} };
+      }
     } catch (err) {
       out.error = { text: err.message, vars: {} };
     }
@@ -822,10 +840,10 @@ function registerIpc() {
     const game = await installedGame(key);
     const serverKey = gameKey(arabicGame(game));
     if (!serverKey) throw new Error('GameShelf doesn\'t know which game this is, so it can\'t ask for it.');
-    // The admins see why this PC couldn't make it.
+    // The admins see why this PC couldn't make it, and what's in the game's folder.
     const info = await arabic.info(arabicGame(game));
-    const reason = info.missing ? cantMake(info, packBuilder, overlayAvailable) : null;
-    return online.request(serverKey, pageOf(game)?.name || game.name, reason || '');
+    const reason = info.missing ? cantMake(info, packBuilder, overlayAvailable) || (info.tier === 'recipe' ? NEEDS_RECIPE : null) : null;
+    return requests.ask({ ...arabicGame(game), title: pageOf(game)?.name || game.name }, reason || '', info);
   });
   // Admin Panel: "Approve, Sign & Publish" a player's submission (signed here, with the Pack Studio's key).
   handle('admin:approve', async (submissionId) => {
@@ -834,6 +852,12 @@ function registerIpc() {
     online.catalog.forget();
     return pack;
   });
+  // Admin Panel: a game's engine recipe, checked and signed here with the Pack Studio's key, then attached on the server.
+  handle('admin:attachRecipe', async (game, text) => {
+    await requireAdmin();
+    return studio.attachRecipe(String(game), String(text));
+  });
+  handle('admin:recipeTemplate', async (game, family) => JSON.stringify(recipeTemplate(String(game), family ? String(family) : null), null, 2));
   // ---- Pack Studio (admins only; the server checks again when a pack is published) ----
   const requireAdmin = async () => {
     if ((await cloud.me())?.role !== 'admin') throw new Error('Only admins can do this.');

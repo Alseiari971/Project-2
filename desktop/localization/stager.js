@@ -1,8 +1,13 @@
 // Adds a pack's files to a game, and takes them away again, without ever
-// replacing or deleting anything that isn't GameShelf's:
+// losing anything that isn't GameShelf's:
 //
-// - Nothing is overwritten. If any file a pack adds already exists, nothing
-//   is added at all.
+// - Nothing is overwritten by accident. If any file a pack adds already
+//   exists, nothing is added at all.
+// - The one exception is a file the pack says it replaces (`replace: true`: a
+//   game's own localization file, for engines that read only that file). Its
+//   original is copied out of the game folder first and checked; turning
+//   Arabic off puts the exact original back (checked again), and a crash
+//   halfway puts it back on the next start.
 // - Before the first file is written, a record of every file and folder about
 //   to be added is saved. If GameShelf stops halfway (a crash, a power cut),
 //   recover() uses it to take back what was added, on the next start.
@@ -91,6 +96,13 @@ function createStager({ stateDir }) {
   async function rollback(state) {
     for (const file of [...state.files].reverse()) {
       await removeFile(`${file.path}.${state.op}.partial`).catch(() => {});
+      if (file.replace) {
+        // Only put back what was copied out; a file never replaced is still the original.
+        if (await fs.lstat(file.replace.backup).catch(() => null)) {
+          if (await restore(file, state.op).catch(() => false)) await removeFile(file.replace.backup).catch(() => {});
+        }
+        continue;
+      }
       const info = await fs.lstat(file.path).catch(() => null);
       if (info?.isFile() && (await sha256File(file.path).catch(() => null)) === file.sha256) {
         await removeFile(file.path).catch(() => {});
@@ -118,6 +130,39 @@ function createStager({ stateDir }) {
       return;
     }
     await removeFile(partial);
+  }
+
+  // A file the pack replaces: the original goes to the backup first (checked),
+  // then the new one takes its place in one step.
+  async function replace(file, entry, op) {
+    await fs.mkdir(path.dirname(file.replace.backup), { recursive: true });
+    await fs.copyFile(file.path, file.replace.backup, fs.constants.COPYFILE_EXCL);
+    if ((await sha256File(file.replace.backup)) !== file.replace.sha256) {
+      throw new StageError(`"${file.path}" changed while GameShelf was keeping a copy of it.`, 'conflict');
+    }
+    const partial = `${file.path}.${op}.partial`;
+    if (entry.source) await fs.copyFile(entry.source, partial, fs.constants.COPYFILE_EXCL);
+    else await fs.writeFile(partial, entry.content, { flag: 'wx' });
+    if ((await sha256File(partial)) !== file.sha256) {
+      throw new StageError(`"${entry.target}" changed while it was being copied.`, 'pack');
+    }
+    await fs.rename(partial, file.path);
+  }
+
+  /** Puts a replaced file's original back from its backup. True when it's back (or never left). */
+  async function restore(file, op) {
+    const current = await sha256File(file.path).catch(() => null);
+    if (current === file.replace.sha256) return true;
+    if (current !== file.sha256 && current !== null) return false; // changed since: left alone
+    if ((await sha256File(file.replace.backup).catch(() => null)) !== file.replace.sha256) return false;
+    const partial = `${file.path}.${op}.restore`;
+    await fs.copyFile(file.replace.backup, partial);
+    if ((await sha256File(partial)) !== file.replace.sha256) {
+      await removeFile(partial);
+      return false;
+    }
+    await fs.rename(partial, file.path);
+    return true;
   }
 
   /**
@@ -149,12 +194,23 @@ function createStager({ stateDir }) {
       const dirs = [];
       const names = new Set();
       const conflicts = [];
-      for (const entry of files) {
+      for (const [index, entry] of files.entries()) {
         const target = path.resolve(realAnchor, ...entry.target.split(/[\\/]/));
         if (!isInside(realAnchor, target)) throw new StageError(`"${entry.target}" points outside the game.`, 'pack');
         if (names.has(fold(target))) throw new StageError(`"${entry.target}" is listed twice.`, 'pack');
         names.add(fold(target));
         await checkNoLinks(realAnchor, path.dirname(target));
+        if (entry.replace) {
+          // Replaced: it has to be there, as a plain file; its original is kept outside the game.
+          const info = await fs.lstat(target).catch(() => null);
+          if (!info?.isFile()) throw new StageError(`"${entry.target}" isn't in the game, so GameShelf can't replace it.`, 'conflict', [target]);
+          planned.push({
+            path: target,
+            sha256: entry.sha256,
+            replace: { sha256: await sha256File(target), backup: path.join(stateDir, 'backups', sha256(fold(realRoot)).slice(0, 16), op, `${index}-${path.basename(target)}`) },
+          });
+          continue;
+        }
         if (await fs.lstat(target).catch(() => null)) conflicts.push(target);
         for (let dir = path.dirname(target); isInside(realAnchor, dir); dir = path.dirname(dir)) {
           if (await fs.lstat(dir).catch(() => null)) break;
@@ -181,7 +237,10 @@ function createStager({ stateDir }) {
       await saveState(state);
       try {
         for (const dir of dirs) await fs.mkdir(dir);
-        for (let i = 0; i < files.length; i++) await place(planned[i], files[i], op);
+        for (let i = 0; i < files.length; i++) {
+          if (planned[i].replace) await replace(planned[i], files[i], op);
+          else await place(planned[i], files[i], op);
+        }
         await saveState({ ...state, status: 'enabled', enabledAt: new Date().toISOString() });
       } catch (err) {
         await rollback(state);
@@ -232,6 +291,20 @@ function createStager({ stateDir }) {
       const removed = [];
       const kept = [];
       for (const file of [...state.files].reverse()) {
+        if (file.replace) {
+          // The game's own file: its original goes back, unless the file changed since (a game update).
+          try {
+            if (await restore(file, state.op)) {
+              await removeFile(file.replace.backup).catch(() => {});
+              removed.push(file.path);
+            } else {
+              kept.push({ path: file.path, why: `changed since GameShelf replaced it; GameShelf's copy of the original is at ${file.replace.backup}` });
+            }
+          } catch (err) {
+            kept.push({ path: file.path, why: err.code === 'EBUSY' ? 'in use' : err.code || err.message, file });
+          }
+          continue;
+        }
         const info = await fs.lstat(file.path).catch(() => null);
         if (!info) continue;
         if (!info.isFile()) {

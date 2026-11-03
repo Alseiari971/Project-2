@@ -17,6 +17,7 @@ const {
 const { ROLES, adminNames, bootstrapAdmins } = require('./roles');
 const { readBody, RegistryError, MAX_PACK_BYTES } = require('./pack-registry');
 const { SubmissionError } = require('./submissions');
+const { RecipeError } = require('./engine-recipes');
 const { TranslationLimit, GAME_RE: GAME_KEY_RE } = require('./translation-memory');
 const { GENRES, findGenre } = require('./games/genres');
 const profile = require('./profile');
@@ -90,7 +91,7 @@ function pitchFrom(text) {
   return pitch.trim();
 }
 
-function createApi({ db, games, prices, steam, steamStore, translations, arabicGames, packs, submissions, downloadsDir }) {
+function createApi({ db, games, prices, steam, steamStore, translations, arabicGames, packs, submissions, recipes = null, downloadsDir }) {
   bootstrapAdmins(db);
   const api = express.Router();
   const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30 });
@@ -728,7 +729,34 @@ function createApi({ db, games, prices, steam, steamStore, translations, arabicG
     if (!Array.isArray(keys) || keys.length > 500) throw new TypeError('Send up to 500 games at a time.');
     return { games: Object.fromEntries(keys.map(String).filter((k) => GAME_KEY_RE.test(k)).map((k) => [k, arabicGames.status(k, askerOf(req))])) };
   }));
-  api.post('/arabic/requests', requireUser, translateLimiter, arabicRoute(({ game, name, reason }, req) => arabicGames.request(askerOf(req), String(game), name, reason)));
+  api.post('/arabic/requests', requireUser, translateLimiter, arabicRoute(({ game, name, reason, fingerprint }, req) => arabicGames.request(askerOf(req), String(game), name, reason, fingerprint)));
+
+  // ---- Engine recipes, for games whose text is packed (see src/engine-recipes.js) ----
+
+  const recipeRoute = (fn) => (req, res) => {
+    if (!recipes) return res.status(503).json({ error: 'Engine recipes aren\'t set up on this server.' });
+    try {
+      const out = fn(req, res);
+      if (out !== undefined) res.json(out);
+    } catch (err) {
+      if (err instanceof RecipeError) return res.status(err.status).json({ error: err.message });
+      throw err;
+    }
+  };
+  // A game's signed recipe, for players' apps (which check the signature before using it).
+  api.get('/arabic/recipes/:game', requireUser, recipeRoute((req, res) => {
+    const found = recipes.get(String(req.params.game));
+    if (!found) {
+      res.status(404).json({ error: 'GameShelf has no engine recipe for this game yet.' });
+      return undefined;
+    }
+    return found;
+  }));
+  api.get('/admin/recipes', requireAdmin, recipeRoute(() => ({ recipes: recipes.list() })));
+  api.get('/admin/engines', requireAdmin, recipeRoute(() => recipes.registry()));
+  // Attached from the Admin Panel in the desktop app, which checks and signs it: { recipe: "<JSON text>", signature }.
+  api.put('/admin/recipes/:game', requireAdmin, recipeRoute((req) => ({ recipe: recipes.attach(String(req.params.game), req.body || {}, req.user) })));
+  api.delete('/admin/recipes/:game', requireAdmin, recipeRoute((req) => ({ removed: recipes.remove(String(req.params.game)) })));
   api.post('/arabic/report', requireUser, translateLimiter, arabicRoute((body, req) => arabicGames.report(askerOf(req), { ...body, game: String(body.game) }, req.user)));
 
   // ---- The cloud catalog of Arabic packs (see src/pack-registry.js) ---------

@@ -11,9 +11,13 @@ import { t } from '../i18n.js';
 const desktop = window.gameshelfDesktop;
 const TABS = ['overview', 'approvals', 'requests', 'packs', 'users', 'installer', ...(desktop?.studio ? ['studio'] : [])];
 const TAB_LABELS = { overview: 'Overview', approvals: 'Pending approvals', users: 'Users', packs: 'Arabic packs', requests: 'Requests', installer: 'Windows app', studio: 'Pack Studio' };
-const ENGINE_LABELS = { auto: 'Detect it', unreal: 'Unreal Engine', unity: 'Unity', reengine: 'Capcom RE Engine', godot: 'Godot', renpy: "Ren'Py", overlay: 'Accessibility overlay' };
+const ENGINE_LABELS = {
+  auto: 'Detect it', unreal: 'Unreal Engine', unity: 'Unity', reengine: 'Capcom RE Engine', godot: 'Godot', renpy: "Ren'Py",
+  bethesda: 'Bethesda Creation Engine', loose: 'Readable text files', custom: 'Custom engine (recipe)', overlay: 'Accessibility overlay',
+};
 
-const formatSize = (bytes) => (bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
+const formatSize = (bytes) => (bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB`
+  : bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
 const errorText = (err) => t(String(err.message || err).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''));
 
 /** Sends a file as the request body, reporting upload progress (0 to 1). */
@@ -221,18 +225,49 @@ async function packs(body) {
 // ---- Requests --------------------------------------------------------------------
 
 async function requests(body) {
-  const { requests: rows } = await api('/admin/requests');
+  const [{ requests: rows }, attached] = await Promise.all([
+    api('/admin/requests'),
+    api('/admin/recipes').then((r) => r.recipes).catch(() => []),
+  ]);
   const STATUS = { ready: 'Arabic ready', partial: 'Partly translated', none: 'Not started' };
+  const byGame = new Map(rows.map((r) => [r.game, r]));
   mount(body, html`
     ${rows.length
       ? html`<div class="admin-table">${rows.map((r) => html`
-          <div class="admin-row">
-            <div><strong>${bdi(r.name || r.game)}</strong> <span class="muted small">${r.game}${r.reason ? html` · ${t(r.reason)}` : ''}</span></div>
+          <div class="admin-row admin-request">
+            <div><strong>${bdi(r.name || r.game)}</strong> <span class="muted small">${r.game}${r.reason ? html` · ${t(r.reason)}` : ''}</span>
+              ${r.fingerprint ? folderPrint(r.fingerprint) : ''}</div>
             <span>${r.requests === 1 ? t('1 player asked') : t('{count} players asked', { count: r.requests })}</span>
-            <span class="muted small">${r.pending ? t('Waiting for approval') : t(STATUS[r.status])}${r.total ? ` · ${r.translated}/${r.total}` : ''}</span>
-            <button class="btn btn-sm btn-quiet" type="button" data-font-list="${r.game}">${t('Font list…')}</button>
+            <span class="muted small">${r.recipe ? html`<span class="recipe-tag">${t('Engine recipe attached')}</span> ` : ''}${r.pending ? t('Waiting for approval') : t(STATUS[r.status])}${r.total ? ` · ${r.translated}/${r.total}` : ''}</span>
+            <span class="admin-row-actions">
+              <button class="btn btn-sm btn-quiet" type="button" data-recipe="${r.game}" data-family="${r.fingerprint?.engine?.id || ''}">${r.recipe ? t('Edit engine recipe…') : t('Attach engine recipe…')}</button>
+              <button class="btn btn-sm btn-quiet" type="button" data-font-list="${r.game}">${t('Font list…')}</button>
+            </span>
           </div>`)}</div>`
       : html`<p class="muted">${t('Nobody has asked for Arabic in a game yet.')}</p>`}
+    <section class="panel" id="recipe-editor" hidden>
+      <h2>${t('Engine recipe')} <span class="muted small" id="recipe-game" dir="ltr"></span></h2>
+      <p class="muted small">${t('For a game whose text is packed in its own archives: which allowlisted tool takes the text out, which files hold the English, and how the Arabic goes back in. Paths start with {game}, {work}, {extracted}, {edited}, {script} or {font}. It\'s signed with GameShelf\'s pack key in the desktop app, and every player\'s app checks that signature before it runs it.')}</p>
+      <textarea class="input recipe-text" id="recipe-text" dir="ltr" spellcheck="false" rows="22"></textarea>
+      <div class="recipe-actions">
+        ${desktop?.attachRecipe
+          ? html`<button class="btn btn-primary" type="button" id="recipe-attach">${icon('check')} ${t('Sign & attach')}</button>`
+          : html`<p class="muted small">${t('Open the Admin Panel in the GameShelf desktop app to sign and attach recipes.')}</p>`}
+        <button class="btn btn-quiet" type="button" id="recipe-remove">${t('Remove recipe')}</button>
+        <button class="btn btn-quiet" type="button" id="recipe-cancel">${t('Close')}</button>
+      </div>
+    </section>
+    ${attached.filter((a) => !byGame.has(a.game)).length ? html`
+      <section class="panel">
+        <h2>${t('Engine recipes')}</h2>
+        <div class="admin-table">${attached.filter((a) => !byGame.has(a.game)).map((a) => html`
+          <div class="admin-row">
+            <div><strong dir="ltr">${a.game}</strong> <span class="muted small">${a.engine}${a.tool ? ` · ${a.tool}` : ''}</span></div>
+            <span class="muted small">${a.attachedBy || ''}</span>
+            <span class="muted small">${a.updatedAt}</span>
+            <button class="btn btn-sm btn-quiet" type="button" data-recipe="${a.game}" data-family="${a.engine}">${t('Edit engine recipe…')}</button>
+          </div>`)}</div>
+      </section>` : ''}
     <section class="panel">
       <h2>${t('RE Engine font list')}</h2>
       <p class="muted small">${t('Players\' apps find the usual RE Engine fonts by themselves. For a game whose fonts they miss, upload its file list (the .list from REE.PAK.Tool, free on GitHub): you don\'t need the game.')}</p>
@@ -243,11 +278,63 @@ async function requests(body) {
       </form>
     </section>`);
   const form = document.getElementById('font-list-form');
-  body.addEventListener('click', (e) => {
+  const editor = document.getElementById('recipe-editor');
+  const text = document.getElementById('recipe-text');
+  let editing = null;
+
+  async function openRecipe(game, family) {
+    editing = game;
+    document.getElementById('recipe-game').textContent = game;
+    text.value = '';
+    editor.hidden = false;
+    try {
+      const { recipe } = await api(`/arabic/recipes/${encodeURIComponent(game)}`);
+      text.value = JSON.stringify(JSON.parse(recipe), null, 2);
+    } catch (err) {
+      if (err.status !== 404) toast(errorText(err), { error: true });
+      text.value = desktop?.recipeTemplate ? await desktop.recipeTemplate(game, family || null) : '';
+    }
+    editor.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    text.focus();
+  }
+
+  body.addEventListener('click', async (e) => {
+    const recipe = e.target.closest('[data-recipe]');
+    if (recipe) {
+      openRecipe(recipe.dataset.recipe, recipe.dataset.family);
+      return;
+    }
     const button = e.target.closest('[data-font-list]');
     if (!button) return;
     form.game.value = button.dataset.fontList;
     form.list.click();
+  });
+  document.getElementById('recipe-cancel').addEventListener('click', () => {
+    editor.hidden = true;
+    editing = null;
+  });
+  document.getElementById('recipe-attach')?.addEventListener('click', async (e) => {
+    const button = e.currentTarget;
+    button.disabled = true;
+    try {
+      await desktop.attachRecipe(editing, text.value);
+      toast(t('Engine recipe signed and attached. Players\' apps can now make this game\'s Arabic natively.'));
+      await requests(body);
+    } catch (err) {
+      toast(errorText(err), { error: true });
+    } finally {
+      button.disabled = false;
+    }
+  });
+  document.getElementById('recipe-remove').addEventListener('click', async () => {
+    if (!editing || !window.confirm(t('Remove the engine recipe for {game}?', { game: editing }))) return;
+    try {
+      await api(`/admin/recipes/${encodeURIComponent(editing)}`, { method: 'DELETE' });
+      toast(t('Engine recipe removed.'));
+      await requests(body);
+    } catch (err) {
+      toast(errorText(err), { error: true });
+    }
   });
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -261,6 +348,24 @@ async function requests(body) {
       toast(errorText(err), { error: true });
     }
   });
+}
+
+/** What a player's app saw in the game's folder: engine, file kinds and sizes, folders (for writing its engine recipe). */
+function folderPrint(print) {
+  const files = print.files === 1 ? t('1 file') : t('{count} files', { count: print.files.toLocaleString() });
+  return html`
+    <details class="folder-print">
+      <summary class="small">${t('Game folder')}: ${print.engine ? html`<strong>${bdi(print.engine.name)}</strong> · ` : ''}${files}, <span dir="ltr">${formatSize(print.bytes || 0)}${print.truncated ? ' +' : ''}</span></summary>
+      <div class="folder-print-body" dir="ltr">
+        <table class="folder-print-kinds">
+          ${print.extensions.slice(0, 14).map((e) => html`<tr><td>${e.ext}</td><td>${e.count.toLocaleString()}</td><td>${formatSize(e.bytes)}</td></tr>`)}
+        </table>
+        <ul class="folder-print-tree">
+          ${print.folders.slice(0, 40).map((f) => html`<li>${f}</li>`)}
+          ${print.top.files.slice(0, 20).map((f) => html`<li class="muted">${f}</li>`)}
+        </ul>
+      </div>
+    </details>`;
 }
 
 // ---- Pending approvals: Arabic made on players' PCs ------------------------------------

@@ -203,7 +203,8 @@ test('a game the player\'s PC can\'t read goes to the admins as a request, with 
   const admin = cloudAs(base, await signUp('hamad'));
   const [request] = (await admin.json('/api/admin/requests')).requests;
   assert.deepEqual([request.game, request.name, request.requests], ['steam:999', 'Mystery', 1]);
-  assert.match(request.reason, /doesn't know the game's engine/);
+  // Its text is packed and GameShelf has no engine recipe for it: the admins get the folder's fingerprint to write one.
+  assert.match(request.reason, /no engine recipe for it yet/);
 });
 
 test('a game whose files can\'t change (signed Unreal paks) gets Arabic as the overlay, made the same way', { skip: !python && 'the pack builder needs Python with its requirements' }, async (t) => {

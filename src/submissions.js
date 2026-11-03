@@ -19,7 +19,10 @@
 const crypto = require('node:crypto');
 const { GAME_RE, sha256 } = require('./translation-memory');
 
-const ENGINES = { reengine: 're-patch', renpy: 'renpy-tl', godot: 'godot-override', unity: 'unity-bepinex', unreal: 'unreal-pak', overlay: 'overlay' };
+const ENGINES = {
+  reengine: 're-patch', renpy: 'renpy-tl', godot: 'godot-override', unity: 'unity-bepinex', unreal: 'unreal-pak',
+  bethesda: 'bethesda-strings', loose: 'loose-files', custom: 'recipe', overlay: 'overlay',
+};
 const MAX_LINES = 200000;
 const MAX_LINE_CHARS = 2000;
 const MAX_FONT_TARGETS = 300;

@@ -6,7 +6,7 @@
 //     commit it) and pack-signing.pub (goes in desktop/config.json as
 //     "localizationPackKey").
 //
-//   node scripts/localization-pack.js make <pack folder> --engine unreal|unity|renpy|godot|overlay --id <id> --version <x.y.z>
+//   node scripts/localization-pack.js make <pack folder> --engine unreal|unity|reengine|renpy|godot|bethesda|loose|custom|overlay --id <id> --version <x.y.z>
 //        --key pack-signing.key (--steam-app-id <n> | --game-id <GameShelf id>) [--title "..."]
 //        [--font-bundle <name>] [--ugui-font Arial] [--backend mono|il2cpp] [--unity <version>] [--arch x64]
 //        [--godot 3|4] [--region x,y,w,h] [--text-luma 170] [--dark-text] [--threshold 0.72]
