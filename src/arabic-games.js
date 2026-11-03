@@ -17,6 +17,8 @@ const { GAME_RE } = require('./translation-memory');
 
 const READY = 0.95;
 const MAX_FINGERPRINT_CHARS = 64 * 1024;
+// The Arabic font styles players' apps bring (localization/assets/fonts).
+const FONT_STYLES = ['plex', 'cairo', 'naskh'];
 const MAX_FONT_TARGETS = 300;
 // name.oft.1, and the copies games keep beside it (name.oft.1.stm, name.oft.1.x64).
 const FONT_TARGET_RE = /^natives\/[\w\-./]{1,200}\.oft(?:\.\d{1,3})?(?:\.(?:stm|x64))?$/i;
@@ -59,7 +61,18 @@ function createArabicGames({ db, translations }) {
       // An admin attached an engine recipe: players' apps can read its packed text.
       recipe: Boolean(hasRecipe.get(game)),
       fontTargets: row ? JSON.parse(row.font_targets) : [],
+      // The font an admin picked for the game's packs (players can pick another), or null.
+      fontStyle: row?.font_style || null,
     };
+  }
+
+  /** An admin picks the Arabic font for a game's packs (null: IBM Plex Sans Arabic). Returns the game's status. */
+  function setFontStyle(game, style) {
+    checkGame(game);
+    if (style !== null && !FONT_STYLES.includes(style)) throw new TypeError(`The font style should be one of ${FONT_STYLES.join(', ')}.`);
+    if (!getGame.get(game)) saveGame.run(game, '', '', 0);
+    db.prepare("UPDATE arabic_games SET font_style = ?, updated_at = datetime('now') WHERE game = ?").run(style || '', game);
+    return status(game);
   }
 
   /**
@@ -110,7 +123,7 @@ function createArabicGames({ db, translations }) {
       .map((r) => ({ ...r, fingerprint: r.fingerprint ? JSON.parse(r.fingerprint) : null, ...status(r.game) }));
   }
 
-  return { status, request, report, requests, setFontList, isAdmin };
+  return { status, request, report, requests, setFontList, setFontStyle, isAdmin };
 }
 
 const text = (value, max) => String(value ?? '').replace(/[\x00-\x1f\x7f]/g, '').slice(0, max);
@@ -137,4 +150,4 @@ function cleanFingerprint(value) {
   return JSON.stringify(print).length <= MAX_FINGERPRINT_CHARS ? print : null;
 }
 
-module.exports = { createArabicGames, cleanFingerprint, READY };
+module.exports = { createArabicGames, cleanFingerprint, READY, FONT_STYLES };

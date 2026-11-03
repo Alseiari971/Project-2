@@ -40,7 +40,7 @@ const { scanAntiCheat } = require('./anticheat');
 const { fingerprint } = require('./engine');
 const { readPack, RUNTIME_PROXIES, RUNTIME_SETTINGS } = require('./pack');
 const { createStager, StageError } = require('./stager');
-const { sha256, fold } = require('./files');
+const { sha256, fold, list } = require('./files');
 const { AUTO_TRANSLATOR_CONFIG, GENERATED, autoTranslatorConfig, unityMismatch } = require('./unity');
 const renpy = require('./renpy');
 const godot = require('./godot');
@@ -170,6 +170,48 @@ async function isFile(file) {
   return Boolean((await fs.lstat(file).catch(() => null))?.isFile());
 }
 
+// The game's own files a store update changes, per tier: { dirs: [{ path, pattern }], files } (see stager.js, verify).
+const MAX_WATCHED = 400;
+
+async function matching(dir, pattern) {
+  const re = new RegExp(pattern, 'i');
+  return (await list(dir)).filter((e) => e.isFile() && re.test(e.name)).map((e) => path.join(dir, e.name));
+}
+
+async function watchList(check) {
+  const { engine } = check;
+  const dirs = [];
+  const files = [];
+  const watchDir = async (dir, pattern) => {
+    if (!dir) return;
+    dirs.push({ path: dir, pattern });
+    files.push(...(await matching(dir, pattern)));
+  };
+  if (check.tier === 'unreal-pak') {
+    await watchDir(engine.unreal.paksDir, '\\.(pak|utoc|ucas|sig)$');
+    files.push(engine.unreal.shippingExe);
+  } else if (check.tier === 're-patch') {
+    await watchDir(engine.reengine.dir, '^re_chunk_000\\.pak(\\.patch_\\d+\\.pak)?$');
+    files.push(engine.reengine.exe);
+  } else if (check.tier === 'unity-bepinex') {
+    await watchDir(engine.unity.dataDir, '^(globalgamemanagers|data\\.unity3d|resources\\.assets|level0|sharedassets0\\.assets)$');
+    files.push(engine.unity.exe, path.join(engine.base, 'GameAssembly.dll'), path.join(engine.base, 'UnityPlayer.dll'));
+  } else if (check.tier === 'renpy-tl') {
+    await watchDir(engine.renpy.gameDir, '\\.(rpa|rpyc)$');
+  } else if (check.tier === 'godot-override') {
+    files.push(engine.godot.exe, engine.godot.pck);
+  } else if (check.tier === 'bethesda-strings') {
+    await watchDir(engine.bethesda.dataDir, '\\.(esm|esp|esl|bsa|ba2)$');
+    files.push(engine.bethesda.exe);
+  } else if (check.tier === 'native-runtime') {
+    await watchDir(engine.custom.runtime.dir, '\\.(exe|dll)$');
+  } else if (engine.custom?.runtime?.exe) {
+    // Loose files and recipes: the files they replace are watched by the stager itself; the program tells of an update too.
+    files.push(engine.custom.runtime.exe);
+  }
+  return { dirs, files: files.filter(Boolean).slice(0, MAX_WATCHED) };
+}
+
 /** The files to add for a checked pack, and where. */
 async function stagePlan(check, pack, { runtimeDir } = {}) {
   const { engine } = check;
@@ -283,7 +325,7 @@ async function enableArabic({ root, packDir, stager, publicKey, allowUnsigned = 
     await fs.mkdir(runtimeDir, { recursive: true });
   }
 
-  const result = await stager.enable({ root: check.root, pack: pack.manifest, ...(await stagePlan(check, pack, { runtimeDir })) });
+  const result = await stager.enable({ root: check.root, pack: pack.manifest, ...(await stagePlan(check, pack, { runtimeDir })), watch: await watchList(check) });
   return { ...result, tier: check.tier };
 }
 
@@ -291,6 +333,16 @@ async function enableArabic({ root, packDir, stager, publicKey, allowUnsigned = 
 async function disableArabic({ root, stager, isRunning }) {
   if (await isRunning?.()) throw new LocalizationError('Close the game first.', 'running');
   return stager.disable(root);
+}
+
+/**
+ * After a game update (stager.verify): takes GameShelf's files out, keeping
+ * everything the update wrote and dropping the originals it made obsolete, so
+ * the Arabic can be made again for the new version.
+ */
+async function retireArabic({ root, stager, isRunning }) {
+  if (await isRunning?.()) throw new LocalizationError('Close the game first.', 'running');
+  return stager.retire(root);
 }
 
 /**
@@ -306,12 +358,14 @@ function createLocalization({ dataDir, runtimeHooks = null }) {
     runtimeFolder: (root) => runtimeFolder(dataDir, root),
     recover: () => stager.recover(),
     status: (root) => stager.status(root),
+    verify: (root) => stager.verify(root),
+    retire: (options) => retireArabic({ ...options, stager }),
     enable: (options) => enableArabic({ ...options, stager, runtimeHooks, runtimeDir: runtimeFolder(dataDir, options.root) }),
     disable: (options) => disableArabic({ ...options, stager }),
   };
 }
 
 module.exports = {
-  preflight, enableArabic, disableArabic, createLocalization, LocalizationError, StageError, fill, TIER_ENGINES, REPLACING_TIERS, ENGINE_NAMES,
+  preflight, enableArabic, disableArabic, retireArabic, watchList, createLocalization, LocalizationError, StageError, fill, TIER_ENGINES, REPLACING_TIERS, ENGINE_NAMES,
   runtimeCheck, runtimeFolder, runtimeSettings,
 };

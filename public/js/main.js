@@ -17,6 +17,7 @@ import { applySeason } from './seasons.js';
 import { appSettingsView } from './views/app-settings.js';
 import { installedView } from './views/installed.js';
 import { adminView } from './views/admin.js';
+import { arabicRequestsView } from './views/arabic-requests.js';
 
 const app = document.getElementById('app');
 const SIDEBAR_GAMES = 12;
@@ -131,6 +132,7 @@ function renderSidebar() {
       ${link('#/browse', 'Browse', 'solid-browse', 'browse')}
       ${link(state.user ? '#/library' : '#/login', 'Library', 'solid-library', 'library')}
       ${link('#/community', 'Community', 'solid-users', 'community')}
+      ${link('#/arabic', 'Arabic requests', 'star', 'arabic')}
       ${state.user ? link('#/import', 'Steam import', 'solid-import', 'import', html`<span class="tag tag-new">${t('NEW')}</span>`) : ''}
       ${state.user?.role === 'admin' ? link('#/admin', 'Admin Panel', 'shield', 'admin') : ''}
     </nav>
@@ -183,7 +185,7 @@ async function route() {
   const parts = (path || '/').split('/').filter(Boolean).map(decodeURIComponent);
   const isMe = parts[0] === 'u' && state.user && parts[1]?.toLowerCase() === state.user.username.toLowerCase();
   current = {
-    section: { undefined: 'home', browse: 'browse', library: 'library', community: 'community', import: 'import', admin: 'admin', u: isMe ? 'library' : 'community' }[parts[0]] || '',
+    section: { undefined: 'home', browse: 'browse', library: 'library', community: 'community', import: 'import', admin: 'admin', arabic: 'arabic', u: isMe ? 'library' : 'community' }[parts[0]] || '',
     gameId: parts[0] === 'game' ? parts[1] : null,
   };
 
@@ -208,6 +210,7 @@ async function route() {
       case 'import': await importView(app); break;
       case 'legal': await legalView(app); break;
       case 'admin': await adminView(app, params); break;
+      case 'arabic': await arabicRequestsView(app); break;
       case 'app-settings':
         if (!desktop) throw Object.assign(new Error(''), { status: 404 });
         await appSettingsView(app, params);

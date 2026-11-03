@@ -18,7 +18,7 @@ function createPackLibrary({ dir, publicKey }) {
       const packDir = path.join(dir, entry.name);
       try {
         const manifest = JSON.parse(await fs.readFile(path.join(packDir, MANIFEST), 'utf8'));
-        out.push({ id: manifest.id, version: manifest.version, engine: manifest.engine, title: manifest.title || null, game: manifest.game || null, overlay: manifest.overlay || null, dir: packDir });
+        out.push({ id: manifest.id, version: manifest.version, engine: manifest.engine, title: manifest.title || null, game: manifest.game || null, overlay: manifest.overlay || null, fontStyle: manifest.fontStyle || null, dir: packDir });
       } catch {
         // Not a pack (or a damaged one): ignored.
       }

@@ -63,11 +63,14 @@ function createSubmissions({ db, translations, publicKeys = [] }) {
     saveLines: db.prepare('UPDATE arabic_submissions SET lines = ? WHERE id = ?'),
     review: db.prepare("UPDATE arabic_submissions SET status = ?, note = ?, reviewed_by = ?, reviewed_at = datetime('now') WHERE id = ?"),
     setCount: db.prepare('SELECT COUNT(*) AS n FROM arabic_sets WHERE id = ?'),
+    fontStyle: db.prepare('SELECT font_style FROM arabic_games WHERE game = ?'),
     insertSet: db.prepare(`INSERT INTO arabic_sets (id, version, game, engine, tier, title, body, signature, sha256, size, submission, approved_by)
       VALUES (@id, @version, @game, @engine, @tier, @title, @body, @signature, @sha256, @size, @submission, @approvedBy)`),
     latestSets: db.prepare(`SELECT s.* FROM arabic_sets s WHERE s.rowid = (
       SELECT s2.rowid FROM arabic_sets s2 WHERE s2.id = s.id ORDER BY s2.created_at DESC, s2.rowid DESC LIMIT 1) ORDER BY s.title COLLATE NOCASE`),
     latestSet: db.prepare('SELECT * FROM arabic_sets WHERE id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1'),
+    setVersion: db.prepare('SELECT 1 FROM arabic_sets WHERE id = ? AND version = ?'),
+    lastApproved: db.prepare("SELECT * FROM arabic_submissions WHERE game = ? AND status = 'approved' ORDER BY reviewed_at DESC, id DESC LIMIT 1"),
     logDownload: db.prepare('INSERT INTO pack_downloads (pack_id, version, user_id) VALUES (?, ?, ?)'),
     request: db.prepare('INSERT INTO arabic_requests (game, asker, name) VALUES (?, ?, ?) ON CONFLICT (game, asker) DO NOTHING'),
   };
@@ -158,7 +161,7 @@ function createSubmissions({ db, translations, publicKeys = [] }) {
     }
     const start = Math.max(0, Number(offset) || 0);
     const size = Math.min(500, Math.max(1, Number(limit) || 100));
-    return { submission: { ...summary(row), translated }, matching: lines.length, lines: lines.slice(start, start + size) };
+    return { submission: { ...summary(row), translated, fontStyle: q.fontStyle.get(row.game)?.font_style || null }, matching: lines.length, lines: lines.slice(start, start + size) };
   }
 
   /** An admin's fixes: [{ hash, arabic }]. Each is checked against its English's tags first. */
@@ -193,6 +196,11 @@ function createSubmissions({ db, translations, publicKeys = [] }) {
   function prepare(id) {
     const row = load(id);
     if (row.status !== 'pending') throw new SubmissionError('This submission isn\'t waiting for approval.');
+    return setFor(row);
+  }
+
+  /** The Arabic set for a submission's lines, with their Arabic as the shared memory has it now. */
+  function setFor(row) {
     const lines = withArabic(row.game, JSON.parse(row.lines)).filter((l) => l.arabic);
     if (!lines.length) throw new SubmissionError('None of its lines have Arabic yet.');
     const [kind, gameId] = row.game.split(':');
@@ -206,9 +214,68 @@ function createSubmissions({ db, translations, publicKeys = [] }) {
       engine: row.engine,
       tier: row.tier,
       fontTargets: JSON.parse(row.font_targets),
+      // The Arabic font an admin picked for the game (players' apps use it unless the player picks another).
+      ...(q.fontStyle.get(row.game)?.font_style ? { fontStyle: q.fontStyle.get(row.game).font_style } : {}),
       lines: lines.map((l) => [l.hash, l.arabic]).sort((a, b) => (a[0] < b[0] ? -1 : 1)),
     };
     return { set: JSON.stringify(set), lines: lines.length };
+  }
+
+  /**
+   * A new version of a game's approved Arabic, with the fixes approved since
+   * (Admin Panel, Translation fixes): the set for its approved submission's
+   * lines as the memory has them now, for an admin's app to sign.
+   */
+  function prepareUpdate(game) {
+    const row = q.lastApproved.get(String(game));
+    if (!row) throw new SubmissionError('This game has no approved Arabic to update.', 404);
+    return setFor(row);
+  }
+
+  /** Publishes the signed update from prepareUpdate(): every player's app gets it the next time Arabic goes in. */
+  function publishUpdate(game, { set, signature } = {}, reviewer) {
+    const row = q.lastApproved.get(String(game));
+    if (!row) throw new SubmissionError('This game has no approved Arabic to update.', 404);
+    const parsed = verifySet(set, signature);
+    if (parsed.kind !== SET_KIND || parsed.id !== setId(row.game) || !Array.isArray(parsed.lines)) throw new SubmissionError('That Arabic set is for another game.');
+    if (q.setVersion.get(parsed.id, String(parsed.version))) throw new SubmissionError('That version is already published.', 409);
+    insertSet(row, parsed, set, signature, reviewer);
+    return catalogEntry(q.latestSet.get(parsed.id));
+  }
+
+  function verifySet(set, signature) {
+    if (!publicKeys.length) throw new SubmissionError('No pack signing key is set up on the server.', 503);
+    const body = Buffer.from(String(set || ''), 'utf8');
+    let valid = false;
+    try {
+      valid = publicKeys.some((key) => crypto.verify(null, body, key, Buffer.from(String(signature || ''), 'base64')));
+    } catch {
+      valid = false;
+    }
+    if (!valid) throw new SubmissionError('The signature doesn\'t match GameShelf\'s pack key. Pick GameShelf\'s pack-signing.key in the Pack Studio.');
+    try {
+      return JSON.parse(body.toString('utf8'));
+    } catch {
+      throw new SubmissionError('That isn\'t an Arabic set.');
+    }
+  }
+
+  function insertSet(row, parsed, set, signature, reviewer) {
+    const body = Buffer.from(String(set), 'utf8');
+    q.insertSet.run({
+      id: parsed.id,
+      version: String(parsed.version),
+      game: row.game,
+      engine: row.engine,
+      tier: row.tier,
+      title: row.name,
+      body: body.toString('utf8'),
+      signature: String(signature),
+      sha256: crypto.createHash('sha256').update(body).digest('hex'),
+      size: body.length,
+      submission: row.id,
+      approvedBy: reviewer.id,
+    });
   }
 
   /** Publishes a submission's Arabic, signed by an admin's app with GameShelf's pack key. */
@@ -276,6 +343,10 @@ function createSubmissions({ db, translations, publicKeys = [] }) {
     reject,
     prepare,
     approve,
+    prepareUpdate,
+    publishUpdate,
+    /** Whether a game has approved Arabic in the catalog (so fixes to it need a new signed version). */
+    published: (game) => Boolean(q.latestSet.get(setId(String(game)))),
     /** The newest approved Arabic set of each game, as catalog entries. */
     catalog: () => q.latestSets.all().map(catalogEntry),
     /** { set, signature, entry } of a game's newest set, counting the download. */

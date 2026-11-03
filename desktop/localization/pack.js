@@ -13,6 +13,7 @@
 //     "requires": { "arch": "x64", "unityBackend": "mono", "unityVersion": "2019.4", "godot": 4 },
 //     "fontBundle": "gameshelf_arabic_sdf",      (Unity: TextMeshPro font, in the game folder)
 //     "uguiFont": "Arial",                       (Unity: optional font for older UI text)
+//     "fontStyle": "plex" | "cairo" | "naskh" | "custom",   (the Arabic font the pack was made with)
 //     "files": [{ "source": "payload/x.pak", "target": "pakchunk99-ArabicLocalization_P.pak",
 //                 "sha256": "...", "size": 123 }]
 //   }
@@ -63,6 +64,8 @@ const UNITY_RESERVED = 'bepinex/config/autotranslatorconfig.ini';
 const DATA_DIRS = { renpy: ['game', 'tl', 'arabic', 'gameshelf'], godot: ['gameshelf_arabic'] };
 const DATA_FILE = /^(strings\.json|[\w.\-]+\.(ttf|otf|txt))$/i;
 const RESERVED_NAMES = /^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$/i;
+// The Arabic font styles GameShelf ships (localization/assets/fonts), and "custom" for a pack author's own font.
+const FONT_STYLES = ['plex', 'cairo', 'naskh', 'custom'];
 const ENGINES = ['unreal', 'unity', 'reengine', 'renpy', 'godot', 'bethesda', 'loose', 'custom', 'runtime', 'overlay'];
 // The runtime adapter: the Windows libraries it may stand in for, and what goes beside it.
 const RUNTIME_PROXIES = ['version.dll', 'dinput8.dll'];
@@ -186,6 +189,7 @@ function checkManifest(manifest) {
   }
   if (manifest.fontBundle !== undefined && !/^[\w.\-]{1,80}$/.test(manifest.fontBundle)) throw new PackError('The pack\'s font bundle name is invalid.');
   if (manifest.uguiFont !== undefined && !/^[\w .\-]{1,80}$/.test(manifest.uguiFont)) throw new PackError('The pack\'s UI font name is invalid.');
+  if (manifest.fontStyle !== undefined && !FONT_STYLES.includes(manifest.fontStyle)) throw new PackError('The pack\'s font style is unknown.');
   const godot = manifest.requires?.godot;
   if (godot !== undefined && godot !== 3 && godot !== 4) throw new PackError('The pack\'s Godot version must be 3 or 4.');
   if (!Array.isArray(manifest.files) || !manifest.files.length || manifest.files.length > MAX_FILES) {
@@ -293,4 +297,4 @@ async function writePack(dir, { files, privateKey, ...details }) {
   return manifest;
 }
 
-module.exports = { readPack, writePack, PackError, MANIFEST, SIGNATURE, ENGINES, REPLACING_ENGINES, EXECUTABLE, RUNTIME_PROXIES, RUNTIME_SETTINGS };
+module.exports = { readPack, writePack, PackError, MANIFEST, SIGNATURE, ENGINES, FONT_STYLES, REPLACING_ENGINES, EXECUTABLE, RUNTIME_PROXIES, RUNTIME_SETTINGS };

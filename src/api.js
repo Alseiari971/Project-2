@@ -18,6 +18,7 @@ const { ROLES, adminNames, bootstrapAdmins } = require('./roles');
 const { readBody, RegistryError, MAX_PACK_BYTES } = require('./pack-registry');
 const { SubmissionError } = require('./submissions');
 const { RecipeError } = require('./engine-recipes');
+const { CommunityError } = require('./community');
 const { TranslationLimit, GAME_RE: GAME_KEY_RE } = require('./translation-memory');
 const { GENRES, findGenre } = require('./games/genres');
 const profile = require('./profile');
@@ -91,7 +92,7 @@ function pitchFrom(text) {
   return pitch.trim();
 }
 
-function createApi({ db, games, prices, steam, steamStore, translations, arabicGames, packs, submissions, recipes = null, downloadsDir }) {
+function createApi({ db, games, prices, steam, steamStore, translations, arabicGames, packs, submissions, recipes = null, community = null, downloadsDir }) {
   bootstrapAdmins(db);
   const api = express.Router();
   const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30 });
@@ -706,6 +707,21 @@ function createApi({ db, games, prices, steam, steamStore, translations, arabicG
     }
   });
 
+  // Before a game's lines are translated: its glossary (names, terms, how it speaks to the player), made from
+  // the builder's candidates when there's none yet: { game, terms: [English], samples: [lines], context }.
+  api.post('/translations/glossary', requireUser, translateLimiter, asyncRoute(async (req, res) => {
+    if (!translations) return res.status(503).json({ error: 'Shared translation isn\'t set up on this server.' });
+    const { game, terms, samples, context } = req.body || {};
+    try {
+      const found = await translations.ensureGlossary(req.user, String(game), { terms, samples, context: String(context || '') });
+      res.json({ terms: found.terms, player: { gender: found.player.gender, name: found.player.name || '' } });
+    } catch (err) {
+      if (err instanceof TranslationLimit) return res.status(503).json({ error: err.message });
+      if (err instanceof TypeError) return res.status(400).json({ error: err.message });
+      console.error('Glossary:', err.message);
+      res.status(502).json({ error: 'The translation service didn\'t answer. Please try again later.' });
+    }
+  }));
   api.post('/translations/translate', requireUser, translateLimiter, asyncRoute(async (req, res) => {
     const { game, lines, context } = req.body || {};
     if (!translations) return res.status(503).json({ error: 'Shared translation isn\'t set up on this server.' });
@@ -740,6 +756,32 @@ function createApi({ db, games, prices, steam, steamStore, translations, arabicG
     return { games: Object.fromEntries(keys.map(String).filter((k) => GAME_KEY_RE.test(k)).map((k) => [k, arabicGames.status(k, askerOf(req))])) };
   }));
   api.post('/arabic/requests', requireUser, translateLimiter, arabicRoute(({ game, name, reason, fingerprint }, req) => arabicGames.request(askerOf(req), String(game), name, reason, fingerprint)));
+
+  // ---- Players helping: votes, the leaderboard, translation fixes (see src/community.js) ----
+
+  const communityRoute = (fn) => asyncRoute(async (req, res) => {
+    if (!community) return res.status(503).json({ error: 'Arabic subtitles aren\'t set up on this server.' });
+    try {
+      res.json(await fn(req, res));
+    } catch (err) {
+      if (err instanceof CommunityError || err instanceof SubmissionError) return res.status(err.status).json({ error: err.message });
+      throw err;
+    }
+  });
+  const fixLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 60 });
+  // The games players most want Arabic for (still without it); `voted` for the signed-in player.
+  api.get('/arabic/leaderboard', communityRoute(async (req) => ({ games: community.leaderboard(req.user ? askerOf(req) : null, req.query.limit) })));
+  // Taking a vote back (POST /arabic/requests is the vote).
+  api.delete('/arabic/requests/:game', requireUser, communityRoute(async (req) => community.unvote(askerOf(req), String(req.params.game))));
+  // "Report a translation issue": { game, english, current, suggestion, note }.
+  api.post('/arabic/fixes', requireUser, fixLimiter, communityRoute(async (req, res) => {
+    const made = community.reportFix(req.user, req.body || {});
+    res.status(made.updated ? 200 : 201);
+    return made;
+  }));
+  api.get('/admin/fixes', requireAdmin, communityRoute(async (req) => community.fixes({ status: String(req.query.status || 'pending') })));
+  api.post('/admin/fixes/:id/approve', requireAdmin, communityRoute(async (req) => community.approveFix(req.params.id, req.user, req.body?.arabic)));
+  api.post('/admin/fixes/:id/reject', requireAdmin, communityRoute(async (req) => community.rejectFix(req.params.id, req.user)));
 
   // ---- Engine recipes, for games whose text is packed (see src/engine-recipes.js) ----
 
@@ -824,6 +866,21 @@ function createApi({ db, games, prices, steam, steamStore, translations, arabicG
       throw new SubmissionError('That isn\'t a signed Arabic set.');
     }
     const pack = submissions.approve(req.params.id, { set: body?.set, signature: body?.signature }, req.user);
+    res.status(201);
+    return { pack };
+  }));
+
+  // A game's approved Arabic again, with the fixes approved since: the set to sign, then the signed set.
+  api.get('/admin/sets/:game/next', requireAdmin, submissionRoute(async (req) => submissions.prepareUpdate(String(req.params.game))));
+  api.post('/admin/sets/:game/publish', requireAdmin, submissionRoute(async (req, res) => {
+    let body;
+    try {
+      body = req.body && Object.keys(req.body).length ? req.body : JSON.parse((await readBody(req, MAX_SUBMISSION_BYTES)).toString('utf8'));
+    } catch (err) {
+      if (err instanceof RegistryError) throw err;
+      throw new SubmissionError('That isn\'t a signed Arabic set.');
+    }
+    const pack = submissions.publishUpdate(String(req.params.game), { set: body?.set, signature: body?.signature }, req.user);
     res.status(201);
     return { pack };
   }));
@@ -956,6 +1013,25 @@ function createApi({ db, games, prices, steam, steamStore, translations, arabicG
       throw err;
     }
   }));
+  // A game's glossary, for admins to read and fix (a fixed glossary is kept; the automatic pass only adds to it).
+  api.get('/admin/glossaries/:game', requireAdmin, (req, res) => {
+    if (!translations) return res.status(503).json({ error: 'Shared translation isn\'t set up on this server.' });
+    try {
+      res.json({ glossary: translations.glossary(String(req.params.game)) });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+  api.put('/admin/glossaries/:game', requireAdmin, (req, res) => {
+    if (!translations) return res.status(503).json({ error: 'Shared translation isn\'t set up on this server.' });
+    try {
+      res.json({ glossary: translations.setGlossary(String(req.params.game), req.body || {}) });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+  // The Arabic font for a game's packs: { fontStyle: 'plex' | 'cairo' | 'naskh' | null }.
+  api.put('/admin/games/:game/font-style', requireAdmin, arabicRoute(({ fontStyle }, req) => arabicGames.setFontStyle(String(req.params.game), fontStyle || null)));
   // The older address of the same list.
   api.get('/arabic/requests', requireAdmin, (_req, res) => {
     res.json({ requests: arabicGames ? arabicGames.requests() : [] });

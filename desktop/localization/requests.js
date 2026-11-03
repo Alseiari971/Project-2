@@ -117,7 +117,7 @@ function createArabicRequests({ arabic, packBuilder, online, server, recipes = n
       const seen = runtime && before.runtime?.newLines > 0 ? before.runtime.dump : null;
       result = await packBuilder.build({
         ...game, tier: before.tier, engine: before.engine, recipe: recipe?.file, proxy: before.runtime?.proxy, extraLines: seen,
-      }, { server: server(), auth, onProgress });
+      }, { server: server(), auth, onProgress, fontStyle: (await arabic.fontFor?.(game)) || null });
       // What the adapter saw is in this build now; it starts a new list as the game is played again.
       if (seen) await fs.rename(seen, seen.replace(/\.txt$/, '.sent.txt')).catch(() => {});
     } catch (err) {

@@ -12,6 +12,14 @@
 //                 signed paks end up here);
 // - 'unavailable' no pack for this game, or no way to use it here.
 //
+// When Play is pressed for a native patch, GameShelf first checks the game
+// wasn't updated since its Arabic went in (stager.verify: the game's archives
+// and program, and the files GameShelf replaced). After a store update the
+// old Arabic comes out without putting outdated originals back over the
+// update (stager.retire), and is made again for the new version, from the
+// game's approved Arabic or GameShelf's shared translations (builder.rebuild),
+// before the game starts. A new font style chosen for the game is made the same way.
+//
 // Messages come as { text, vars } so the page can translate them.
 const fs = require('node:fs/promises');
 const path = require('node:path');
@@ -22,19 +30,26 @@ const { OVERLAY_STYLES, DEFAULT_STYLE } = require('./overlay-manager');
 const { engineOf } = require('./dirprint');
 
 const PREFLIGHT_TTL_MS = 60 * 1000;
+// The Arabic font styles (localization/assets/fonts; see the pack builder's --font-style).
+const FONT_STYLES = ['plex', 'cairo', 'naskh'];
+// Unity's Arabic font is a TextMeshPro bundle made with the Unity Editor when the pack is built, not on players' PCs.
+const FIXED_FONT_TIERS = new Set(['unity-bepinex']);
 
 const why = (text, vars = {}) => ({ text, vars });
 
 /**
  * `catalog` is GameShelf's cloud catalog (online.js); `builder` builds a game's
- * patch on this PC from an approved Arabic set: { canBuild(tier), fromSet({ game,
- * tier, entry, set, setFile, onProgress }) -> pack folder } (see main.js).
+ * patch on this PC: { canBuild(tier), fromSet({ game, tier, entry, set, setFile,
+ * fontStyle, onProgress }) -> pack folder, from an approved Arabic set, and
+ * rebuild({ game, tier, fontStyle, onProgress }) -> pack folder or null, to make it
+ * again after a game update or for another font } (see main.js).
  */
 function createArabicService({ dataDir, publicKey, overlayAvailable = process.platform === 'win32', localization, packs, catalog = null, builder = null, runtimeHooks = null }) {
   localization ??= createLocalization({ dataDir, runtimeHooks });
   packs ??= createPackLibrary({ dir: path.join(dataDir, 'localization', 'packs'), publicKey });
   const prefsFile = path.join(dataDir, 'localization', 'arabic.json');
   const overlayFile = path.join(dataDir, 'localization', 'overlay.json');
+  const fontsFile = path.join(dataDir, 'localization', 'fonts.json');
   const checks = new Map(); // game folder -> { at, result }
 
   async function readPrefs() {
@@ -51,6 +66,30 @@ function createArabicService({ dataDir, publicKey, overlayAvailable = process.pl
     else delete prefs[key];
     await fs.mkdir(path.dirname(prefsFile), { recursive: true });
     await fs.writeFile(prefsFile, JSON.stringify(prefs, null, 1));
+  }
+
+  async function readFonts() {
+    try {
+      return JSON.parse(await fs.readFile(fontsFile, 'utf8'));
+    } catch {
+      return {};
+    }
+  }
+
+  /** The Arabic font style the player picked for a game, or null (the pack's, else IBM Plex Sans Arabic). */
+  async function fontFor(game) {
+    const style = (await readFonts())[game.key];
+    return FONT_STYLES.includes(style) ? style : null;
+  }
+
+  async function setFont(game, style) {
+    if (style !== null && !FONT_STYLES.includes(style)) throw new Error(`Unknown font style "${style}".`);
+    const fonts = await readFonts();
+    if (style) fonts[game.key] = style;
+    else delete fonts[game.key];
+    await fs.mkdir(path.dirname(fontsFile), { recursive: true });
+    await fs.writeFile(fontsFile, JSON.stringify(fonts, null, 1));
+    return info(game);
   }
 
   async function check(game, staged) {
@@ -79,7 +118,7 @@ function createArabicService({ dataDir, publicKey, overlayAvailable = process.pl
     } catch {
       return { ...base, why: why('GameShelf couldn\'t look inside this game\'s folder.') };
     }
-    const summary = (p) => ({ id: p.id, version: p.version, engine: p.engine, title: p.title });
+    const summary = (p) => ({ id: p.id, version: p.version, engine: p.engine, title: p.title, fontStyle: p.fontStyle || null });
     const native = result.fileChanges && found.find((p) => p.engine === TIER_ENGINES[result.tier]);
     const overlayPack = found.find((p) => p.engine === 'overlay');
     // GameShelf's cloud catalog: a pack not on this PC yet, or a newer version of one that is.
@@ -115,7 +154,10 @@ function createArabicService({ dataDir, publicKey, overlayAvailable = process.pl
         why: why('There\'s no Arabic pack for this game yet.'),
       };
     }
-    return { ...out, ...(runtime ? { runtime } : {}), enabled: out.mode !== 'unavailable' && prefs[game.key] === true };
+    // The Arabic font: the player's pick for this game, and what the pack here was made with (a new pick goes in at Play).
+    const font = result.fileChanges && !FIXED_FONT_TIERS.has(result.tier)
+      ? { chosen: await fontFor(game), pack: out.pack?.fontStyle || null, styles: FONT_STYLES } : null;
+    return { ...out, ...(runtime ? { runtime } : {}), ...(font ? { font } : {}), enabled: out.mode !== 'unavailable' && prefs[game.key] === true };
   }
 
   async function runtimeInfo(game, result) {
@@ -192,10 +234,23 @@ function createArabicService({ dataDir, publicKey, overlayAvailable = process.pl
         now = await info(game);
       }
       if (now.mode === 'native') {
+        // Was the game updated since its Arabic went in, or is another font wanted? Then it's made again first.
+        const verified = await localization.verify?.(game.dir).catch(() => null);
+        const chosen = await fontFor(game);
+        const fontChanged = Boolean(chosen && now.font && now.pack.fontStyle && now.pack.fontStyle !== 'custom' && now.pack.fontStyle !== chosen);
+        let notice = null;
+        if (verified?.updated || fontChanged) {
+          const remade = await remake(game, now, { updated: Boolean(verified?.updated), fontStyle: chosen, onProgress });
+          if (remade.error) return { mode: 'native', ok: false, updated: true, error: remade.error };
+          notice = remade.notice || null;
+          now = await info(game);
+          if (now.mode !== 'native') return { mode: now.mode, ok: false, ...(verified?.updated ? { updated: true } : {}), error: now.why };
+        }
         const pack = (await packs.list()).find((p) => p.id === now.pack.id);
         await localization.enable({ root: game.dir, packDir: pack.dir, publicKey, steamAppId: game.steamAppId });
         checks.delete(game.dir);
-        return { mode: 'native', ok: true };
+        const remade = Boolean(verified?.updated || fontChanged) && !notice;
+        return { mode: 'native', ok: true, ...(verified?.updated ? { updated: true } : {}), ...(remade ? { remade: true } : {}), ...(notice ? { error: notice } : {}) };
       }
       if (now.mode === 'overlay') {
         const pack = await packs.verify(now.pack.id);
@@ -209,6 +264,38 @@ function createArabicService({ dataDir, publicKey, overlayAvailable = process.pl
     }
   }
 
+  /**
+   * Makes a game's patch again: after a game update (its old files come out
+   * first, safely) or for a new font style. Returns {} when it's done; { error }
+   * when an updated game has no Arabic now (it starts in English); { notice }
+   * when the font couldn't change (the pack already here stays).
+   */
+  async function remake(game, now, { updated, fontStyle, onProgress = () => {} }) {
+    if (updated) {
+      onProgress({ phase: 'game-updated' });
+      await localization.retire({ root: game.dir });
+      checks.delete(game.dir);
+    }
+    try {
+      if (!builder?.rebuild) throw new Error('GameShelf can\'t make Arabic for this game on this PC.');
+      const fresh = await check(game, false);
+      const tier = fresh.fileChanges ? fresh.tier : null;
+      if (!tier) throw new Error(fresh.reason || 'This game\'s files can\'t be changed now.');
+      const runtime = tier === 'native-runtime' ? await runtimeInfo(game, fresh) : null;
+      const packDir = await builder.rebuild({ game: { ...game, engine: fresh.engine?.engine || now.engine, runtime }, tier, fontStyle, onProgress });
+      if (!packDir) throw new Error('There\'s no Arabic for this version of the game yet.');
+      onProgress({ phase: 'checking' });
+      await packs.add(packDir);
+      checks.clear();
+      return {};
+    } catch (err) {
+      if (updated) {
+        return { error: why('The game was updated, and GameShelf couldn\'t make its Arabic again just now: {reason} It starts in English this time.', { reason: err.message }) };
+      }
+      return { notice: why('The new Arabic font couldn\'t go in just now: {reason} The game starts with the font it had.', { reason: err.message }) };
+    }
+  }
+
   /** Downloads a catalog pack, checks it (SHA-256, then its signature and files) and adds it to this PC's packs. */
   async function install(entry, onProgress = () => {}, game = null, tier = null) {
     if (!catalog) throw new Error('There\'s no Arabic pack catalog in this copy of GameShelf.');
@@ -217,7 +304,7 @@ function createArabicService({ dataDir, publicKey, overlayAvailable = process.pl
       if (!builder || !game) throw new Error('GameShelf can\'t make Arabic for this game on this PC.');
       const got = await catalog.fetchSet(entry, { onProgress });
       try {
-        const packDir = await builder.fromSet({ game, tier, entry, set: got.set, setFile: got.file, onProgress });
+        const packDir = await builder.fromSet({ game, tier, entry, set: got.set, setFile: got.file, fontStyle: game.key ? await fontFor(game) : null, onProgress });
         onProgress({ phase: 'checking' });
         await packs.add(packDir);
       } finally {
@@ -253,7 +340,7 @@ function createArabicService({ dataDir, publicKey, overlayAvailable = process.pl
     return style;
   }
 
-  return { info, set, prepareLaunch, install, overlayStyle, setOverlayStyle, packs, localization, recover: () => localization.recover(), fill };
+  return { info, set, prepareLaunch, install, remake, fontFor, setFont, overlayStyle, setOverlayStyle, packs, localization, recover: () => localization.recover(), fill };
 }
 
 module.exports = { createArabicService };

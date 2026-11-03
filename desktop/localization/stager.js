@@ -20,6 +20,13 @@
 // - A file in a numbered chain (RE Engine's patch files, which the game loads
 //   in order until a number is missing) is only taken out while it's the last
 //   one; otherwise nothing is removed and turning off says why.
+// - Game updates: the record keeps the size and time of the game's own files
+//   the caller names (its archives, its program) and of the folders they're
+//   in, and of every file GameShelf put in. verify() tells, cheaply, when a
+//   store update changed them (or wrote over a file GameShelf replaced), and
+//   retire() takes GameShelf's files out after one without ever putting an
+//   outdated original back over the update: backups the update made obsolete
+//   are dropped, and what the update wrote stays.
 const fs = require('node:fs/promises');
 const crypto = require('node:crypto');
 const path = require('node:path');
@@ -34,6 +41,11 @@ class StageError extends Error {
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+// Files bigger than this aren't hashed to tell whether a changed time means changed contents.
+const HASH_LIMIT = 256 * 1024 * 1024;
+
+const stampOf = (info) => ({ size: info.size, mtimeMs: Math.round(info.mtimeMs) });
+const sameStamp = (info, stamp) => Boolean(stamp) && info.size === stamp.size && Math.round(info.mtimeMs) === stamp.mtimeMs;
 
 /** unlink that waits a moment for Windows to let go of a file. */
 async function removeFile(file) {
@@ -165,14 +177,39 @@ function createStager({ stateDir }) {
     return true;
   }
 
+  /** The size and time of the game's own files, and the names in its folders (matching each folder's pattern), minus GameShelf's. */
+  async function watchSnapshot(realRoot, watch, ours) {
+    const own = new Set(ours.map((p) => fold(p)));
+    const files = [];
+    for (const file of watch.files || []) {
+      const full = path.resolve(file);
+      if (!isInside(realRoot, full) || own.has(fold(full)) || files.some((f) => fold(f.path) === fold(full))) continue;
+      const info = await fs.lstat(full).catch(() => null);
+      if (info?.isFile()) files.push({ path: full, ...stampOf(info) });
+    }
+    const dirs = [];
+    for (const { path: dir, pattern } of watch.dirs || []) {
+      const full = path.resolve(dir);
+      if (!isInside(realRoot, full, { allowSame: true })) continue;
+      dirs.push({ path: full, pattern, names: await namesIn(full, pattern, own) });
+    }
+    return { files, dirs };
+  }
+
+  async function namesIn(dir, pattern, own = new Set()) {
+    const re = new RegExp(pattern, 'i');
+    return (await fs.readdir(dir).catch(() => [])).filter((n) => re.test(n) && !own.has(fold(path.join(dir, n)))).sort();
+  }
+
   /**
    * Adds files to a game. `anchor` is the folder the targets are relative to
    * (inside `root`); each file is { target, source } or { target, content }, with
    * its sha256, and `mutable` for files the mod itself rewrites. `generated`
    * lists paths (relative to the anchor) the mod creates while running, which
-   * go with it when GameShelf created their folder.
+   * go with it when GameShelf created their folder. `watch` names the game's own
+   * files ({ files: [paths], dirs: [{ path, pattern }] }) that a game update changes.
    */
-  async function enable({ root, anchor, pack, files, generated = [] }) {
+  async function enable({ root, anchor, pack, files, generated = [], watch = {} }) {
     const realRoot = await fs.realpath(root);
     return locked(realRoot, async () => {
       const realAnchor = await fs.realpath(anchor);
@@ -241,7 +278,16 @@ function createStager({ stateDir }) {
           if (planned[i].replace) await replace(planned[i], files[i], op);
           else await place(planned[i], files[i], op);
         }
-        await saveState({ ...state, status: 'enabled', enabledAt: new Date().toISOString() });
+        for (const file of planned) {
+          const info = await fs.lstat(file.path).catch(() => null);
+          if (info) file.stamp = stampOf(info);
+          if (file.replace) {
+            const backup = await fs.lstat(file.replace.backup).catch(() => null);
+            if (backup) file.replace.size = backup.size;
+          }
+        }
+        const watched = await watchSnapshot(realRoot, watch, planned.map((f) => f.path));
+        await saveState({ ...state, files: planned, watch: watched, status: 'enabled', enabledAt: new Date().toISOString() });
       } catch (err) {
         await rollback(state);
         throw err.code === 'EEXIST' ? new StageError(`"${err.path}" appeared while GameShelf was adding files.`, 'conflict') : err;
@@ -264,11 +310,69 @@ function createStager({ stateDir }) {
   }
 
   /**
-   * Takes away everything enable() added. Returns { removed, kept: [{ path, why }] }.
-   * Throws StageError 'chain' (and changes nothing) when a file in a numbered
-   * chain has another after it; details: [{ path, after }].
+   * Whether the game changed since its files went in (a store update, or a
+   * "verify files" that put the game's own files back): null when nothing of
+   * GameShelf's is in, else { updated, changes: [{ path, what }], backups: [problems] }.
+   * `what`: 'missing', 'overwritten' (a file of GameShelf's has other contents
+   * now), 'restored' (a replaced file has its original back), 'changed' or
+   * 'removed' (a game file), 'added' or 'gone' (a name in a watched folder).
    */
-  async function disable(root) {
+  async function verify(root) {
+    const realRoot = await fs.realpath(root).catch(() => path.resolve(root));
+    const state = await readState(realRoot);
+    if (!state || state.status !== 'enabled') return null;
+    const changes = [];
+    const backups = [];
+    for (const file of state.files) {
+      if (file.mutable) continue;
+      const info = await fs.lstat(file.path).catch(() => null);
+      if (!info?.isFile()) {
+        changes.push({ path: file.path, what: 'missing' });
+        continue;
+      }
+      if (file.replace) {
+        const backup = await fs.lstat(file.replace.backup).catch(() => null);
+        if (!backup || (file.replace.size !== undefined && backup.size !== file.replace.size)) backups.push({ path: file.replace.backup, what: 'damaged' });
+      }
+      // Added under a name of GameShelf's own: store updates don't write there.
+      if (!file.replace && !file.chain) continue;
+      if (sameStamp(info, file.stamp)) continue;
+      if (info.size > HASH_LIMIT) {
+        changes.push({ path: file.path, what: 'overwritten' });
+        continue;
+      }
+      const current = await sha256File(file.path).catch(() => null);
+      if (current === file.sha256) continue;
+      changes.push({ path: file.path, what: file.replace && current === file.replace.sha256 ? 'restored' : 'overwritten' });
+    }
+    for (const file of state.watch?.files || []) {
+      const info = await fs.lstat(file.path).catch(() => null);
+      if (!info) changes.push({ path: file.path, what: 'removed' });
+      else if (!sameStamp(info, file)) changes.push({ path: file.path, what: 'changed' });
+    }
+    const own = new Set(state.files.map((f) => fold(f.path)));
+    for (const dir of state.watch?.dirs || []) {
+      const now = await namesIn(dir.path, dir.pattern, own);
+      for (const name of now.filter((n) => !dir.names.includes(n))) changes.push({ path: path.join(dir.path, name), what: 'added' });
+      for (const name of dir.names.filter((n) => !now.includes(n))) changes.push({ path: path.join(dir.path, name), what: 'gone' });
+    }
+    return { updated: changes.length > 0, changes, backups };
+  }
+
+  /**
+   * Takes away everything enable() added. Returns { removed, kept: [{ path, why }],
+   * superseded, left }. Throws StageError 'chain' (and changes nothing) when a
+   * file in a numbered chain has another after it; details: [{ path, after }].
+   *
+   * With `superseded` (after a game update, see verify()), what the update
+   * changed is the game's now: a replaced file the update wrote over keeps the
+   * update's version and its outdated backup is dropped, a file of GameShelf's
+   * the update wrote over is left as the update's, and a numbered patch file
+   * with a newer one after it stays where it is (the game needs the chain
+   * whole), forgotten: the next Arabic goes in after it. Nothing is kept on the
+   * list for later.
+   */
+  async function disable(root, { superseded: afterUpdate = false } = {}) {
     const realRoot = await fs.realpath(root).catch(() => path.resolve(root));
     return locked(realRoot, async () => {
       const state = await readState(realRoot);
@@ -281,22 +385,31 @@ function createStager({ stateDir }) {
         await dropState(realRoot); // the game itself is gone
         return { removed: [], kept: [] };
       }
+      const left = [];
       for (const file of state.files.filter((f) => f.chain)) {
         const after = await laterInChain(file);
-        if (after) {
+        if (after && afterUpdate) {
+          left.push(file.path);
+        } else if (after) {
           throw new StageError(`${after} was added after ${path.basename(file.path)}, and the game would stop loading it if ${path.basename(file.path)} were taken out. Take ${after} out first.`, 'chain', [{ path: file.path, after }]);
         }
       }
 
       const removed = [];
       const kept = [];
+      const superseded = [];
       for (const file of [...state.files].reverse()) {
+        if (left.includes(file.path)) continue;
         if (file.replace) {
           // The game's own file: its original goes back, unless the file changed since (a game update).
           try {
             if (await restore(file, state.op)) {
               await removeFile(file.replace.backup).catch(() => {});
               removed.push(file.path);
+            } else if (afterUpdate) {
+              // The update's version stays; the original from before it is out of date.
+              await removeFile(file.replace.backup).catch(() => {});
+              superseded.push(file.path);
             } else {
               kept.push({ path: file.path, why: `changed since GameShelf replaced it; GameShelf's copy of the original is at ${file.replace.backup}` });
             }
@@ -316,6 +429,8 @@ function createStager({ stateDir }) {
           } catch (err) {
             kept.push({ path: file.path, why: err.code === 'EBUSY' ? 'in use' : err.code || err.message, file });
           }
+        } else if (afterUpdate) {
+          superseded.push(file.path);
         } else {
           kept.push({ path: file.path, why: 'changed since GameShelf added it' });
         }
@@ -341,6 +456,7 @@ function createStager({ stateDir }) {
           await fs.rmdir(dir);
         } catch (err) {
           if (err.code === 'ENOENT') continue;
+          if (afterUpdate && err.code === 'ENOTEMPTY') continue; // holds the update's files now
           leftDirs.push(dir);
           kept.push({ path: dir, why: err.code === 'ENOTEMPTY' ? 'has files GameShelf didn\'t add' : err.code || err.message });
         }
@@ -353,7 +469,7 @@ function createStager({ stateDir }) {
       } else {
         await dropState(realRoot);
       }
-      return { removed, kept: kept.map(({ path: p, why }) => ({ path: p, why })) };
+      return { removed, kept: kept.map(({ path: p, why }) => ({ path: p, why })), superseded, left };
     });
   }
 
@@ -382,7 +498,7 @@ function createStager({ stateDir }) {
     return count;
   }
 
-  return { enable, disable, status, recover };
+  return { enable, disable, verify, retire: (root) => disable(root, { superseded: true }), status, recover };
 }
 
 module.exports = { createStager, StageError };

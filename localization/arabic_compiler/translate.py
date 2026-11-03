@@ -30,6 +30,7 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 
+from . import glossary as game_glossary_module
 from .rtl import _TOKENS
 
 PROMPT_VERSION = 1
@@ -152,6 +153,8 @@ class Translator:
     workers: int = 4
     context: str = ''
     glossary: dict = field(default_factory=dict)
+    # The game's glossary (glossary.py): its terms and how to speak to the player, given to each batch for its own lines.
+    game_glossary: dict = field(default_factory=dict)
     max_retries: int = 5
     log: object = print
     sleep: object = time.sleep
@@ -162,17 +165,31 @@ class Translator:
 
     def cache_key(self, source: str) -> str:
         glossary = json.dumps(sorted(self.glossary.items()), ensure_ascii=False)
-        raw = '\0'.join([str(PROMPT_VERSION), self.provider.kind, self.provider.model, self.context, glossary, source])
-        return hashlib.sha256(raw.encode('utf-8')).hexdigest()
+        parts = [str(PROMPT_VERSION), self.provider.kind, self.provider.model, self.context, glossary, source]
+        if not game_glossary_module.is_empty(self.game_glossary):
+            # Only what of the game's glossary this line's translation depends on, so the glossary can grow.
+            parts.append(game_glossary_module.line_key(self.game_glossary, source))
+        return hashlib.sha256('\0'.join(parts).encode('utf-8')).hexdigest()
 
-    def system_prompt(self):
+    def system_prompt(self, lines=()):
         extra = ''
         if self.context:
             extra += f'\nAbout the game: {self.context}'
         if self.glossary:
             terms = '\n'.join(f'- {en} -> {ar}' for en, ar in self.glossary.items())
             extra += f'\nAlways translate these terms this way:\n{terms}'
+        extra += game_glossary_module.prompt_section(self.game_glossary, list(lines))
         return SYSTEM_PROMPT + extra
+
+    def make_glossary(self, lines) -> dict:
+        """The game's glossary from its lines, in one request (see glossary.py)."""
+        terms = [t for t in game_glossary_module.candidates(lines) if t not in self.glossary]
+        sample_lines = game_glossary_module.samples(lines)
+        if not terms and not sample_lines:
+            return game_glossary_module.clean({})
+        body, headers = self.provider.request(game_glossary_module.GLOSSARY_PROMPT,
+                                              game_glossary_module.request_text(terms, sample_lines, self.context))
+        return game_glossary_module.parse_answer(self.provider.answer_text(self._post(body, headers)))
 
     def _post(self, body, headers):
         data = json.dumps(body, ensure_ascii=False).encode('utf-8')
@@ -204,7 +221,7 @@ class Translator:
         user = json.dumps([{'id': i, 'text': text} for i, text in lines], ensure_ascii=False)
         if note:
             user = f'{note}\n{user}'
-        body, headers = self.provider.request(self.system_prompt(), user)
+        body, headers = self.provider.request(self.system_prompt([text for _, text in lines]), user)
         text = self.provider.answer_text(self._post(body, headers)).strip()
         text = re.sub(r'^```(?:json)?\s*|\s*```$', '', text)
         try:

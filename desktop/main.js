@@ -25,6 +25,7 @@ const { createStudio } = require('./localization/studio');
 const { createArabicRequests, cantMake, playedAlone, NEEDS_RECIPE } = require('./localization/requests');
 const { createRecipes, recipeTemplate } = require('./localization/recipes');
 const { directoryFingerprint } = require('./localization/dirprint');
+const arabicLines = require('./localization/lines');
 const config = require('./config.json');
 const { normalizeTitle } = require('../src/text');
 
@@ -348,29 +349,49 @@ const runtimeHooks = (() => {
   }
   return Object.keys(hashes).length ? hashes : null;
 })();
+// Approved Arabic sets: the patch is built here, from the player's own copy of the game.
+async function buildFromSet({ game, tier, entry, set, setFile, fontStyle, onProgress }) {
+  // Packed text: the game's signed engine recipe says how to read it and put the Arabic back.
+  const recipe = tier === 'recipe' ? await recipes.forGame(gameKey(game)) : null;
+  if (tier === 'recipe' && !recipe) throw new Error(NEEDS_RECIPE);
+  // The runtime adapter only goes into games played alone.
+  if (tier === 'native-runtime') {
+    const alone = await playedAlone(online, game);
+    if (!alone.ok) throw new Error(alone.why);
+  }
+  const seen = tier === 'native-runtime' && game.runtime?.newLines > 0 ? game.runtime.dump : null;
+  return (await packBuilder.build({ ...game, tier, title: entry.title || set.title, recipe: recipe?.file, proxy: game.runtime?.proxy, extraLines: seen },
+    // The player's font, else the one the admin picked for this game's Arabic.
+    { set: setFile, fontTargets: set.fontTargets || [], version: entry.version, fontStyle: fontStyle || set.fontStyle || null, onProgress })).packDir;
+}
+
+// After a game update, or for another font: the approved Arabic when there is one, else GameShelf's shared translations.
+async function rebuildArabic({ game, tier, fontStyle, onProgress }) {
+  const entry = await online.catalog.forGame(game).catch(() => null);
+  if (entry?.mode === 'build' && entry.tier === tier) {
+    const got = await online.catalog.fetchSet(entry, { onProgress });
+    try {
+      return await buildFromSet({ game, tier, entry, set: got.set, setFile: got.file, fontStyle, onProgress });
+    } finally {
+      await got.done();
+    }
+  }
+  if (!packBuilder.canBuild(tier, game.engine) || !(await online.signedIn())) return null;
+  const recipe = tier === 'recipe' ? await recipes.forGame(gameKey(game)) : null;
+  if (tier === 'recipe' && !recipe) return null;
+  const seen = tier === 'native-runtime' && game.runtime?.newLines > 0 ? game.runtime.dump : null;
+  const built = await packBuilder.build({ ...game, tier, recipe: recipe?.file, proxy: game.runtime?.proxy, extraLines: seen },
+    { server: cloud.server(), auth: await online.builderEnv(), fontStyle, onProgress });
+  return built.packDir;
+}
+
 const arabic = createArabicService({
   dataDir,
   runtimeHooks,
   publicKey: [packKey, localKey.publicKey].filter(Boolean),
   overlayAvailable: process.platform === 'win32' || Boolean(devOcrHelper),
   catalog: online.catalog,
-  // Approved Arabic sets: the patch is built here, from the player's own copy of the game.
-  builder: {
-    canBuild: (tier, engine) => packBuilder.canBuild(tier, engine),
-    fromSet: async ({ game, tier, entry, set, setFile, onProgress }) => {
-      // Packed text: the game's signed engine recipe says how to read it and put the Arabic back.
-      const recipe = tier === 'recipe' ? await recipes.forGame(gameKey(game)) : null;
-      if (tier === 'recipe' && !recipe) throw new Error(NEEDS_RECIPE);
-      // The runtime adapter only goes into games played alone.
-      if (tier === 'native-runtime') {
-        const alone = await playedAlone(online, game);
-        if (!alone.ok) throw new Error(alone.why);
-      }
-      const seen = tier === 'native-runtime' && game.runtime?.newLines > 0 ? game.runtime.dump : null;
-      return (await packBuilder.build({ ...game, tier, title: entry.title || set.title, recipe: recipe?.file, proxy: game.runtime?.proxy, extraLines: seen },
-        { set: setFile, fontTargets: set.fontTargets || [], version: entry.version, onProgress })).packDir;
-    },
-  },
+  builder: { canBuild: (tier, engine) => packBuilder.canBuild(tier, engine), fromSet: buildFromSet, rebuild: rebuildArabic },
 });
 const packBuilder = createPackBuilder({
   paths: builderPaths,
@@ -805,6 +826,30 @@ function registerIpc() {
     const game = await installedGame(key);
     return { ...(await arabic.info(arabicGame(game))), overlayRunning: Boolean(overlays?.has(key)), overlay: overlays?.status(key) || null };
   });
+  // "Report a translation issue": the game's lines as its last build here wrote them, found by English or Arabic.
+  handle('arabic:lines', async (key, query) => {
+    const game = await installedGame(key);
+    const info = await arabic.info(arabicGame(game));
+    const ids = [info.pack?.id, `gameshelf-${game.steamAppId ? `steam-${game.steamAppId}` : arabicGame(game).gameId}-ar`].filter(Boolean);
+    for (const id of ids) {
+      const lines = await arabicLines.readLines(path.join(dataDir, 'localization', 'builds', id, 'translations.csv'));
+      if (lines.length) return arabicLines.search(lines, String(query || ''));
+    }
+    return [];
+  });
+  handle('arabic:report', async (key, fix) => {
+    const game = await installedGame(key);
+    const serverKey = gameKey(arabicGame(game));
+    if (!serverKey) throw new Error('GameShelf doesn\'t know which game this is, so it can\'t send the report.');
+    if (!(await online.signedIn())) throw new Error('Log in to GameShelf first.');
+    const { english, current, suggestion, note } = fix || {};
+    return online.reportFix(serverKey, { english, current, suggestion, note });
+  });
+  // The Arabic font style for a game (null: the pack's own); a new one goes in the next time the game starts.
+  handle('arabic:font', async (key, style) => {
+    const game = await installedGame(key);
+    return arabic.setFont(arabicGame(game), style || null);
+  });
   handle('arabic:set', async (key, on) => {
     const game = await installedGame(key);
     const isRunning = async () => {
@@ -874,6 +919,13 @@ function registerIpc() {
   handle('admin:attachRecipe', async (game, text) => {
     await requireAdmin();
     return studio.attachRecipe(String(game), String(text));
+  });
+  // Admin Panel, Translation fixes: the approved fixes out to every player (a new signed version of the game's Arabic).
+  handle('admin:republish', async (game) => {
+    await requireAdmin();
+    const pack = await studio.republish(String(game));
+    online.catalog.forget();
+    return pack;
   });
   handle('admin:recipeTemplate', async (game, family) => JSON.stringify(recipeTemplate(String(game), family ? String(family) : null), null, 2));
   // ---- Pack Studio (admins only; the server checks again when a pack is published) ----

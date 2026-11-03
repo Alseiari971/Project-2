@@ -9,8 +9,11 @@ import { icon } from '../icons.js';
 import { t } from '../i18n.js';
 
 const desktop = window.gameshelfDesktop;
-const TABS = ['overview', 'approvals', 'requests', 'packs', 'users', 'installer', ...(desktop?.studio ? ['studio'] : [])];
-const TAB_LABELS = { overview: 'Overview', approvals: 'Pending approvals', users: 'Users', packs: 'Arabic packs', requests: 'Requests', installer: 'Windows app', studio: 'Pack Studio' };
+const TABS = ['overview', 'approvals', 'requests', 'fixes', 'packs', 'users', 'installer', ...(desktop?.studio ? ['studio'] : [])];
+const TAB_LABELS = {
+  overview: 'Overview', approvals: 'Pending approvals', users: 'Users', packs: 'Arabic packs', requests: 'Requests', fixes: 'Translation fixes',
+  installer: 'Windows app', studio: 'Pack Studio',
+};
 const ENGINE_LABELS = {
   auto: 'Detect it', unreal: 'Unreal Engine', unity: 'Unity', reengine: 'Capcom RE Engine', godot: 'Godot', renpy: "Ren'Py",
   bethesda: 'Bethesda Creation Engine', loose: 'Readable text files', custom: 'Custom engine (recipe)', overlay: 'Accessibility overlay',
@@ -87,7 +90,7 @@ export async function adminView(app, params) {
       <div id="admin-body" class="admin-body"></div>
     </div>`);
   const body = document.getElementById('admin-body');
-  await { overview, approvals, users, packs, requests, installer, studio }[tab](body, params);
+  await { overview, approvals, users, packs, requests, fixes, installer, studio }[tab](body, params);
 }
 
 // ---- Overview ------------------------------------------------------------------
@@ -232,12 +235,14 @@ async function requests(body) {
   const STATUS = { ready: 'Arabic ready', partial: 'Partly translated', none: 'Not started' };
   const byGame = new Map(rows.map((r) => [r.game, r]));
   mount(body, html`
+    <h2 class="admin-board-head">${icon('star')} ${t('Most requested games')}</h2>
+    <p class="muted small">${t('Every game players asked Arabic for, most votes first. Players upvote the ones still without Arabic on the Arabic requests page.')}</p>
     ${rows.length
-      ? html`<div class="admin-table">${rows.map((r) => html`
+      ? html`<div class="admin-table">${rows.map((r, i) => html`
           <div class="admin-row admin-request">
-            <div><strong>${bdi(r.name || r.game)}</strong> <span class="muted small">${r.game}${r.reason ? html` · ${t(r.reason)}` : ''}</span>
+            <div><strong><span class="admin-rank">#${i + 1}</span> ${bdi(r.name || r.game)}</strong> <span class="muted small">${r.game}${r.reason ? html` · ${t(r.reason)}` : ''}</span>
               ${r.fingerprint ? folderPrint(r.fingerprint) : ''}</div>
-            <span>${r.requests === 1 ? t('1 player asked') : t('{count} players asked', { count: r.requests })}</span>
+            <span>${r.requests === 1 ? t('1 vote') : t('{count} votes', { count: r.requests })}</span>
             <span class="muted small">${r.recipe ? html`<span class="recipe-tag">${t('Engine recipe attached')}</span> ` : ''}${r.pending ? t('Waiting for approval') : t(STATUS[r.status])}${r.total ? ` · ${r.translated}/${r.total}` : ''}</span>
             <span class="admin-row-actions">
               <button class="btn btn-sm btn-quiet" type="button" data-recipe="${r.game}" data-family="${r.fingerprint?.engine?.id || ''}">${r.recipe ? t('Edit engine recipe…') : t('Attach engine recipe…')}</button>
@@ -368,6 +373,68 @@ function folderPrint(print) {
     </details>`;
 }
 
+// ---- Translation fixes: players' better Arabic for a line --------------------------------
+
+async function fixes(body) {
+  const { fixes: list, published } = await api('/admin/fixes');
+  const groups = new Map();
+  for (const fix of list) groups.set(fix.game, [...(groups.get(fix.game) || []), fix]);
+  const publish = (game) => html`
+    <p class="muted small fix-publish" data-publish="${game}" ${published[game] ? '' : 'hidden'}>
+      ${t('This game\'s approved Arabic is in the catalog: fixes you approve reach players once it\'s signed again.')}
+      ${desktop?.republishArabic
+        ? html`<button class="btn btn-sm btn-light" type="button" data-republish="${game}">${icon('shield')} ${t('Sign & publish fixes')}</button>`
+        : t('Open the Admin Panel in the GameShelf desktop app to sign it.')}
+    </p>`;
+  mount(body, html`
+    <p class="muted small">${t('Players\' suggestions for lines that read wrong. Approving one puts it in the shared translations as reviewed Arabic, so every new build has it.')}</p>
+    ${groups.size ? [...groups].map(([game, items]) => html`
+      <section class="panel fix-group">
+        <h2>${bdi(items[0].name)} <span class="muted small" dir="ltr">${game}</span></h2>
+        ${publish(game)}
+        <div class="fix-list">${items.map((f) => html`
+          <div class="fix-row" data-fix="${f.id}" data-game="${game}">
+            <div class="fix-english" dir="ltr">${f.english}</div>
+            <div class="fix-current" dir="rtl" lang="ar"><span class="muted small">${t('In the game now')}:</span> ${f.current || '—'}</div>
+            <textarea class="input fix-suggestion" dir="rtl" lang="ar" rows="2" aria-label="${t('Better Arabic')}">${f.suggestion}</textarea>
+            <div class="muted small">${f.reporter ? t('from {user}', { user: `@${f.reporter}` }) : ''}${f.reports > 1 ? ` · ${t('{count} players reported this line', { count: f.reports })}` : ''}${f.note ? html` · <bdi>${f.note}</bdi>` : ''}</div>
+            <div class="fix-actions">
+              <button class="btn btn-sm btn-light" type="button" data-approve="${f.id}">${icon('check')} ${t('Approve')}</button>
+              <button class="btn btn-sm btn-quiet" type="button" data-reject="${f.id}">${t('Turn down')}</button>
+            </div>
+          </div>`)}</div>
+      </section>`) : html`<p class="muted">${t('No translation issues reported right now.')}</p>`}`);
+
+  body.addEventListener('click', async (e) => {
+    const approve = e.target.closest('[data-approve]');
+    const reject = e.target.closest('[data-reject]');
+    const republish = e.target.closest('[data-republish]');
+    try {
+      if (approve || reject) {
+        const row = (approve || reject).closest('.fix-row');
+        const id = encodeURIComponent((approve || reject).dataset.approve || (approve || reject).dataset.reject);
+        if (approve) {
+          const { republish: needs } = await api(`/admin/fixes/${id}/approve`, { method: 'POST', body: { arabic: row.querySelector('.fix-suggestion').value } });
+          if (needs) body.querySelector(`[data-publish="${CSS.escape(row.dataset.game)}"]`)?.removeAttribute('hidden');
+          toast(needs ? t('Approved. Sign & publish the game\'s Arabic to send it to players.') : t('Approved: every new build of this game has it.'));
+        } else {
+          await api(`/admin/fixes/${id}/reject`, { method: 'POST', body: {} });
+          toast(t('Turned down.'));
+        }
+        row.remove();
+      } else if (republish) {
+        republish.disabled = true;
+        const pack = await desktop.republishArabic(republish.dataset.republish);
+        toast(t('Published version {version}: every player gets the fixes the next time they play.', { version: pack.version }));
+        republish.closest('[data-publish]')?.setAttribute('hidden', '');
+      }
+    } catch (err) {
+      toast(errorText(err), { error: true });
+      if (republish) republish.disabled = false;
+    }
+  });
+}
+
 // ---- Pending approvals: Arabic made on players' PCs ------------------------------------
 
 async function approvals(body, params) {
@@ -408,6 +475,12 @@ async function review(body, id) {
         <p class="muted small">${s.game} · ${t(ENGINE_LABELS[s.engine] || s.engine)} · ${s.submittedBy ? t('from {user}', { user: `@${s.submittedBy}` }) : ''}</p>
         <p>${t('{translated} of {total} lines have Arabic.', { translated: s.translated, total: s.total })}
           ${s.fontTargets.length ? t('{n} game fonts get the Arabic font.', { n: s.fontTargets.length }) : ''}</p>
+        <label class="small review-font">${t('Arabic font for this game')}
+          <select class="input" id="review-font">
+            ${[['plex', 'IBM Plex Sans Arabic (clear, the default)'], ['cairo', 'Cairo (modern, for HUDs and menus)'], ['naskh', 'Noto Naskh Arabic (classic, for story games)']]
+              .map(([value, label]) => html`<option value="${value}" ${(s.fontStyle || 'plex') === value ? 'selected' : ''}>${t(label)}</option>`)}
+          </select>
+        </label>
       </div>
       ${pending ? html`
         <div class="review-actions">
@@ -416,6 +489,21 @@ async function review(body, id) {
             : html`<p class="muted small">${t('Approving signs the Arabic with GameShelf\'s key, which stays on your PC: open this page in GameShelf for Windows.')}</p>`}
           <button class="btn btn-quiet" type="button" id="reject">${t('Turn down')}</button>
         </div>` : html`<span class="role-tag">${t(s.status === 'approved' ? 'Approved' : 'Turned down')}</span>`}
+    </section>
+    <section class="panel glossary-panel">
+      <h3>${t('Glossary')}</h3>
+      <p class="muted small">${t('Names and game terms every translation batch keeps the same, and how the game speaks to the player. GameShelf makes it before translating a game; what you fix here stays, and only new terms get added.')}</p>
+      <label class="small">${t('The player character')}
+        <select class="input" id="glossary-gender">
+          <option value="unknown">${t('Not known (masculine, the usual default)')}</option>
+          <option value="masculine">${t('Male (أنتَ)')}</option>
+          <option value="feminine">${t('Female (أنتِ)')}</option>
+        </select>
+      </label>
+      <label class="small">${t('Names and terms, one per line: English = Arabic')}
+        <textarea class="input glossary-terms" id="glossary-terms" rows="8" dir="auto" placeholder="Kratos = كريتوس"></textarea>
+      </label>
+      <button class="btn btn-light" type="button" id="glossary-save">${t('Save glossary')}</button>
     </section>
     <form class="search-bar" id="review-search" role="search">
       <label class="search-field">${icon('search')}<input type="search" name="q" placeholder="${t('Find a line (English or Arabic)')}" aria-label="${t('Find a line (English or Arabic)')}"></label>
@@ -427,6 +515,32 @@ async function review(body, id) {
       ${pending ? html`<button class="btn btn-light" type="button" id="save" disabled>${t('Save changes')}</button>` : ''}
     </div>`);
 
+  const gender = document.getElementById('glossary-gender');
+  const terms = document.getElementById('glossary-terms');
+  api(`/admin/glossaries/${encodeURIComponent(s.game)}`).then(({ glossary }) => {
+    if (!glossary) return;
+    gender.value = glossary.player?.gender || 'unknown';
+    terms.value = Object.entries(glossary.terms || {}).map(([en, ar]) => `${en} = ${ar}`).join('\n');
+  }).catch(() => {});
+  document.getElementById('glossary-save').addEventListener('click', async () => {
+    const entries = terms.value.split('\n').map((line) => line.split(' = ')).filter((parts) => parts.length >= 2 && parts[0].trim());
+    try {
+      const { glossary } = await api(`/admin/glossaries/${encodeURIComponent(s.game)}`, {
+        method: 'PUT', body: { terms: Object.fromEntries(entries.map(([en, ...ar]) => [en.trim(), ar.join(' = ').trim()])), player: { gender: gender.value } },
+      });
+      toast(t('Glossary saved: {count} names and terms. New translations of this game follow it.', { count: Object.keys(glossary.terms).length }));
+    } catch (err) {
+      toast(errorText(err), { error: true });
+    }
+  });
+  document.getElementById('review-font').addEventListener('change', async (e) => {
+    try {
+      await api(`/admin/games/${encodeURIComponent(s.game)}/font-style`, { method: 'PUT', body: { fontStyle: e.target.value === 'plex' ? null : e.target.value } });
+      toast(t('Saved. Players\' apps make this game\'s Arabic with that font, unless a player picks another.'));
+    } catch (err) {
+      toast(errorText(err), { error: true });
+    }
+  });
   const list = document.getElementById('review-list');
   const more = document.getElementById('more');
   const save = document.getElementById('save');

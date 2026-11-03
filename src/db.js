@@ -44,6 +44,10 @@ const ADDED_COLUMNS = {
     // What's in the game's folder (names, file kinds and sizes; see desktop/localization/dirprint.js), as JSON.
     fingerprint: "TEXT NOT NULL DEFAULT ''",
   },
+  // The Arabic font an admin picked for a game's packs ('' for the default, IBM Plex Sans Arabic).
+  arabic_games: {
+    font_style: "TEXT NOT NULL DEFAULT ''",
+  },
   library: {
     game_backdrop: 'TEXT',
     game_genres: "TEXT NOT NULL DEFAULT '[]'",
@@ -213,6 +217,34 @@ function openDatabase(file = process.env.DB_FILE || path.join(__dirname, '..', '
       approved_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
       created_at   TEXT NOT NULL DEFAULT (datetime('now')),
       PRIMARY KEY (id, version)
+    );
+
+    -- Players' better Arabic for a line, waiting for an admin (see src/community.js).
+    CREATE TABLE IF NOT EXISTS translation_fixes (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      game        TEXT NOT NULL,
+      line_hash   TEXT NOT NULL,
+      english     TEXT NOT NULL,
+      current     TEXT NOT NULL DEFAULT '',
+      suggestion  TEXT NOT NULL,
+      note        TEXT NOT NULL DEFAULT '',
+      status      TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+      reported_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      reviewed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      reviewed_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS translation_fixes_status ON translation_fixes(status, created_at);
+
+    -- A game's glossary (see src/translation-memory.js): the Arabic for its names
+    -- and terms, and how it speaks to the player, given to every translation batch.
+    -- locked: an admin edited it, so the automatic pass only adds new terms.
+    CREATE TABLE IF NOT EXISTS game_glossaries (
+      game       TEXT PRIMARY KEY,
+      terms      TEXT NOT NULL DEFAULT '{}',
+      player     TEXT NOT NULL DEFAULT '{}',
+      locked     INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
     -- Engine recipes (see src/engine-recipes.js): how players' apps read a game

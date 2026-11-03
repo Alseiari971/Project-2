@@ -81,8 +81,130 @@ function paintArabic(button, info) {
   }
   button.title = notes.filter(Boolean).join('\n');
   paintRefresh(button, info);
+  paintFontPicker(button, info);
+  paintReport(button, info);
   // No pack on this PC yet: GameShelf's server may have the Arabic, or it can be asked for.
   if (mode === 'unavailable' && info?.missing) checkOnline(button);
+}
+
+/** "Report a translation issue", for games with Arabic on this PC. */
+function paintReport(button, info) {
+  let report = button.parentElement?.querySelector('[data-arabic-report]');
+  if (!((info?.mode === 'native' || info?.mode === 'overlay') && info.pack)) {
+    report?.remove();
+    return;
+  }
+  if (report) return;
+  report = document.createElement('button');
+  report.type = 'button';
+  report.className = 'pill-btn pill-light arabic-report';
+  report.dataset.arabicReport = button.dataset.arabic;
+  report.textContent = t('Report a translation issue');
+  (button.parentElement.querySelector('[data-arabic-font]') || button).insertAdjacentElement('afterend', report);
+  report.addEventListener('click', () => {
+    if (!state.user) {
+      location.hash = '#/login';
+      return;
+    }
+    openReport(button.dataset.arabic, button.closest('.page')?.querySelector('h1')?.textContent?.trim() || '');
+  });
+}
+
+/** The report dialog: find the line (or paste it), write better Arabic, send it to GameShelf's team. */
+function openReport(key, name) {
+  const dialog = document.createElement('dialog');
+  dialog.className = 'consent-dialog report-dialog';
+  dialog.setAttribute('aria-labelledby', 'report-title');
+  mount(dialog, html`
+    <form method="dialog" id="report-form">
+      <h2 id="report-title">${t('Report a translation issue')}</h2>
+      <p class="muted">${bdi(name)} · ${t('Find the line, or paste its English and Arabic. GameShelf\'s team checks every suggestion.')}</p>
+      <label class="search-field">${icon('search')}<input type="search" name="q" placeholder="${t('Find a line (English or Arabic)')}" aria-label="${t('Find a line (English or Arabic)')}"></label>
+      <ul class="report-results" id="report-results"></ul>
+      <label>${t('English line')}<textarea class="input" name="english" rows="2" dir="ltr" required></textarea></label>
+      <label>${t('Arabic in the game now')}<textarea class="input" name="current" rows="2" dir="rtl" lang="ar"></textarea></label>
+      <label>${t('Better Arabic')}<textarea class="input" name="suggestion" rows="3" dir="rtl" lang="ar" required></textarea></label>
+      <label>${t('Note (optional)')}<input class="input" name="note" maxlength="500"></label>
+      <div class="consent-actions">
+        <button class="btn btn-quiet" value="cancel" formnovalidate>${t('Cancel')}</button>
+        <button class="btn btn-light" value="send">${t('Send to GameShelf')}</button>
+      </div>
+    </form>`);
+  document.body.append(dialog);
+  const form = dialog.querySelector('form');
+  const results = dialog.querySelector('#report-results');
+  const find = async () => {
+    const lines = await desktop.arabicLines(key, form.q.value).catch(() => []);
+    mount(results, html`${lines.length
+      ? lines.map((l, i) => html`<li><button type="button" class="report-line" data-line="${i}"><span dir="ltr">${l.english}</span><span dir="rtl" lang="ar">${l.arabic}</span></button></li>`)
+      : html`<li class="muted small">${t('No lines found here: paste the English and Arabic below.')}</li>`}`);
+    results.querySelectorAll('[data-line]').forEach((b) => b.addEventListener('click', () => {
+      const line = lines[Number(b.dataset.line)];
+      form.english.value = line.english;
+      form.current.value = line.arabic;
+      form.suggestion.value = line.arabic;
+      form.suggestion.focus();
+    }));
+  };
+  let timer;
+  form.q.addEventListener('input', () => {
+    clearTimeout(timer);
+    timer = setTimeout(find, 200);
+  });
+  find();
+  form.addEventListener('submit', async (e) => {
+    if (e.submitter?.value !== 'send') return;
+    e.preventDefault();
+    try {
+      await desktop.reportArabicFix(key, { english: form.english.value, current: form.current.value, suggestion: form.suggestion.value, note: form.note.value });
+      dialog.close();
+      toast(t('Thanks! Your suggestion went to GameShelf\'s team. Once it\'s approved, every player gets it.'));
+    } catch (err) {
+      toast(errorText(err), { error: true });
+    }
+  });
+  dialog.addEventListener('close', () => dialog.remove());
+  dialog.showModal();
+}
+
+// The Arabic font styles GameShelf brings (localization/assets/fonts).
+const FONT_NAMES = {
+  plex: 'IBM Plex Sans Arabic (clear, the default)',
+  cairo: 'Cairo (modern, for HUDs and menus)',
+  naskh: 'Noto Naskh Arabic (classic, for story games)',
+};
+
+/** The Arabic font picker beside the switch, for games whose patch carries a font. */
+function paintFontPicker(button, info) {
+  let picker = button.parentElement?.querySelector('[data-arabic-font]');
+  const font = info?.font;
+  const shown = font && (info.mode === 'native' || info.missing);
+  if (!shown) {
+    picker?.remove();
+    return;
+  }
+  if (!picker) {
+    picker = document.createElement('select');
+    picker.className = 'input arabic-font';
+    picker.dataset.arabicFont = button.dataset.arabic;
+    picker.setAttribute('aria-label', t('Arabic font'));
+    (button.parentElement.querySelector('[data-arabic-refresh]') || button).insertAdjacentElement('afterend', picker);
+    picker.addEventListener('change', async () => {
+      try {
+        const after = await desktop.setArabicFont(button.dataset.arabic, picker.value === 'pack' ? null : picker.value);
+        paintArabic(button, after);
+        if (after.mode === 'native') toast(t('The game gets its new Arabic font the next time you press Play.'));
+      } catch (err) {
+        toast(errorText(err), { error: true });
+      }
+    });
+  }
+  const current = font.chosen || 'pack';
+  const packName = font.pack && FONT_NAMES[font.pack] ? t(FONT_NAMES[font.pack]) : t(FONT_NAMES.plex);
+  mount(picker, html`
+    <option value="pack" ${current === 'pack' ? 'selected' : ''}>${t('Arabic font: {name}', { name: font.pack ? packName : t('as the pack comes') })}</option>
+    ${font.styles.map((style) => html`<option value="${style}" ${current === style ? 'selected' : ''}>${t(FONT_NAMES[style])}</option>`)}`);
+  picker.title = t('The Arabic font for this game. Changing it makes the game\'s Arabic again with the new font when you next press Play.');
 }
 
 /** Games with the runtime adapter: "Translate N new lines" for the text it saw in the game without Arabic. */
@@ -169,7 +291,8 @@ async function checkOnline(button) {
 }
 
 function paintRequested(button, server) {
-  setLabel(button, server.asked ? t('Arabic requested') : t('Request Arabic subtitles'),
+  // Asked for already by others: one more vote.
+  setLabel(button, server.asked ? t('Arabic requested') : server.requests ? t('Upvote request (+1)') : t('Request Arabic subtitles'),
     server.requests === 1 ? t('1 player asked') : t('{count} players asked', { count: server.requests || 0 }));
   // Still clickable once asked: it says why this PC can't make the Arabic.
   button.disabled = false;
@@ -179,6 +302,7 @@ function paintRequested(button, server) {
 
 const PHASES = {
   starting: 'Getting ready…',
+  'game-updated': 'The game was updated: making its Arabic again…',
   checking: 'Checking the pack…',
   reading: 'Reading the game\'s text…',
   packing: 'Making the Arabic patch…',
@@ -416,6 +540,10 @@ export function wireLaunchButtons(root, { onAdded } = {}) {
           document.querySelectorAll(`[data-arabic="${CSS.escape(key)}"]`).forEach((b) => desktop.arabicInfo(key).then((info) => paintArabic(b, info)).catch(() => {}));
           if (arabic && !arabic.ok && arabic.mode !== 'off') {
             toast(t('Starting {name} in English: {reason}', { name: button.dataset.name, reason: explain(arabic.error) }), { error: true });
+          } else if (arabic?.ok && arabic.error) {
+            toast(explain(arabic.error), { error: true });
+          } else if (arabic?.ok && arabic.updated) {
+            toast(t('{name} was updated, so GameShelf made its Arabic again for the new version. Starting it…', { name: button.dataset.name }));
           } else if (arabic?.mode === 'native' || arabic?.mode === 'overlay') {
             toast(t('Starting {name} with Arabic subtitles…', { name: button.dataset.name }));
           } else {

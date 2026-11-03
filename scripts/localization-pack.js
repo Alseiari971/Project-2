@@ -76,6 +76,7 @@ async function main([command, folder, ...rest]) {
       ...(Object.keys(overlay).length ? { overlay } : {}),
       ...(opt['font-bundle'] ? { fontBundle: opt['font-bundle'] } : {}),
       ...(opt['ugui-font'] ? { uguiFont: opt['ugui-font'] } : {}),
+      ...(opt['font-style'] ? { fontStyle: opt['font-style'] } : {}),
       ...(Object.keys(requires).length ? { requires } : {}),
       files,
       privateKey: crypto.createPrivateKey(await fs.readFile(opt.key)),

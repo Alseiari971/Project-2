@@ -65,6 +65,50 @@ Rules:
 - Use Western digits (0-9) as written.
 Answer with JSON only: {"translations": [{"id": <id>, "arabic": "<translation>"}, ...]}, one item per input line, same ids.`;
 
+// The glossary pass (the pack builder sends a game's candidate names, terms and sample lines; see
+// localization/arabic_compiler/glossary.py, which has the same prompt for --provider builds).
+const GLOSSARY_PROMPT = `You prepare a translation glossary for a video game being translated from English into Modern Standard Arabic.
+For each term, give the Arabic to use everywhere in the game: names of people, places, factions and creatures in their usual Arabic spelling (transliterated when they have none); items, skills, menus and other game terms translated, short and natural; brand and product names in Latin letters.
+From the sample lines, decide how the game speaks to the player character: "masculine", "feminine", or "unknown" (the player picks, or the lines don't say), and the player character's name if the lines show it.
+Answer with JSON only: {"terms": {"<English>": "<Arabic>", ...}, "player": {"gender": "masculine" | "feminine" | "unknown", "name": "<name, or empty>"}}`;
+const GENDERS = ['masculine', 'feminine', 'unknown'];
+const MAX_GLOSSARY_TERMS = 300;
+const MAX_GLOSSARY_SAMPLES = 40;
+const escapeRe = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** A glossary kept to its shape: { terms: { English: Arabic }, player: { gender, name } }. */
+function cleanGlossary(data) {
+  const out = { terms: {}, player: { gender: 'unknown', name: '' } };
+  const terms = data && typeof data.terms === 'object' && !Array.isArray(data.terms) ? data.terms : {};
+  for (const [english, arabic] of Object.entries(terms)) {
+    if (typeof arabic !== 'string' || !english.trim() || english.length > 80 || !arabic.trim() || arabic.length > 120) continue;
+    // Brand names may stay in Latin letters; anything else must be Arabic.
+    if (/[\u0600-\u06FF]/.test(arabic) || arabic === english) out.terms[english.trim()] = arabic.trim();
+  }
+  const player = data && typeof data.player === 'object' ? data.player : {};
+  if (GENDERS.includes(player.gender)) out.player.gender = player.gender;
+  if (typeof player.name === 'string') out.player.name = player.name.trim().slice(0, 60);
+  return out;
+}
+
+/** What a batch of English lines is told: the Arabic for the terms in them, and how to speak to the player. */
+function glossaryPrompt(glossary, lines) {
+  // No terms and nothing known of the player: the same as no glossary.
+  if (!glossary || (!Object.keys(glossary.terms || {}).length && (glossary.player?.gender || 'unknown') === 'unknown')) return '';
+  const text = lines.join('\n');
+  const terms = Object.entries(glossary.terms || {})
+    .filter(([english]) => text.includes(english) && lines.some((line) => new RegExp(`(?<![\\w])${escapeRe(english)}(?![\\w])`).test(line)))
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .slice(0, 80);
+  let out = terms.length ? `\nUse these Arabic renderings for names and terms, always the same way:\n${terms.map(([en, ar]) => `- ${en} -> ${ar}`).join('\n')}` : '';
+  const { gender, name } = glossary.player || {};
+  const who = name ? ` (${name})` : '';
+  if (gender === 'feminine') out += `\nThe player character is female${who}: when a line speaks to the player ("you"), use feminine Arabic forms (أنتِ، تستطيعين، اذهبي).`;
+  else if (gender === 'masculine') out += `\nThe player character is male${who}: when a line speaks to the player ("you"), use masculine Arabic forms (أنتَ، تستطيع، اذهب).`;
+  else out += '\nThe player character\'s gender isn\'t known: when a line speaks to the player ("you"), use masculine Arabic forms, the usual default, consistently.';
+  return out;
+}
+
 class TranslationLimit extends Error {}
 
 function createTranslationMemory({ db, env = process.env, fetch = globalThis.fetch, now = () => new Date() }) {
@@ -100,9 +144,17 @@ function createTranslationMemory({ db, env = process.env, fetch = globalThis.fet
     return found;
   }
 
-  async function ask(lines, context, note = '') {
-    const system = SYSTEM_PROMPT + (context ? `\nAbout the game: ${context}` : '');
+  async function ask(lines, context, note = '', extra = '') {
+    const system = SYSTEM_PROMPT + (context ? `\nAbout the game: ${context}` : '') + extra;
     const user = (note ? `${note}\n` : '') + JSON.stringify(lines.map(([id, text]) => ({ id, text })));
+    const data = await complete(system, user);
+    if (!data) return {};
+    const items = Array.isArray(data) ? data : data?.translations;
+    return Object.fromEntries((Array.isArray(items) ? items : []).filter((i) => i && 'id' in i).map((i) => [i.id, i.arabic]));
+  }
+
+  /** One request to the translation service: the answer's JSON, or null when it wasn't JSON. */
+  async function complete(system, user) {
     let delay = 1000;
     for (let attempt = 0; ; attempt++) {
       const res = await fetch(`${base}/chat/completions`, {
@@ -113,14 +165,11 @@ function createTranslationMemory({ db, env = process.env, fetch = globalThis.fet
       if (res.ok) {
         const payload = await res.json();
         const text = String(payload?.choices?.[0]?.message?.content || '').replace(/^```(?:json)?\s*|\s*```$/g, '');
-        let data;
         try {
-          data = JSON.parse(text);
+          return JSON.parse(text);
         } catch {
-          return {};
+          return null;
         }
-        const items = Array.isArray(data) ? data : data?.translations;
-        return Object.fromEntries((Array.isArray(items) ? items : []).filter((i) => i && 'id' in i).map((i) => [i.id, i.arabic]));
       }
       if (![408, 409, 425, 429, 500, 502, 503, 504].includes(res.status) || attempt >= 4) {
         throw new Error(`The translation service answered ${res.status}.`);
@@ -132,15 +181,15 @@ function createTranslationMemory({ db, env = process.env, fetch = globalThis.fet
   }
 
   // One batch: asked together, then any line that broke a tag once more on its own.
-  async function batch(lines, context) {
-    const answers = await ask(lines, context);
+  async function batch(lines, context, extra = '') {
+    const answers = await ask(lines, context, '', extra);
     const good = {};
     const failed = {};
     for (const [id, english] of lines) {
       let arabic = answers[id];
       let problem = problemWith(english, arabic);
       if (problem) {
-        arabic = (await ask([[id, english]], context, `Your last translation of this line was unusable because ${problem}. Keep every tag and placeholder exactly.`))[id];
+        arabic = (await ask([[id, english]], context, `Your last translation of this line was unusable because ${problem}. Keep every tag and placeholder exactly.`, extra))[id];
         problem = problemWith(english, arabic);
       }
       if (problem) failed[id] = problem;
@@ -199,7 +248,9 @@ function createTranslationMemory({ db, env = process.env, fetch = globalThis.fet
       const worker = async () => {
         while (next < batches.length) {
           const lines = batches[next++].map((t, i) => [i, t.english, t.hash]);
-          const { good, failed: bad } = await batch(lines.map(([i, english]) => [i, english]), String(context).slice(0, 300));
+          const known = glossary(game);
+          const { good, failed: bad } = await batch(lines.map(([i, english]) => [i, english]), String(context).slice(0, 300),
+            known ? glossaryPrompt(known, lines.map(([, english]) => english)) : '');
           const chars = lines.reduce((sum, [, english]) => sum + english.length, 0);
           addUsage.run(user.id, day, lines.length, chars);
           for (const [i, , hash] of lines) {
@@ -234,11 +285,58 @@ function createTranslationMemory({ db, env = process.env, fetch = globalThis.fet
     saveReviewed.run(game, sha256(english), arabic);
   }
 
+  // ---- The game's glossary ----------------------------------------------------------
+
+  const getGlossary = db.prepare('SELECT * FROM game_glossaries WHERE game = ?');
+  const saveGlossary = db.prepare(`INSERT INTO game_glossaries (game, terms, player, locked, updated_at) VALUES (?, ?, ?, ?, datetime('now'))
+    ON CONFLICT (game) DO UPDATE SET terms = excluded.terms, player = excluded.player, locked = excluded.locked, updated_at = excluded.updated_at`);
+
+  /** A game's glossary: { terms, player: { gender, name, checked }, locked, updatedAt }, or null. */
+  function glossary(game) {
+    checkGame(game);
+    const row = getGlossary.get(game);
+    return row ? { terms: JSON.parse(row.terms), player: JSON.parse(row.player), locked: Boolean(row.locked), updatedAt: row.updated_at } : null;
+  }
+
+  /**
+   * Before a game's lines are translated: makes its glossary, or adds the new
+   * candidate terms to it, in one request (counted like that many lines, for
+   * `user`). Terms already there, and an admin's edits, are never changed.
+   * Returns the glossary.
+   */
+  async function ensureGlossary(user, game, { terms = [], samples = [], context = '' } = {}) {
+    checkGame(game);
+    if (!apiKey) throw new TranslationLimit('Shared translation isn\'t set up on this server.');
+    const current = glossary(game) || { terms: {}, player: { gender: 'unknown', name: '' }, locked: false };
+    const wanted = [...new Set((Array.isArray(terms) ? terms : []).filter((t) => typeof t === 'string' && t.trim() && t.length <= 80).map((t) => t.trim()))]
+      .filter((t) => !(t in current.terms)).slice(0, MAX_GLOSSARY_TERMS);
+    const lines = (Array.isArray(samples) ? samples : []).filter((l) => typeof l === 'string' && l.trim()).map((l) => l.slice(0, 300)).slice(0, MAX_GLOSSARY_SAMPLES);
+    const askPlayer = !current.player.checked && !current.locked && lines.length > 0;
+    if (!wanted.length && !askPlayer) return current;
+    const day = now().toISOString().slice(0, 10);
+    const cost = wanted.length + lines.length;
+    if ((usageToday.get(user.id, day)?.lines || 0) + cost > dailyLines) return current; // the day's limit: no glossary this time
+    const answer = cleanGlossary(await complete(GLOSSARY_PROMPT, JSON.stringify({ context: String(context).slice(0, 300), terms: wanted, samples: askPlayer ? lines : [] })));
+    const added = Object.fromEntries(Object.entries(answer.terms).filter(([english]) => wanted.includes(english)));
+    const player = askPlayer ? { ...answer.player, checked: true } : current.player;
+    saveGlossary.run(game, JSON.stringify({ ...added, ...current.terms }), JSON.stringify(player), current.locked ? 1 : 0);
+    addUsage.run(user.id, day, cost, JSON.stringify(wanted).length + lines.join('').length);
+    return glossary(game);
+  }
+
+  /** An admin's glossary for a game (replacing it): kept, and only added to by the automatic pass. */
+  function setGlossary(game, data) {
+    checkGame(game);
+    const cleaned = cleanGlossary(data);
+    saveGlossary.run(game, JSON.stringify(cleaned.terms), JSON.stringify({ ...cleaned.player, checked: true }), 1);
+    return glossary(game);
+  }
+
   /** How many lines are stored for a game. */
   const countStmt = db.prepare('SELECT COUNT(*) AS n FROM translation_memory WHERE game = ?');
   const stored = (game) => countStmt.get(game).n;
 
-  return { configured: Boolean(apiKey), lookup, translate, review, stored, model };
+  return { configured: Boolean(apiKey), lookup, translate, review, stored, model, glossary, ensureGlossary, setGlossary };
 }
 
-module.exports = { createTranslationMemory, problemWith, sha256, TranslationLimit, GAME_RE };
+module.exports = { createTranslationMemory, problemWith, sha256, TranslationLimit, GAME_RE, cleanGlossary, glossaryPrompt, GLOSSARY_PROMPT };

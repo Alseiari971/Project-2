@@ -78,6 +78,11 @@ function createArabicOnline({ cloud, cacheDir, publicKeys = [] }) {
       return cloud.json('/api/arabic/requests', { method: 'POST', body: { game: key, name, reason, ...(fingerprint ? { fingerprint } : {}) } });
     },
 
+    /** "Report a translation issue": { english, current, suggestion, note } for a game, to an admin. */
+    async reportFix(key, fix) {
+      return cloud.json('/api/arabic/fixes', { method: 'POST', body: { game: key, ...fix } });
+    },
+
     /**
      * Sends the Arabic this PC made to GameShelf for an admin to approve:
      * { game, name, engine, fontTargets, lines: [English] }. Resolves to { id, total, translated }.

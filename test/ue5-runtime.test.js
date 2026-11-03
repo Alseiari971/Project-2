@@ -343,7 +343,8 @@ test('request, the adapter\'s table from the game\'s own data, lines seen in pla
     // "Translate new lines": the same flow, with what the adapter saw.
     const again = await requests.run(game, { consent: true });
     assert.equal(again.done, true, JSON.stringify(again.error || again));
-    await arabic.prepareLaunch(game);
+    const relaunch = await arabic.prepareLaunch(game);
+    assert.deepEqual([relaunch.mode, relaunch.ok], ['native', true], JSON.stringify(relaunch));
     assert.equal(lookup('The gate opens at dawn'), 'عربي The gate opens at dawn');
     assert.equal(lookup('Two\nlines here'), 'عربي Two\nlines here');
     assert.equal((await arabic.info(game)).runtime.newLines, 0);

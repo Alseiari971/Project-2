@@ -166,6 +166,7 @@ class FakeApi:
 
     def __init__(self):
         self.requests = []
+        self.systems = []           # each request's system prompt
         self.drop_once = set()      # first time: lose this line's placeholders
         self.always_drop = set()    # every time
         self.rate_limit_first = False
@@ -188,6 +189,23 @@ class FakeApi:
                     return
                 gemini = ':generateContent' in self.path
                 user = body['contents'][0]['parts'][0]['text'] if gemini else body['messages'][1]['content']
+                system = body['systemInstruction']['parts'][0]['text'] if gemini else body['messages'][0]['content']
+                with api.lock:
+                    api.systems.append(system)
+                if system.startswith('You prepare a translation glossary'):
+                    # The glossary pass: every term "translated", and the player's gender from the samples.
+                    asked = json.loads(user)
+                    feminine = any('my lady' in line.lower() for line in asked['samples'])
+                    answer = json.dumps({'terms': {t: 'عربي-' + t for t in asked['terms']},
+                                         'player': {'gender': 'feminine' if feminine else 'unknown', 'name': ''}}, ensure_ascii=False)
+                    payload = {'candidates': [{'content': {'parts': [{'text': answer}]}}]} if gemini else {'choices': [{'message': {'content': answer}}]}
+                    data = json.dumps(payload).encode()
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.send_header('Content-Length', str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return
                 retry = not user.lstrip().startswith('[')
                 items = json.loads(user[user.index('['):])
                 out = []

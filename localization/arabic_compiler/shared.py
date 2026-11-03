@@ -83,6 +83,10 @@ class SharedMemory:
         """Tells the server how many lines the game has (and, from an admin, its font names)."""
         return self._post('/arabic/report', {'game': game, 'total': total, 'engine': engine, 'name': name, 'fontTargets': list(font_targets)})
 
+    def glossary(self, game: str, terms: list, samples: list, context: str = '') -> dict:
+        """The game's glossary on the server ({terms, player}), made (or added to) from these candidates and sample lines."""
+        return self._post('/translations/glossary', {'game': game, 'terms': terms[:300], 'samples': samples[:40], 'context': context[:300]})
+
     def translate(self, game: str, lines: list, context: str = '', log=print):
         """Has the server translate [english] it doesn't have yet. Returns ({english: arabic}, {english: why not}, limited)."""
         done, failed, limited = {}, {}, False

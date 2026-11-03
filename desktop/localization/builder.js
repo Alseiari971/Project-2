@@ -120,19 +120,20 @@ function createPackBuilder({ paths, outDir, keyFile, spawn = defaultSpawn, nodeP
    * Resolves to the final state (packDir set when a pack was made; info: the
    * build's build-info.json).
    */
-  function build(game, { server, auth = {}, set = null, fontTargets = [], version = null, onProgress = () => {} }) {
+  function build(game, { server, auth = {}, set = null, fontTargets = [], version = null, fontStyle = null, onProgress = () => {} }) {
     if (running.has(game.key)) return running.get(game.key).promise;
     if (!canBuild(game.tier, game.engine)) return Promise.reject(new Error('GameShelf can\'t make Arabic for this game on this PC.'));
     if (game.tier === 'recipe' && !game.recipe) return Promise.reject(new Error('This game needs an engine recipe from GameShelf first.'));
     const id = `gameshelf-${game.steamAppId ? `steam-${game.steamAppId}` : game.gameId}-ar`;
     const out = path.join(outDir, id);
-    const args = [paths.script, game.dir, '--id', id, '--version', version || `1.0.${Math.floor(Date.now() / 1000)}`,
+    const args = [paths.script, game.dir, '--id', id, '--version', version || `1.0.${Date.now()}`,
       '--key', keyFile, '--out', out, '--title', String(game.title || '').slice(0, 120) || id,
       ...(game.steamAppId ? ['--steam-app-id', String(game.steamAppId)] : ['--game-id', String(game.gameId)]),
       '--engine', BUILDABLE[game.tier]];
     if (set) args.push('--arabic-by-hash', set, '--no-translate');
     else args.push('--shared', server);
     if (fontTargets.length) args.push('--font-targets', fontTargets.join(','));
+    if (fontStyle) args.push('--font-style', fontStyle);
     if (paths.msgTool && (game.tier === 're-patch' || game.engine === 'reengine')) args.push('--msg-tool', paths.msgTool);
     if (game.tier === 're-patch') args.push('--require-fonts');
     if (game.tier === 'recipe') args.push('--recipe', game.recipe, '--tools-dir', paths.tools);

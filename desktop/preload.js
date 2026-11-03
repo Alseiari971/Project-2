@@ -40,10 +40,14 @@ contextBridge.exposeInMainWorld('gameshelfDesktop', {
   // The "Arabic subtitles" switch next to Play, and the Arabic packs.
   arabicInfo: (key) => ipcRenderer.invoke('arabic:info', key),
   setArabic: (key, on) => ipcRenderer.invoke('arabic:set', key, on),
+  setArabicFont: (key, style) => ipcRenderer.invoke('arabic:font', key, style),
+  arabicLines: (key, query) => ipcRenderer.invoke('arabic:lines', key, query),
+  reportArabicFix: (key, fix) => ipcRenderer.invoke('arabic:report', key, fix),
   arabicOnline: (key) => ipcRenderer.invoke('arabic:online', key),
   getArabic: (key, options) => ipcRenderer.invoke('arabic:get', key, options),
   approveSubmission: (id) => ipcRenderer.invoke('admin:approve', id),
   attachRecipe: (game, text) => ipcRenderer.invoke('admin:attachRecipe', game, text),
+  republishArabic: (game) => ipcRenderer.invoke('admin:republish', game),
   recipeTemplate: (game, family) => ipcRenderer.invoke('admin:recipeTemplate', game, family),
   requestArabic: (key) => ipcRenderer.invoke('arabic:request', key),
   onArabicProgress: (fn) => {
