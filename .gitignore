@@ -15,3 +15,9 @@ build/
 
 # Python and the Arabic pack builder for the Windows app (scripts/bundle-arabic-builder.py)
 build-tools/
+
+# Ad video renders: frames and check stills (re-made by halai-outputs/build/render.js)
+halai-outputs/build/frames/
+halai-outputs/build/still-*.png
+halai-outputs/build/check-*.png
+halai-outputs/build/*-sheet.png
