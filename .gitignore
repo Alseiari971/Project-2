@@ -21,3 +21,9 @@ halai-outputs/ad-source/frames/
 halai-outputs/ad-source/still-*.png
 halai-outputs/ad-source/check-*.png
 halai-outputs/ad-source/*-sheet.png
+halai-outputs/ad2/frames/
+halai-outputs/ad2/still-*.png
+halai-outputs/ad2/check-*.png
+halai-outputs/ad2/*sheet.png
+halai-outputs/ad2/caps.png
+halai-outputs/ad2/sfx.wav

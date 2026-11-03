@@ -1,5 +1,24 @@
 # GameShelf TikTok ad (Arabic, 30 s, 9:16)
 
+## Version 2 (motion graphics)
+
+- `gameshelf-tiktok-ar-v2.mp4`: animated replicas of GameShelf's interface (the Arabic switch clicked, an
+  in-game subtitle turning Arabic, the request and the votes), captions synced to the voice-over, and
+  subtle synthesized sound effects (no music).
+- `gameshelf-tiktok-ar-v2-voice-only.mp4`: the same, voice only.
+- `ad2/ad.html` is the timeline (one `setTime(t)` drives every frame), `ad2/render.js` renders its 900
+  frames, `ad2/sfx.py` makes `sfx.wav`. Cover art in `ad2/covers/` is the games' Steam store art.
+
+```bash
+cd halai-outputs/ad2 && python3 sfx.py && node render.js
+```
+
+```bash
+cd halai-outputs && ffmpeg -y -framerate 30 -i ad2/frames/f%04d.jpg -i voice.mp3 -i ad2/sfx.wav -filter_complex "[1:a]aresample=48000,aformat=channel_layouts=stereo,loudnorm=I=-14:TP=-1.5:LRA=11,apad[v];[2:a]volume=0.55[s];[v][s]amix=inputs=2:duration=longest:normalize=0,alimiter=limit=0.89[a]" -map 0:v -map "[a]" -t 30 -c:v libx264 -preset slow -crf 18 -pix_fmt yuv420p -c:a aac -b:a 192k -ar 48000 -movflags +faststart gameshelf-tiktok-ar-v2.mp4
+```
+
+## Version 1 (screenshots)
+
 - `gameshelf-tiktok-ar.mp4`: the finished ad, 1080×1920, 30 fps, male Gulf-dialect voice-over, no music.
 - `voice.mp3`: the voice-over (Halai, ElevenLabs v4, voice Liam, Arabic, energetic).
 - `ad-source/ad.html`: the timeline (scenes, captions, zooms) over real GameShelf screenshots; `ad-source/render.js` renders its 900 frames with Playwright.

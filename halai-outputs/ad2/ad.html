@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="ar" dir="rtl"><head><meta charset="utf-8">
+<title>GameShelf ad</title>
+<style>
+@font-face { font-family: Alexandria; src: url(alexandria-arabic.woff2); font-weight: 100 900; }
+@font-face { font-family: Manrope; src: url(manrope.woff2); font-weight: 200 800; }
+:root { --bg: #0b0c0e; --card: #15171c; --card2: #1c1f26; --line: rgba(255,255,255,.1); --neon: #e7ff0c; --glow: rgba(231,255,12,.4); --text: #f2f3f5; --muted: #9aa0ab; --red: #ff4d5e; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--bg); color: var(--text); font-family: Alexandria, Manrope, sans-serif; }
+#stage { position: fixed; left: 0; top: 0; width: 1080px; height: 1920px; overflow: hidden; contain: paint; }
+.abs { position: absolute; }
+.latin { font-family: Manrope, Alexandria, sans-serif; direction: ltr; unicode-bidi: isolate; }
+em { font-style: normal; color: var(--neon); }
+.c { left: 0; right: 0; text-align: center; }
+
+/* background */
+#grid { position: absolute; left: -540px; right: -540px; top: 700px; height: 2400px; background-image: linear-gradient(rgba(255,255,255,.05) 2px, transparent 2px), linear-gradient(90deg, rgba(255,255,255,.05) 2px, transparent 2px); background-size: 80px 80px; transform-origin: 50% 0; }
+#glowA, #glowB { position: absolute; width: 1100px; height: 1100px; border-radius: 50%; filter: blur(60px); }
+#glowA { background: radial-gradient(circle, rgba(231,255,12,.20), transparent 65%); }
+#glowB { background: radial-gradient(circle, rgba(124,92,255,.22), transparent 65%); }
+#bar { position: absolute; top: 0; right: 0; height: 10px; background: var(--neon); box-shadow: 0 0 24px var(--neon); z-index: 50; }
+#brand { position: absolute; top: 176px; left: 48px; display: flex; align-items: center; gap: 14px; padding: 12px 26px 12px 14px; border-radius: 999px; background: rgba(255,255,255,.07); border: 2px solid var(--line); z-index: 40; direction: ltr; }
+.dot { width: 48px; height: 48px; border-radius: 50%; background: var(--neon); color: #0b0c0e; font-weight: 800; font-size: 30px; display: grid; place-items: center; }
+#brand b { font-family: Manrope; font-weight: 800; font-size: 34px; }
+#brand b i { font-style: normal; color: var(--neon); }
+#chip { position: absolute; top: 180px; right: 48px; padding: 14px 30px; border-radius: 999px; background: var(--neon); color: #0b0c0e; font-weight: 800; font-size: 36px; z-index: 40; white-space: nowrap; box-shadow: 0 0 40px var(--glow); }
+
+/* captions */
+#cap { position: absolute; top: 1330px; left: 70px; right: 70px; min-height: 150px; padding: 26px 34px; border-radius: 34px; background: rgba(12,13,17,.9); border: 3px solid rgba(231,255,12,.35); box-shadow: 0 24px 60px rgba(0,0,0,.6); font-weight: 700; font-size: 50px; line-height: 1.4; text-align: center; z-index: 45; display: flex; align-items: center; justify-content: center; }
+
+.scene { position: absolute; inset: 0; }
+.big { font-weight: 800; font-size: 124px; line-height: 1.2; }
+.cover { position: absolute; border-radius: 22px; overflow: hidden; box-shadow: 0 22px 50px rgba(0,0,0,.6); border: 2px solid rgba(255,255,255,.12); background: #222 center/cover; }
+.card { position: absolute; background: var(--card); border: 2px solid var(--line); border-radius: 40px; box-shadow: 0 40px 100px rgba(0,0,0,.7); overflow: hidden; }
+.pill { display: inline-flex; align-items: center; gap: 12px; padding: 14px 28px; border-radius: 999px; font-weight: 700; }
+svg { display: block; }
+
+/* S0 */
+#s0frame { left: 80px; top: 600px; width: 920px; height: 560px; background: #000 url(covers/hero-814380.jpg) center/cover; }
+#s0frame::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,.05) 30%, rgba(0,0,0,.8)); }
+#s0sub { position: absolute; left: 40px; right: 40px; bottom: 40px; z-index: 2; padding: 22px 26px; border-radius: 18px; background: rgba(0,0,0,.72); font-family: Manrope; font-weight: 600; font-size: 36px; text-align: center; direction: ltr; }
+#s0no { position: absolute; top: 30px; right: 30px; z-index: 3; background: var(--red); color: #fff; font-size: 34px; }
+
+/* S1 */
+#s1logo { top: 760px; font-family: Manrope; font-weight: 800; font-size: 200px; letter-spacing: -5px; direction: ltr; }
+#s1logo i { font-style: normal; color: var(--neon); }
+#s1ring { left: 540px; top: 880px; width: 200px; height: 200px; margin: -100px 0 0 -100px; border-radius: 50%; border: 8px solid var(--neon); }
+
+/* S2 */
+.store { position: absolute; top: 340px; height: 84px; padding: 0 34px; border-radius: 999px; background: var(--card2); border: 2px solid var(--line); font-family: Manrope; font-weight: 800; font-size: 36px; display: flex; align-items: center; gap: 14px; }
+.store s { width: 22px; height: 22px; border-radius: 50%; text-decoration: none; display: block; }
+.tile { width: 200px; height: 300px; }
+.tile .ar { position: absolute; bottom: 12px; right: 12px; padding: 6px 14px; border-radius: 999px; background: rgba(0,0,0,.8); border: 2px solid var(--neon); color: var(--neon); font-weight: 800; font-size: 24px; }
+#price { left: 90px; top: 790px; width: 900px; height: 330px; padding: 30px 40px; }
+.prow { display: flex; justify-content: space-between; align-items: center; height: 82px; padding: 0 26px; border-radius: 20px; font-family: Manrope; font-weight: 700; font-size: 38px; }
+.prow + .prow { margin-top: 12px; }
+.prow.best { background: var(--neon); color: #0b0c0e; }
+.prow span:last-child { font-family: Alexandria, Manrope; font-weight: 700; font-size: 32px; }
+.status { position: absolute; top: 1150px; padding: 16px 30px; border-radius: 999px; background: var(--card2); border: 2px solid rgba(231,255,12,.5); font-weight: 700; font-size: 34px; white-space: nowrap; }
+
+/* S3 */
+#s3wow { top: 760px; font-weight: 800; font-size: 150px; color: var(--neon); text-shadow: 0 0 60px var(--glow); }
+#rays { left: 540px; top: 860px; width: 1600px; height: 1600px; margin: -800px 0 0 -800px; background: repeating-conic-gradient(from 0deg, rgba(231,255,12,.10) 0deg 8deg, transparent 8deg 24deg); border-radius: 50%; -webkit-mask: radial-gradient(circle, #000 20%, transparent 65%); }
+#win { left: 60px; top: 320px; width: 960px; height: 600px; }
+#win .bar { height: 64px; display: flex; align-items: center; gap: 12px; padding: 0 24px; background: #101216; direction: ltr; }
+#win .bar i { width: 18px; height: 18px; border-radius: 50%; background: #3a3e47; display: block; }
+#win .bar b { margin-left: auto; font-family: Manrope; font-weight: 800; font-size: 26px; }
+#win .bar b em { color: var(--neon); }
+#win .hero { height: 300px; background: url(covers/hero-814380.jpg) center 30%/cover; position: relative; }
+#win .hero::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, transparent 30%, var(--card)); }
+#win .title { position: absolute; right: 40px; top: 250px; z-index: 2; font-family: Manrope; font-weight: 800; font-size: 54px; direction: ltr; }
+#win .acts { position: absolute; right: 40px; top: 420px; display: flex; gap: 20px; align-items: center; }
+#play { height: 104px; padding: 0 44px; border-radius: 999px; background: var(--neon); color: #0b0c0e; font-weight: 800; font-size: 42px; display: flex; align-items: center; gap: 16px; box-shadow: 0 0 40px var(--glow); }
+#play small { font-family: Manrope; font-size: 26px; font-weight: 700; opacity: .7; }
+#tog { height: 104px; padding: 0 30px 0 16px; border-radius: 999px; background: #20232b; border: 3px solid rgba(255,255,255,.14); display: flex; align-items: center; gap: 18px; }
+#tog .ain { width: 72px; height: 72px; border-radius: 50%; background: #2f343e; color: #fff; font-weight: 800; font-size: 40px; display: grid; place-items: center; }
+#tog .lab { display: flex; flex-direction: column; line-height: 1.25; }
+#tog .lab b { font-size: 32px; }
+#tog .lab span { font-size: 24px; color: var(--muted); }
+#tog .sw { width: 92px; height: 50px; border-radius: 999px; background: #3b404b; position: relative; }
+#tog .sw i { position: absolute; top: 7px; width: 36px; height: 36px; border-radius: 50%; background: #fff; display: block; }
+#view { left: 60px; top: 960px; width: 960px; height: 330px; background: #000 url(covers/hero-1245620.jpg) center/cover; }
+#view::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,0) 20%, rgba(0,0,0,.75)); }
+#vlabel { position: absolute; top: 22px; right: 24px; z-index: 3; padding: 8px 20px; border-radius: 999px; background: rgba(0,0,0,.7); font-weight: 700; font-size: 26px; color: var(--muted); }
+.vsub { position: absolute; left: 40px; right: 40px; bottom: 30px; z-index: 2; padding: 18px 24px; border-radius: 16px; background: rgba(0,0,0,.72); font-weight: 700; font-size: 38px; text-align: center; }
+#vsubEn { font-family: Manrope; direction: ltr; font-weight: 600; }
+#vsubAr { color: #fff; border-top: 4px solid var(--neon); }
+#cursor { position: absolute; left: 0; top: 0; width: 70px; height: 70px; z-index: 60; filter: drop-shadow(0 6px 10px rgba(0,0,0,.6)); }
+.ripple { position: absolute; width: 160px; height: 160px; margin: -80px 0 0 -80px; border-radius: 50%; border: 6px solid var(--neon); z-index: 59; opacity: 0; }
+
+/* S4 */
+#req { left: 80px; top: 360px; width: 920px; height: 560px; }
+#req .cover { left: 40px; top: 40px; width: 320px; height: 480px; }
+#req .info { position: absolute; right: 44px; top: 70px; width: 470px; display: flex; flex-direction: column; gap: 26px; }
+#req h3 { font-family: Manrope; font-weight: 800; font-size: 72px; direction: ltr; text-align: right; }
+#reqtag { align-self: flex-start; font-size: 32px; background: rgba(255,77,94,.15); color: #ff8a95; border: 2px solid rgba(255,77,94,.5); }
+#reqbtn { align-self: flex-start; font-size: 36px; background: var(--card2); border: 3px solid rgba(255,255,255,.16); padding: 18px 30px 18px 18px; }
+#reqbtn .ain { width: 58px; height: 58px; border-radius: 50%; background: var(--neon); color: #0b0c0e; display: grid; place-items: center; font-size: 32px; font-weight: 800; }
+#prog { left: 80px; top: 960px; width: 920px; height: 240px; padding: 36px 44px; }
+#prog .track { height: 28px; border-radius: 999px; background: #262a33; overflow: hidden; margin-top: 26px; }
+#prog .fill { height: 100%; width: 0; background: var(--neon); box-shadow: 0 0 20px var(--glow); border-radius: 999px; }
+#prog .step { font-weight: 700; font-size: 38px; display: flex; justify-content: space-between; }
+#prog .step span:last-child { font-family: Manrope; color: var(--neon); direction: ltr; }
+
+/* S5 */
+#s5title { top: 330px; font-weight: 800; font-size: 84px; }
+.row { position: absolute; left: 80px; width: 920px; height: 200px; border-radius: 34px; background: var(--card); border: 2px solid var(--line); display: flex; align-items: center; gap: 26px; padding: 0 30px; box-shadow: 0 20px 50px rgba(0,0,0,.5); }
+.row .rank { width: 60px; font-family: Manrope; font-weight: 800; font-size: 60px; color: var(--muted); text-align: center; }
+.row .thumb { width: 104px; height: 150px; border-radius: 16px; background: center/cover; flex: none; }
+.row .nm { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+.row .nm b { font-family: Manrope; font-weight: 800; font-size: 44px; direction: ltr; text-align: right; }
+.row .nm span { font-size: 32px; color: var(--muted); }
+.row .vote { padding: 18px 28px; border-radius: 999px; background: var(--card2); border: 2px solid rgba(255,255,255,.16); font-weight: 800; font-size: 32px; white-space: nowrap; }
+.row.top { border-color: var(--neon); box-shadow: 0 0 50px rgba(231,255,12,.25); }
+.row.top .rank { color: var(--neon); }
+.plus { position: absolute; font-family: Manrope; font-weight: 800; font-size: 56px; color: var(--neon); text-shadow: 0 0 20px var(--glow); z-index: 30; }
+
+/* S6 */
+#s6bg { position: absolute; inset: 0; background: var(--neon); }
+#s6logo { top: 640px; display: flex; justify-content: center; align-items: center; gap: 30px; direction: ltr; }
+#s6logo .mark { width: 170px; height: 170px; border-radius: 46px; background: #0b0c0e; color: var(--neon); font-weight: 800; font-size: 110px; display: grid; place-items: center; }
+#s6logo b { font-family: Manrope; font-weight: 800; font-size: 150px; color: #0b0c0e; letter-spacing: -4px; }
+#s6slogan { top: 880px; font-weight: 800; font-size: 104px; color: #0b0c0e; }
+#s6cta { top: 1090px; left: 50%; padding: 36px 70px; border-radius: 999px; background: #0b0c0e; color: #fff; font-weight: 800; font-size: 64px; white-space: nowrap; display: flex; align-items: center; gap: 22px; box-shadow: 0 30px 80px rgba(0,0,0,.35); }
+#s6plat { top: 1290px; display: flex; justify-content: center; gap: 20px; }
+#s6plat span { padding: 14px 34px; border-radius: 999px; border: 3px solid #0b0c0e; color: #0b0c0e; font-weight: 800; font-size: 38px; }
+</style></head><body>
+<div id="stage">
+<div id="glowA"></div><div id="glowB"></div><div id="grid"></div>
+<div id="bar"></div>
+<div id="brand"><div class="dot">ع</div><b>Game<i>Shelf</i></b></div>
+<div id="chip"></div>
+
+<!-- S0: the problem -->
+<div class="scene" id="S0">
+  <div class="cover" id="c0" style="background-image:url(covers/1245620.jpg); width:230px; height:345px;"></div>
+  <div class="cover" id="c1" style="background-image:url(covers/1086940.jpg); width:230px; height:345px;"></div>
+  <div class="cover" id="c2" style="background-image:url(covers/292030.jpg); width:230px; height:345px;"></div>
+  <div class="cover" id="c3" style="background-image:url(covers/367520.jpg); width:230px; height:345px;"></div>
+  <div class="cover" id="c4" style="background-image:url(covers/1145360.jpg); width:230px; height:345px;"></div>
+  <div class="cover" id="c5" style="background-image:url(covers/632470.jpg); width:230px; height:345px;"></div>
+  <div class="abs c big" id="s0t1" style="top:360px">تحب <em>الألعاب</em>؟</div>
+  <div class="abs c big" id="s0t2" style="top:330px; font-size:104px">بس نص ألعابك<br><span style="color:var(--red)">ما فيها عربي</span>؟</div>
+  <div class="card" id="s0frame"><div class="pill abs" id="s0no">
+    <svg width="34" height="34" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="#fff" stroke-width="3.4" stroke-linecap="round"/></svg>العربية غير متوفرة</div>
+    <div id="s0sub">"The bridge is out. We'll have to find another way."</div></div>
+</div>
+
+<!-- S1: brand -->
+<div class="scene" id="S1">
+  <div class="abs" id="s1ring"></div>
+  <div class="abs c" id="s1pre" style="top:640px; font-weight:700; font-size:70px; color:var(--muted)">تعرّف على</div>
+  <div class="abs c" id="s1logo">Game<i>Shelf</i></div>
+</div>
+
+<!-- S2: one library -->
+<div class="scene" id="S2">
+  <div class="store" id="st0" style="right:110px"><s style="background:#66c0f4"></s>Steam</div>
+  <div class="store" id="st1" style="right:390px"><s style="background:#fff"></s>Epic Games</div>
+  <div class="store" id="st2" style="right:730px"><s style="background:#b85cff"></s>GOG</div>
+  <div class="cover tile" id="t0" style="background-image:url(covers/1245620.jpg)"><span class="ar">عربي ✓</span></div>
+  <div class="cover tile" id="t1" style="background-image:url(covers/1086940.jpg)"></div>
+  <div class="cover tile" id="t2" style="background-image:url(covers/814380.jpg)"><span class="ar">عربي ✓</span></div>
+  <div class="cover tile" id="t3" style="background-image:url(covers/292030.jpg)"></div>
+  <div class="cover tile" id="t4" style="background-image:url(covers/367520.jpg)"></div>
+  <div class="cover tile" id="t5" style="background-image:url(covers/1145360.jpg)"><span class="ar">عربي ✓</span></div>
+  <div class="cover tile" id="t6" style="background-image:url(covers/413150.jpg)"></div>
+  <div class="cover tile" id="t7" style="background-image:url(covers/632470.jpg)"></div>
+  <div class="card" id="price">
+    <div class="prow"><span>Steam</span><span>$59.99</span></div>
+    <div class="prow best"><span>GOG</span><span>$41.99 · أفضل سعر</span></div>
+    <div class="prow"><span>Epic Games</span><span>$49.99</span></div>
+  </div>
+  <div class="status" id="ss0" style="right:110px">ألعبها الآن · ١٤٢ ساعة</div>
+  <div class="status" id="ss1" style="right:560px">أنهيتها ✓</div>
+</div>
+
+<!-- S3: the Arabic switch -->
+<div class="scene" id="S3">
+  <div class="abs" id="rays"></div>
+  <div class="abs c" id="s3wow">وهنا المفاجأة!</div>
+  <div class="card" id="win">
+    <div class="bar"><i></i><i></i><i></i><b>Game<em>Shelf</em></b></div>
+    <div class="hero"></div>
+    <div class="title">Sekiro: Shadows Die Twice</div>
+    <div class="acts">
+      <div id="play"><svg width="34" height="34" viewBox="0 0 24 24"><path d="M7 4l13 8-13 8z" fill="#0b0c0e"/></svg>تشغيل <small>Steam</small></div>
+      <div id="tog"><div class="ain">ع</div><div class="lab"><b>ترجمة عربية</b><span id="togsub">متوقفة</span></div><div class="sw"><i id="knob"></i></div></div>
+    </div>
+  </div>
+  <div class="card" id="view"><div id="vlabel">داخل اللعبة</div>
+    <div class="vsub" id="vsubEn">"The bridge is out. We'll have to find another way."</div>
+    <div class="vsub" id="vsubAr">«الجسر مدمّر. علينا أن نجد طريقًا آخر.»</div></div>
+</div>
+
+<!-- S4: request -->
+<div class="scene" id="S4">
+  <div class="card" id="req">
+    <div class="cover" style="background-image:url(covers/1145360.jpg)"></div>
+    <div class="info">
+      <h3>Hades</h3>
+      <div class="pill" id="reqtag">بدون ترجمة عربية</div>
+      <div class="pill" id="reqbtn"><span class="ain">ع</span><span id="reqbtntext">اطلب ترجمة عربية</span></div>
+    </div>
+  </div>
+  <div class="card" id="prog">
+    <div class="step"><span id="stepname">نقرأ نصوص اللعبة…</span><span id="steppct">0%</span></div>
+    <div class="track"><div class="fill" id="fill"></div></div>
+  </div>
+</div>
+
+<!-- S5: vote -->
+<div class="scene" id="S5">
+  <div class="abs c" id="s5title">الألعاب <em>الأكثر طلبًا</em></div>
+  <div class="row top" id="r0"><div class="rank">1</div><div class="thumb" style="background-image:url(covers/1086940.jpg)"></div><div class="nm"><b>Baldur's Gate 3</b><span><b class="latin" id="v0" style="font-size:32px;font-weight:700">412</b> صوت</span></div><div class="vote">أيّد (+1)</div></div>
+  <div class="row" id="r1"><div class="rank" id="rk1">2</div><div class="thumb" style="background-image:url(covers/1145360.jpg)"></div><div class="nm"><b>Hades</b><span><b class="latin" id="v1" style="font-size:32px;font-weight:700">287</b> صوت</span></div><div class="vote" id="vb1">أيّد (+1)</div></div>
+  <div class="row" id="r2"><div class="rank">3</div><div class="thumb" style="background-image:url(covers/367520.jpg)"></div><div class="nm"><b>Hollow Knight</b><span><b class="latin" style="font-size:32px;font-weight:700">254</b> صوت</span></div><div class="vote">أيّد (+1)</div></div>
+  <div class="plus" id="p0">+1</div><div class="plus" id="p1">+1</div><div class="plus" id="p2">+1</div>
+</div>
+
+<!-- S6: finale -->
+<div class="scene" id="S6">
+  <div id="s6bg"></div>
+  <div class="abs c" id="s6logo"><div class="mark">ع</div><b>GameShelf</b></div>
+  <div class="abs c" id="s6slogan">ألعابك، بلغتك.</div>
+  <div class="abs" id="s6cta"><svg width="56" height="56" viewBox="0 0 24 24"><path d="M12 3v12m0 0l-5-5m5 5l5-5M5 21h14" stroke="#e7ff0c" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>حمّله الآن مجانًا</div>
+  <div class="abs" id="s6plat" style="left:0;right:0"><span>الويب</span><span class="latin" style="font-family:Manrope">Windows</span></div>
+</div>
+
+<div id="cap"></div>
+<svg id="cursor" viewBox="0 0 32 32"><path d="M6 3l20 12-9 2-4 9z" fill="#fff" stroke="#0b0c0e" stroke-width="2" stroke-linejoin="round"/></svg>
+<div class="ripple" id="rip"></div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const cl = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
+const p = (t, a, d) => cl((t - a) / d);
+const out = (x) => 1 - Math.pow(1 - cl(x), 3);
+const inout = (x) => { x = cl(x); return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; };
+const back = (x) => { x = cl(x); const c1 = 1.9, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); };
+const lerp = (a, b, k) => a + (b - a) * k;
+function put(el, o = 1, x = 0, y = 0, s = 1, r = 0, extra = '') {
+  if (typeof el === 'string') el = $(el);
+  el.style.opacity = o;
+  el.style.transform = `${extra}translate(${x}px, ${y}px) scale(${s}) rotate(${r}deg)`;
+}
+// A scene's opacity: in over 0.3 s from a, out over 0.25 s before b.
+const vis = (t, a, b) => Math.min(out(p(t, a, 0.3)), 1 - p(t, b - 0.25, 0.25));
+
+const CAPS = [
+  [0, 0.98, 'تحب <em>الألعاب</em>؟'],
+  [1.2, 3.5, 'بس زهقت إن نص ألعابك <em>ما فيها عربي</em>؟'],
+  [3.83, 5.3, 'تعرّف على <em class="latin">GameShelf</em>!'],
+  [5.5, 7.15, 'كل ألعابك في <em>مكان واحد</em>'],
+  [7.35, 10.3, 'اكتشف، <em>قارن الأسعار</em>، وتابع مكتبتك'],
+  [10.5, 11.5, 'وهنا <em>المفاجأة</em>'],
+  [11.72, 15.5, 'في تطبيق ويندوز، ضغطة وحدة… <em>واللعبة تصير بالعربي!</em>'],
+  [15.76, 17.05, 'لعبتك <em>ما فيها عربي</em>؟'],
+  [17.27, 19.95, '<em>اطلبها بضغطة</em>، و <span class="latin">GameShelf</span> يجهّزها لك'],
+  [20.12, 22.3, 'وصوّت للألعاب اللي <em>تبيها بالعربي!</em>'],
+];
+const CHIPS = [[5.5, 10.4, '١ · مكتبة واحدة'], [11.72, 15.55, '٢ · ترجمة بضغطة'], [15.76, 19.95, '٣ · اطلب لعبتك'], [20.12, 22.35, '٤ · صوّت']];
+let lastCap = -1, lastChip = -1;
+
+// Tile grid: 4 x 2 of 200 x 300, centred, from y 450.
+const tilePos = (i) => ({ x: 1080 - 110 - (i % 4) * 220 - 200, y: 450 + Math.floor(i / 4) * 320 });
+// Hook covers, floating round the title.
+const COVERS = [[60, 760, -12], [790, 700, 10], [420, 860, 4], [120, 1080, 8], [740, 1050, -7], [430, 1150, -3]];
+
+window.setTime = (t) => {
+  // Background, bar, brand
+  $('grid').style.transform = `perspective(900px) rotateX(58deg) translateY(${(t * 60) % 80}px)`;
+  put('glowA', 1, 200 + Math.sin(t * 0.7) * 160, 200 + Math.cos(t * 0.5) * 120);
+  put('glowB', 1, -300 + Math.cos(t * 0.6) * 140, 1000 + Math.sin(t * 0.8) * 150);
+  $('bar').style.width = `${cl(t / 30) * 100}%`;
+  put('brand', t < 22.45 ? out(p(t, 0.2, 0.5)) : 0);
+
+  // Captions and chapter chips
+  const ci = CAPS.findIndex(([a, b]) => t >= a - 0.05 && t < b);
+  const cap = $('cap');
+  if (ci !== lastCap) { cap.innerHTML = ci >= 0 ? `<span>${CAPS[ci][2]}</span>` : ''; lastCap = ci; }
+  if (ci >= 0) { const k = out(p(t, CAPS[ci][0] - 0.05, 0.22)); put(cap, k, 0, (1 - k) * 30, 0.96 + 0.04 * k); } else put(cap, 0);
+  const hi = CHIPS.findIndex(([a, b]) => t >= a && t < b);
+  const chip = $('chip');
+  if (hi !== lastChip) { chip.textContent = hi >= 0 ? CHIPS[hi][2] : ''; lastChip = hi; }
+  if (hi >= 0) { const k = back(p(t, CHIPS[hi][0], 0.4)); put(chip, cl(k), 0, 0, 0.6 + 0.4 * k); } else put(chip, 0);
+
+  // ---- S0 (0–3.65): the problem
+  $('S0').style.opacity = vis(t, -1, 3.7);
+  COVERS.forEach(([x, y, r], i) => {
+    const k = out(p(t, 0.05 + i * 0.07, 0.6));
+    const away = inout(p(t, 1.1, 0.5));
+    const el = $('c' + i);
+    el.style.left = x + 'px'; el.style.top = y + 'px';
+    put(el, k * (1 - away * 0.85), (i % 2 ? 300 : -300) * (1 - k), Math.sin(t * 2 + i) * 10 + away * 120, 0.9 + 0.1 * k, r + Math.sin(t * 1.5 + i) * 2);
+  });
+  const t1 = back(p(t, 0.0, 0.45));
+  put('s0t1', cl(t1) * (1 - p(t, 1.05, 0.2)), 0, 0, 0.5 + 0.5 * t1);
+  const t2 = out(p(t, 1.2, 0.35));
+  put('s0t2', t2, 0, (1 - t2) * 40);
+  const f = out(p(t, 1.3, 0.45));
+  put('s0frame', f, 0, (1 - f) * 120, 0.94 + 0.06 * f);
+  const no = back(p(t, 1.95, 0.35));
+  put('s0no', cl(no), Math.sin(p(t, 2.25, 0.4) * Math.PI * 6) * 14 * (1 - p(t, 2.25, 0.4)), 0, 0.4 + 0.6 * no);
+
+  // ---- S1 (3.83–5.45): brand
+  $('S1').style.opacity = vis(t, 3.8, 5.45);
+  const pre = out(p(t, 3.83, 0.3));
+  put('s1pre', pre, 0, (1 - pre) * 30);
+  const lg = back(p(t, 4.05, 0.5));
+  put('s1logo', cl(lg * 1.4), 0, 0, 1.7 - 0.7 * lg);
+  const rg = p(t, 4.1, 0.9);
+  put('s1ring', (1 - rg) * 0.9, 0, 0, 0.5 + rg * 7);
+
+  // ---- S2 (5.5–10.45): one library
+  $('S2').style.opacity = vis(t, 5.45, 10.45);
+  [0, 1, 2].forEach((i) => { const k = back(p(t, 5.55 + i * 0.15, 0.4)); put('st' + i, cl(k), 0, (1 - k) * -60, 0.7 + 0.3 * k); });
+  for (let i = 0; i < 8; i++) {
+    const el = $('t' + i), { x, y } = tilePos(i);
+    el.style.left = x + 'px'; el.style.top = y + 'px';
+    const k = back(p(t, 5.85 + i * 0.09, 0.45));
+    const sweep = Math.max(0, 1 - Math.abs((t - 7.35) * 4 - i * 0.6));  // "اكتشف": a highlight runs across the tiles
+    put(el, cl(k), 0, (1 - k) * 50, 0.7 + 0.3 * k + sweep * 0.06);
+    el.style.borderColor = sweep > 0.05 ? `rgba(231,255,12,${sweep})` : 'rgba(255,255,255,.12)';
+  }
+  const pr = out(p(t, 8.15, 0.45));
+  put('price', pr, 0, (1 - pr) * 260);
+  const best = document.querySelector('#price .best');
+  put(best, 1, 0, 0, 1 + 0.04 * Math.sin(p(t, 8.6, 0.5) * Math.PI));
+  [0, 1].forEach((i) => { const k = back(p(t, 9.2 + i * 0.25, 0.4)); put('ss' + i, cl(k), 0, (1 - k) * 40, 0.6 + 0.4 * k); });
+
+  // ---- S3 (10.5–15.55): the Arabic switch
+  $('S3').style.opacity = vis(t, 10.45, 15.55);
+  const wow = back(p(t, 10.5, 0.45));
+  put('s3wow', cl(wow) * (1 - p(t, 11.45, 0.2)), 0, 0, 0.4 + 0.6 * wow);
+  put('rays', 0.9 * out(p(t, 10.5, 0.4)) * (1 - p(t, 11.45, 0.25)), 0, 0, 1, t * 25);
+  const w = out(p(t, 11.72, 0.45));
+  put('win', w, 0, (1 - w) * 160, 0.95 + 0.05 * w);
+  const v = out(p(t, 11.95, 0.45));
+  put('view', v, 0, (1 - v) * 160);
+  const on = t >= 13.0;
+  const sw = out(p(t, 13.0, 0.25));
+  $('knob').style.left = lerp(7, 49, sw) + 'px';
+  $('knob').style.background = on ? '#0b0c0e' : '#fff';
+  document.querySelector('#tog .sw').style.background = on ? 'var(--neon)' : '#3b404b';
+  document.querySelector('#tog .ain').style.background = on ? 'var(--neon)' : '#2f343e';
+  document.querySelector('#tog .ain').style.color = on ? '#0b0c0e' : '#fff';
+  $('tog').style.borderColor = on ? 'var(--neon)' : 'rgba(255,255,255,.14)';
+  $('tog').style.boxShadow = on ? `0 0 ${30 + 30 * Math.sin(p(t, 13, 0.6) * Math.PI)}px rgba(231,255,12,.5)` : 'none';
+  $('togsub').textContent = on ? 'تعريب مدمج · شغّالة' : 'متوقفة';
+  $('togsub').style.color = on ? 'var(--neon)' : 'var(--muted)';
+  put('tog', 1, 0, 0, 1 + 0.06 * Math.sin(p(t, 13.0, 0.3) * Math.PI));
+  const swap = p(t, 13.7, 0.35);
+  put('vsubEn', 1 - swap, (swap > 0 && swap < 1) ? Math.sin(t * 90) * 10 : 0);
+  put('vsubAr', swap, (swap > 0 && swap < 1) ? Math.sin(t * 90 + 1) * 10 : 0, 0, 0.96 + 0.04 * out(swap));
+
+  // ---- S4 (15.76–19.95): request
+  $('S4').style.opacity = vis(t, 15.7, 20.15);
+  const rq = out(p(t, 15.76, 0.45));
+  put('req', rq, 0, (1 - rq) * 160, 0.95 + 0.05 * rq);
+  const ready = t >= 19.55;
+  $('reqtag').textContent = ready ? 'عربي ✓ جاهزة' : 'بدون ترجمة عربية';
+  $('reqtag').style.background = ready ? 'var(--neon)' : 'rgba(255,77,94,.15)';
+  $('reqtag').style.color = ready ? '#0b0c0e' : '#ff8a95';
+  $('reqtag').style.borderColor = ready ? 'var(--neon)' : 'rgba(255,77,94,.5)';
+  put('reqtag', 1, 0, 0, ready ? 1 + 0.12 * Math.sin(p(t, 19.55, 0.35) * Math.PI) : 1);
+  const pressed = t >= 17.6;
+  $('reqbtntext').textContent = pressed ? (ready ? 'جاهزة للعب' : 'جاري التجهيز…') : 'اطلب ترجمة عربية';
+  $('reqbtn').style.borderColor = pressed ? 'var(--neon)' : 'rgba(255,255,255,.16)';
+  put('reqbtn', 1, 0, 0, 1 - 0.06 * Math.sin(p(t, 17.6, 0.2) * Math.PI));
+  const pg = out(p(t, 17.75, 0.35));
+  put('prog', pg, 0, (1 - pg) * 120);
+  const fill = inout(p(t, 17.85, 1.65));
+  $('fill').style.width = `${fill * 100}%`;
+  $('steppct').textContent = `${Math.round(fill * 100)}%`;
+  $('stepname').textContent = fill < 0.34 ? 'نقرأ نصوص اللعبة…' : fill < 0.7 ? 'نترجمها للعربي…' : fill < 1 ? 'نجهّز الحزمة…' : 'جاهزة! العب بالعربي';
+
+  // ---- S5 (20.12–22.4): vote
+  $('S5').style.opacity = vis(t, 20.05, 22.4);
+  const tt = out(p(t, 20.12, 0.35));
+  put('s5title', tt, 0, (1 - tt) * 40);
+  const climb = inout(p(t, 21.25, 0.45));   // Hades passes Baldur's Gate 3
+  const rowY = [470 + 230 * climb, 700 - 230 * climb, 930];
+  ['r0', 'r1', 'r2'].forEach((id, i) => {
+    const k = out(p(t, 20.2 + i * 0.12, 0.4));
+    $(id).style.top = rowY[i] + 'px';
+    put(id, k, (1 - k) * 200, 0, i === 1 ? 1 + 0.04 * Math.sin(climb * Math.PI) : 1);
+  });
+  const votes = Math.round(287 + 130 * inout(p(t, 20.55, 0.75)));
+  $('v1').textContent = votes;
+  $('r1').classList.toggle('top', climb > 0.5);
+  $('r0').classList.toggle('top', climb <= 0.5);
+  $('rk1').textContent = climb > 0.5 ? '1' : '2';
+  document.querySelector('#r0 .rank').textContent = climb > 0.5 ? '2' : '1';
+  $('vb1').textContent = t > 20.55 ? 'أيّدتها ✓' : 'أيّد (+1)';
+  [0, 1, 2].forEach((i) => {
+    const k = p(t, 20.55 + i * 0.22, 0.6);
+    const el = $('p' + i);
+    el.style.left = (140 + i * 40) + 'px'; el.style.top = (rowY[1] + 40) + 'px';
+    put(el, k > 0 && k < 1 ? 1 - k : 0, 0, -k * 140, 0.8 + 0.4 * k);
+  });
+
+  // ---- S6 (22.5–30): finale
+  const s6 = p(t, 22.45, 0.45);
+  $('S6').style.opacity = t >= 22.45 ? 1 : 0;
+  $('s6bg').style.clipPath = `circle(${out(s6) * 1300}px at 540px 880px)`;
+  const lg6 = back(p(t, 22.55, 0.5));
+  put('s6logo', cl(lg6 * 1.3), 0, Math.sin(t * 2) * 6, 1.5 - 0.5 * lg6);
+  const sl = out(p(t, 23.49, 0.4));
+  put('s6slogan', sl, 0, (1 - sl) * 50);
+  const cta = back(p(t, 25.15, 0.5));
+  put('s6cta', cl(cta), 0, 0, (0.6 + 0.4 * cta) * (1 + 0.035 * Math.sin((t - 25.15) * 6) * p(t, 25.7, 0.3)), 0, 'translateX(-50%) ');
+  const pl = out(p(t, 26.0, 0.4));
+  put('s6plat', pl, 0, (1 - pl) * 30);
+
+  // Cursor and ripple (S3 click at 13.0, S4 click at 17.6)
+  const cur = $('cursor'), rip = $('rip');
+  let cx = 0, cy = 0, co = 0, rx = 0, ry = 0, rk = -1;
+  if (t >= 12.15 && t < 13.6) {
+    const m = inout(p(t, 12.2, 0.75));
+    cx = lerp(980, 395, m); cy = lerp(1300, 780, m); co = out(p(t, 12.15, 0.2)) * (1 - p(t, 13.4, 0.2));
+    rx = 395; ry = 780; rk = p(t, 13.0, 0.45);
+  } else if (t >= 16.9 && t < 18.1) {
+    const m = inout(p(t, 16.95, 0.6));
+    cx = lerp(990, 650, m); cy = lerp(1280, 735, m); co = out(p(t, 16.9, 0.2)) * (1 - p(t, 17.9, 0.2));
+    rx = 650; ry = 735; rk = p(t, 17.6, 0.45);
+  }
+  const press = rk >= 0 && rk < 0.3 ? 0.85 : 1;
+  cur.style.opacity = co;
+  cur.style.transform = `translate(${cx}px, ${cy}px) scale(${press})`;
+  rip.style.left = rx + 'px'; rip.style.top = ry + 'px';
+  put(rip, rk > 0 && rk < 1 ? 1 - rk : 0, 0, 0, 0.3 + rk * 1.4);
+};
+setTime(0);
+</script></body></html>
