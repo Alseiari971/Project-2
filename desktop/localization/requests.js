@@ -16,31 +16,52 @@
 // admin can write the game's engine recipe without owning the game. Once a
 // recipe is signed and attached, the same button makes the Arabic natively.
 //
-// The runtime adapter ('native-runtime', see index.js) is only ever put into a
-// game Steam lists as single-player and nothing else (no online or local
-// multiplayer, no co-op); when that can't be checked, it isn't used. A game
-// with no readable English gets the adapter with an empty table first: it
-// notes the game's text as it's played, and the next press of the button
-// translates what it saw.
+// The runtime adapter ('native-runtime', see index.js) goes into Steam, Epic,
+// GOG and other games alike, once the anti-cheat scan (anticheat.js, which runs
+// before any tier is picked) found nothing in the game's folder; never into a
+// game Steam lists as played only online (no single-player), or as protected by
+// Valve Anti-Cheat. A game with no readable English gets the adapter with an
+// empty table first: it notes the game's text as it's played, and the next
+// press of the button translates what it saw.
+//
+// Unreal games whose .pak/.utoc files are encrypted are read with the game's
+// key only when an admin attached one in a signed key recipe (recipes.js):
+// GameShelf never looks for keys. Without one, the request goes to the admins.
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { gameKey } = require('./online');
+const { aesKeyOf } = require('./recipes');
 
 // Most of a game's lines must have Arabic before its pack goes in.
 const ENOUGH_ARABIC = 0.9;
 const NEEDS_RECIPE = 'This game keeps its text packed in its own files, and GameShelf has no engine recipe for it yet.';
-// Steam features that mean a game is played with others: the runtime adapter never goes into those.
-const PLAYED_WITH_OTHERS = ['Multi-player', 'Online PvP', 'PvP', 'Online Co-op', 'Co-op', 'Shared/Split Screen', 'Cross-Platform Multiplayer'];
+// Steam features of games played online: one with these and no single-player is online-only.
+const ONLINE_FEATURES = ['Multi-player', 'Online PvP', 'Online Co-op', 'Cross-Platform Multiplayer', 'MMO'];
+const VAC = 'Valve Anti-Cheat enabled';
 
-/** Whether a game is played alone, as its Steam store page says: { ok, why }. Fails closed. */
+/**
+ * Whether the runtime adapter may go into a game: { ok, why, checked }. The game's
+ * folder has already been scanned for anti-cheat (no tier is picked otherwise);
+ * Steam's store page, when there is one and it can be had, also rules out games
+ * played only online and games with Valve Anti-Cheat. Epic, GOG and other games
+ * have no store page to ask, so the folder scan is the check.
+ */
 async function playedAlone(online, game) {
-  if (!game.steamAppId) return { ok: false, why: 'The runtime adapter is only for Steam games, whose store page says they\'re played alone.' };
+  if (!game.steamAppId) return { ok: true, why: null, checked: false };
   const features = await online.features?.(game.steamAppId).catch(() => null);
-  if (!features) return { ok: false, why: 'GameShelf couldn\'t check that this game is played alone, so it didn\'t use the runtime adapter.' };
-  if (features.some((f) => PLAYED_WITH_OTHERS.includes(f)) || !features.includes('Single-player')) {
-    return { ok: false, why: 'This game can be played online or with others, so GameShelf won\'t run its adapter in it.' };
+  if (!features) return { ok: true, why: null, checked: false };
+  if (features.includes(VAC)) return { ok: false, why: 'This game uses Valve Anti-Cheat, so GameShelf won\'t run its adapter in it.', checked: true };
+  if (!features.includes('Single-player') && features.some((f) => ONLINE_FEATURES.includes(f))) {
+    return { ok: false, why: 'This game is only played online, so GameShelf won\'t run its adapter in it.', checked: true };
   }
-  return { ok: true, why: null };
+  return { ok: true, why: null, checked: true };
+}
+
+/** An encrypted Unreal game's key, from its admin-signed key recipe, or null (none, or it can't be had now). */
+async function unrealKey(recipes, serverKey) {
+  if (!recipes || !serverKey) return null;
+  const found = await recipes.forGame(serverKey).catch(() => null);
+  return aesKeyOf(found?.recipe);
 }
 
 /**
@@ -105,6 +126,7 @@ function createArabicRequests({ arabic, packBuilder, online, server, recipes = n
       }
       if (!recipe) return askAdmins(NEEDS_RECIPE);
     }
+    const aesKey = before.tier === 'unreal-pak' ? await unrealKey(recipes, serverKey) : null;
     let auth;
     try {
       auth = await online.builderEnv();
@@ -116,7 +138,7 @@ function createArabicRequests({ arabic, packBuilder, online, server, recipes = n
     try {
       const seen = runtime && before.runtime?.newLines > 0 ? before.runtime.dump : null;
       result = await packBuilder.build({
-        ...game, tier: before.tier, engine: before.engine, recipe: recipe?.file, proxy: before.runtime?.proxy, extraLines: seen,
+        ...game, tier: before.tier, engine: before.engine, recipe: recipe?.file, proxy: before.runtime?.proxy, extraLines: seen, aesKey,
       }, { server: server(), auth, onProgress, fontStyle: (await arabic.fontFor?.(game)) || null });
       // What the adapter saw is in this build now; it starts a new list as the game is played again.
       if (seen) await fs.rename(seen, seen.replace(/\.txt$/, '.sent.txt')).catch(() => {});
@@ -160,4 +182,4 @@ function createArabicRequests({ arabic, packBuilder, online, server, recipes = n
   return { run, ask };
 }
 
-module.exports = { createArabicRequests, cantMake, playedAlone, ENOUGH_ARABIC, NEEDS_RECIPE, PLAYED_WITH_OTHERS };
+module.exports = { createArabicRequests, cantMake, playedAlone, unrealKey, ENOUGH_ARABIC, NEEDS_RECIPE, ONLINE_FEATURES, VAC };

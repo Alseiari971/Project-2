@@ -1,79 +1,207 @@
 {
   "format": 1,
-  "about": "Engines beyond Unreal, Unity, RE Engine, Ren'Py and Godot. The desktop app (desktop/localization/engine.js) recognises a game by `detect` (paths in the game's folder, * matches within one name, letter case ignored; `all` must all be there, and one of `any`), and the pack builder (localization/arabic_compiler/recipes.py) reads its text with `parser` (built into GameShelf) or, for packed formats, with a game recipe an admin signed (see README, Engine recipes). `tools` are the only programs a recipe may run: GameShelf finds them in its own tools folder, never at a path a recipe gives.",
+  "about": "Engines beyond Unreal, Unity, RE Engine, Ren'Py and Godot. The desktop app (desktop/localization/engine.js) recognises a game by `detect` (paths in the game's folder, * matches within one name, letter case ignored; `all` must all be there, and one of `any`), and the pack builder (localization/arabic_compiler/recipes.py) reads its text with `parser` (built into GameShelf) or, for packed formats, with a game recipe an admin signed (see README, Engine recipes). `tools` are the only programs a recipe may run: GameShelf finds them in its own tools folder, never at a path a recipe gives. `formats` are message tables GameShelf reads natively for the engine (loose.py); `note` is for admins.",
   "tools": {
-    "quickbms": { "name": "QuickBMS", "exe": ["quickbms.exe", "quickbms_4gb_files.exe"], "home": "https://aluigi.altervista.org/quickbms.htm" },
-    "wolvenkit": { "name": "WolvenKit.CLI", "exe": ["WolvenKit.CLI.exe"], "home": "https://github.com/WolvenKit/WolvenKit" },
-    "repak": { "name": "repak", "exe": ["repak.exe", "repak"], "home": "https://github.com/trumank/repak" }
+    "quickbms": {
+      "name": "QuickBMS",
+      "exe": [
+        "quickbms.exe",
+        "quickbms_4gb_files.exe"
+      ],
+      "home": "https://aluigi.altervista.org/quickbms.htm"
+    },
+    "wolvenkit": {
+      "name": "WolvenKit.CLI",
+      "exe": [
+        "WolvenKit.CLI.exe"
+      ],
+      "home": "https://github.com/WolvenKit/WolvenKit"
+    },
+    "repak": {
+      "name": "repak",
+      "exe": [
+        "repak.exe",
+        "repak"
+      ],
+      "home": "https://github.com/trumank/repak"
+    }
   },
   "recipes": [
     {
       "id": "bethesda-creation",
       "name": "Bethesda Creation Engine (Skyrim, Fallout 4, Starfield)",
-      "detect": { "all": ["Data/*.esm"], "any": ["Data/Strings", "Data/*.bsa", "Data/*.ba2"] },
+      "detect": {
+        "all": [
+          "Data/*.esm"
+        ],
+        "any": [
+          "Data/Strings",
+          "Data/*.bsa",
+          "Data/*.ba2"
+        ]
+      },
       "parser": "bethesda"
+    },
+    {
+      "id": "fromsoftware",
+      "name": "FromSoftware (Dark Souls, Sekiro, Elden Ring, Armored Core VI)",
+      "detect": {
+        "any": [
+          "msg/engus",
+          "*/msg/engus",
+          "msg/engUS"
+        ]
+      },
+      "parser": "fromsoft",
+      "formats": [
+        "fmg"
+      ],
+      "note": "Unpacked msg/engus/*.msgbnd.dcx (UXM or a mod loader): read and written natively (fromsoft.py). DCX_KRAK files use the game's own oo2core DLL. The encrypted .bdt archives are never read."
+    },
+    {
+      "id": "mt-framework",
+      "name": "Capcom MT Framework (Resident Evil 5/6, Revelations, Dragon's Dogma, DMC4, MH: World)",
+      "detect": {
+        "any": [
+          "nativePC/arc",
+          "nativePC",
+          "nativeDX10",
+          "nativeDX11"
+        ]
+      },
+      "parser": "mt",
+      "formats": [
+        "gmd"
+      ],
+      "note": ".arc archives and .gmd tables, read and written natively (mtframework.py). Bitmap fonts (.gfd/.tex) aren't made: an admin can stage replacement font files with a recipe."
     },
     {
       "id": "santa-monica",
       "name": "Santa Monica Studio engine (God of War)",
-      "detect": { "any": ["exec/wad/pc_le", "exec/wad/pc"] },
-      "archives": [".wad"],
+      "detect": {
+        "any": [
+          "exec/wad/pc_le",
+          "exec/wad/pc"
+        ]
+      },
+      "archives": [
+        ".wad"
+      ],
       "needs": "recipe"
     },
     {
       "id": "redengine4",
       "name": "REDengine 4 (Cyberpunk 2077)",
-      "detect": { "any": ["archive/pc/content/*.archive"] },
-      "archives": [".archive"],
+      "detect": {
+        "any": [
+          "archive/pc/content/*.archive"
+        ]
+      },
+      "archives": [
+        ".archive"
+      ],
       "needs": "recipe"
     },
     {
       "id": "redengine3",
       "name": "REDengine 3 (The Witcher 3)",
-      "detect": { "any": ["content/content0/*.bundle"] },
-      "archives": [".bundle"],
+      "detect": {
+        "any": [
+          "content/content0/*.bundle"
+        ]
+      },
+      "archives": [
+        ".bundle"
+      ],
       "needs": "recipe"
     },
     {
       "id": "psarc",
       "name": "PlayStation archives (.psarc) in a PC port",
-      "detect": { "any": ["*.psarc", "*/*.psarc"] },
-      "archives": [".psarc"],
+      "detect": {
+        "any": [
+          "*.psarc",
+          "*/*.psarc"
+        ]
+      },
+      "archives": [
+        ".psarc"
+      ],
       "needs": "recipe"
     },
     {
       "id": "anvil",
-      "name": "Ubisoft Anvil (.forge)",
-      "detect": { "any": ["*.forge"] },
-      "archives": [".forge"],
-      "needs": "recipe"
+      "name": "Ubisoft Anvil / Dunia (.forge, .pck)",
+      "detect": {
+        "any": [
+          "*.forge"
+        ]
+      },
+      "archives": [
+        ".forge",
+        ".pck"
+      ],
+      "needs": "recipe",
+      "note": "No built-in reader: .forge archives are Oodle-compressed. An admin writes a recipe with a QuickBMS script for the game (Oodle from the game's own folder)."
     },
     {
       "id": "frostbite",
       "name": "EA Frostbite (.toc and .cas)",
-      "detect": { "any": ["Data/Win32/*.toc", "Data/*.toc"] },
-      "archives": [".toc", ".cas"],
+      "detect": {
+        "any": [
+          "Data/Win32/*.toc",
+          "Data/*.toc"
+        ]
+      },
+      "archives": [
+        ".toc",
+        ".cas"
+      ],
       "needs": "recipe"
     },
     {
       "id": "rage",
-      "name": "Rockstar RAGE (.rpf)",
-      "detect": { "any": ["*.rpf", "*/*.rpf"] },
-      "archives": [".rpf"],
-      "needs": "recipe"
+      "name": "Rockstar RAGE (.rpf; loose .gxt2 from a mod loader)",
+      "detect": {
+        "any": [
+          "*.rpf",
+          "*/*.rpf"
+        ]
+      },
+      "archives": [
+        ".rpf"
+      ],
+      "needs": "recipe",
+      "formats": [
+        "gxt2"
+      ],
+      "note": ".rpf archives are encrypted and never read. Unpacked .gxt2 string tables (a mod loader's folder) are read and written natively (rage.py)."
     },
     {
       "id": "source",
       "name": "Valve Source (.vpk)",
-      "detect": { "any": ["*/*_dir.vpk"] },
-      "archives": [".vpk"],
+      "detect": {
+        "any": [
+          "*/*_dir.vpk"
+        ]
+      },
+      "archives": [
+        ".vpk"
+      ],
       "needs": "recipe"
     },
     {
       "id": "decima",
       "name": "Decima (Horizon, Death Stranding)",
-      "detect": { "any": ["LocalCacheWinGame/package/*.bin", "LocalCacheDX12/*.bin"] },
-      "archives": [".bin"],
+      "detect": {
+        "any": [
+          "LocalCacheWinGame/package/*.bin",
+          "LocalCacheDX12/*.bin"
+        ]
+      },
+      "archives": [
+        ".bin"
+      ],
       "needs": "recipe"
     }
   ]

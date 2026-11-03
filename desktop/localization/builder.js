@@ -16,6 +16,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawn: defaultSpawn } = require('node:child_process');
+const { AES_KEY } = require('./recipes');
 
 const BUILDABLE = {
   're-patch': 'reengine', 'renpy-tl': 'renpy', 'godot-override': 'godot', 'unity-bepinex': 'unity', 'unreal-pak': 'unreal',
@@ -112,7 +113,8 @@ function createPackBuilder({ paths, outDir, keyFile, spawn = defaultSpawn, nodeP
 
   /**
    * Builds the pack for a game. `game` is { key, dir, tier, steamAppId, gameId,
-   * title, recipe, proxy, extraLines } (`recipe`: the signed engine recipe's file, for tier 'recipe';
+   * title, recipe, proxy, extraLines, aesKey } (`recipe`: the signed engine recipe's file, for tier 'recipe';
+   * `aesKey`: an encrypted Unreal game's key, from its signed key recipe;
    * `proxy`: the library the runtime adapter stands in for, and `extraLines` the strings it saw in the
    * game without Arabic, for tier 'native-runtime'). With `server` and `auth` (the signed-in player's sign-in, see
    * online.js), the Arabic comes from GameShelf's shared translations; with
@@ -153,6 +155,8 @@ function createPackBuilder({ paths, outDir, keyFile, spawn = defaultSpawn, nodeP
         ...(paths.repak ? { GAMESHELF_REPAK: paths.repak } : {}),
         ...(paths.retoc ? { GAMESHELF_RETOC: paths.retoc } : {}),
         ...(paths.unityTools ? { GAMESHELF_UNITY_TOOLS: paths.unityTools } : {}),
+        // An encrypted Unreal game's key, from its admin-signed recipe: in the environment, never on a command line or in a log.
+        GAMESHELF_AES_KEY: game.tier === 'unreal-pak' && AES_KEY.test(game.aesKey || '') ? game.aesKey : '',
         ELECTRON_RUN_AS_NODE: '1',
         PYTHONIOENCODING: 'utf-8',
         PYTHONUTF8: '1',

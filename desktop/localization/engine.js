@@ -46,16 +46,24 @@ const BETHESDA_GAMES = {
 };
 
 // The loose-file scanner's quick look (the pack builder's loose.py looks properly).
-const TEXT_FILE = /\.(json|csv|tsv|xml|po|mo|txt|ini|cfg|lang|loc|yaml|yml|strings)$/i;
+// Readable text files, and the message tables loose.py reads natively: FromSoftware .fmg and .msgbnd(.dcx),
+// Rockstar .gxt2, Capcom MT Framework .gmd and the .arc archives holding them.
+const TEXT_FILE = /\.(json|csv|tsv|xml|po|mo|txt|ini|cfg|lang|loc|yaml|yml|strings|fmg|msgbnd|msgbnd\.dcx|fmg\.dcx|gxt2|gmd|arc)$/i;
 const TEXT_DIRS = new Set(['localization', 'localisation', 'locale', 'locales', 'lang', 'langs', 'language', 'languages', 'i18n', 'l10n',
-  'loc', 'text', 'texts', 'strings', 'string', 'dialog', 'dialogs', 'dialogue', 'dialogues', 'subtitles', 'subs', 'translation', 'translations', 'messages']);
+  'loc', 'text', 'texts', 'strings', 'string', 'dialog', 'dialogs', 'dialogue', 'dialogues', 'subtitles', 'subs', 'translation', 'translations', 'messages',
+  'msg', 'message']);
 const SKIP_DIRS = new Set(['_commonredist', 'redist', 'redistributables', 'directx', 'vcredist', '.git', 'crashreporter', 'crashpad',
   'easyanticheat', 'battleye', 'licenses', 'license', 'legal', 'eula', 'manual', 'docs', 'mono', 'monobleedingedge', 'jre', 'java',
   'python', 'node_modules', 'saves', 'savegames', 'logs', 'shadercache', 'gameshelf_arabic']);
-const ENGLISH = /(^|[_\-.\s])(en|eng|english|en[_-]?us|en[_-]?gb)$|^(en|eng|english|en[_-]?us|en[_-]?gb)([_\-.\s]|$)/i;
+const ENGLISH = /(^|[_\-.\s])(en|eng|english|en[_-]?us|en[_-]?gb|engus|american)$|^(en|eng|english|en[_-]?us|en[_-]?gb|engus|american)([_\-.\s]|$)/i;
 const QUICK_LOOK = { maxEntries: 15000, maxDepth: 6, enough: 12 };
 // What the runtime adapter hooks (localization/runtime/gs_hook.c), and the libraries it can stand in for.
 const TEXT_FUNCTIONS = ['ExtTextOutW', 'TextOutW', 'DrawTextW', 'DrawTextExW', 'DWriteCreateFactory'];
+// The strings engines that draw their own text convert, copy and format on their way to the screen (gs_hook.c, buffers=1).
+const BUFFER_FUNCTIONS = ['MultiByteToWideChar', 'WideCharToMultiByte', 'wcscpy_s', 'wcsncpy', '_vsnwprintf', '_vsnprintf', 'vsnprintf',
+  '__stdio_common_vswprintf', '__stdio_common_vsprintf'];
+// Direct3D 11, which the adapter's canvas draws on (gs_render.c); Direct3D 12 games' frames it can't draw on.
+const D3D11_LIBRARIES = ['d3d11.dll', 'dxgi.dll'];
 const RUNTIME_PROXIES = ['version.dll', 'dinput8.dll'];
 const MAX_MODULES = 64;
 
@@ -421,6 +429,11 @@ async function runtimeInfo(root) {
     dir,
     arch: program?.arch || null,
     textApis: TEXT_FUNCTIONS.filter((f) => functions.has(f)),
+    buffers: BUFFER_FUNCTIONS.filter((f) => functions.has(f)),
+    d3d11: D3D11_LIBRARIES.some((name) => loads.has(name)),
+    d3d12: loads.has('d3d12.dll'),
+    // An engine drawing its own glyphs with FreeType: its strings never reach Windows' text functions.
+    freetype: files.some((n) => /^freetype[\w.-]*\.dll$/i.test(n)) || [...loads].some((n) => /^freetype/i.test(n)),
     // The library the adapter would stand in for: one the game loads by name.
     proxy: RUNTIME_PROXIES.find((name) => loads.has(name)) || null,
     present,
@@ -450,4 +463,4 @@ async function fingerprint(root) {
   };
 }
 
-module.exports = { fingerprint, unityVersion, renpyVersion, engineFamily, looseText, matches, runtimeInfo, BETHESDA_GAMES, UNITY_VERSION, TEXT_FUNCTIONS };
+module.exports = { fingerprint, unityVersion, renpyVersion, engineFamily, looseText, matches, runtimeInfo, BETHESDA_GAMES, UNITY_VERSION, TEXT_FUNCTIONS, BUFFER_FUNCTIONS };

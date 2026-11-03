@@ -185,12 +185,34 @@ test('Ren\'Py: adds the lines, the font and GameShelf\'s script, and takes all o
   assert.match(script, /config\.rtl = True/);
   assert.match(script, /previous\(what\)/, 'keeps a filter the game already has');
 
-  // Ren'Py compiles the script when the game starts; that goes too.
-  await fs.writeFile(path.join(dir, 'gameshelf.rpyc'), 'compiled');
+  // Ren'Py's own translation files, made here from strings.json: menu and interface strings, and the font.
+  assert.deepEqual((await fs.readdir(path.join(root, 'game/tl/arabic'))).sort(), ['gameshelf', 'gameshelf_font.rpy', 'gameshelf_strings.rpy']);
+  const block = await fs.readFile(path.join(root, 'game/tl/arabic/gameshelf_strings.rpy'), 'utf8');
+  assert.match(block, /^translate arabic strings:$/m);
+  assert.ok(block.includes('    old "Hi there! How was class?"\n    new "مرحبًا! كيف كان الدرس؟"'), block);
+  const font = await fs.readFile(path.join(root, 'game/tl/arabic/gameshelf_font.rpy'), 'utf8');
+  assert.match(font, /^translate arabic style default:\n    font "tl\/arabic\/gameshelf\/Arabic\.ttf"$/m);
+  assert.match(script, /config\.language = "arabic"/);
+
+  // Ren'Py compiles the scripts when the game starts; those go too.
+  for (const compiled of ['gameshelf/gameshelf.rpyc', 'gameshelf_strings.rpyc', 'gameshelf_font.rpyc']) {
+    await fs.writeFile(path.join(root, 'game/tl/arabic', compiled), 'compiled');
+  }
   const off = await l10n.disable({ root });
   assert.deepEqual(off.kept, []);
   assert.deepEqual(await listFiles(root), before);
   await assert.rejects(fs.stat(path.join(root, 'game/tl')), { code: 'ENOENT' });
+});
+
+test('Ren\'Py: translation files escape what the pack says, and a font name can\'t leave the folder', () => {
+  const block = renpy.stringsScript({ 'He said "go"\\now\nthen': 'قال "اذهب"' });
+  assert.ok(block.includes('old "He said \\"go\\"\\\\now\\nthen"'), block);
+  assert.ok(block.includes('new "قال \\"اذهب\\""'), block);
+  // One line per old and new: nothing a pack writes can start a statement of its own.
+  assert.equal(block.split('\n').filter((l) => l.trim().startsWith('old ')).length, 1);
+  assert.equal(renpy.fontScript('../../options.rpy'), null);
+  assert.equal(renpy.fontScript('a"b.ttf'), null);
+  assert.deepEqual(renpy.scriptsFor('not json').map((s) => s.target), [renpy.HOOK_SCRIPT, renpy.STRINGS_SCRIPT]);
 });
 
 test('Ren\'Py: a game that already has translations keeps them', async () => {

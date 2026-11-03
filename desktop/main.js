@@ -22,7 +22,7 @@ const { createArabicOnline, gameKey } = require('./localization/online');
 const { createPackBuilder, findBuilder, localPackKey } = require('./localization/builder');
 const { createPassThrough, createCloudClient, createRemoteGames, SESSION_COOKIE } = require('./cloud');
 const { createStudio } = require('./localization/studio');
-const { createArabicRequests, cantMake, playedAlone, NEEDS_RECIPE } = require('./localization/requests');
+const { createArabicRequests, cantMake, playedAlone, unrealKey, NEEDS_RECIPE } = require('./localization/requests');
 const { createRecipes, recipeTemplate } = require('./localization/recipes');
 const { directoryFingerprint } = require('./localization/dirprint');
 const arabicLines = require('./localization/lines');
@@ -360,7 +360,8 @@ async function buildFromSet({ game, tier, entry, set, setFile, fontStyle, onProg
     if (!alone.ok) throw new Error(alone.why);
   }
   const seen = tier === 'native-runtime' && game.runtime?.newLines > 0 ? game.runtime.dump : null;
-  return (await packBuilder.build({ ...game, tier, title: entry.title || set.title, recipe: recipe?.file, proxy: game.runtime?.proxy, extraLines: seen },
+  const aesKey = tier === 'unreal-pak' ? await unrealKey(recipes, gameKey(game)) : null;
+  return (await packBuilder.build({ ...game, tier, title: entry.title || set.title, recipe: recipe?.file, proxy: game.runtime?.proxy, extraLines: seen, aesKey },
     // The player's font, else the one the admin picked for this game's Arabic.
     { set: setFile, fontTargets: set.fontTargets || [], version: entry.version, fontStyle: fontStyle || set.fontStyle || null, onProgress })).packDir;
 }
@@ -380,7 +381,8 @@ async function rebuildArabic({ game, tier, fontStyle, onProgress }) {
   const recipe = tier === 'recipe' ? await recipes.forGame(gameKey(game)) : null;
   if (tier === 'recipe' && !recipe) return null;
   const seen = tier === 'native-runtime' && game.runtime?.newLines > 0 ? game.runtime.dump : null;
-  const built = await packBuilder.build({ ...game, tier, recipe: recipe?.file, proxy: game.runtime?.proxy, extraLines: seen },
+  const aesKey = tier === 'unreal-pak' ? await unrealKey(recipes, gameKey(game)) : null;
+  const built = await packBuilder.build({ ...game, tier, recipe: recipe?.file, proxy: game.runtime?.proxy, extraLines: seen, aesKey },
     { server: cloud.server(), auth: await online.builderEnv(), fontStyle, onProgress });
   return built.packDir;
 }

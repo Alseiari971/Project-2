@@ -688,6 +688,23 @@ class BuildingCustomEngines(unittest.TestCase):
         info = json.loads((self.tmp / 'out' / 'build-info.json').read_text(encoding='utf-8'))
         self.assertEqual(info['fontTargets'], ['fonts/Body-Bold.otf', 'fonts/Body.ttf'])
 
+    def test_a_fromsoftware_game_gets_its_msgbnd_back_with_the_arabic_in_it(self):
+        from test_binary_tables import ITEMS, TALK, msgbnd
+        from arabic_compiler import fromsoft
+        game = self.tmp / 'Sekiro'
+        (game / 'msg' / 'engus').mkdir(parents=True)
+        (game / 'msg' / 'engus' / 'item.msgbnd.dcx').write_bytes(msgbnd({'Item.fmg': ITEMS, 'Talk.fmg': TALK}))
+        (game / 'sekiro.exe').write_bytes(b'MZ')
+        pack = self.run_build(game, '--engine', 'loose', '--no-fonts')
+        read = self.read(pack)
+        self.assertEqual(read['manifest']['engine'], 'loose')
+        self.assertEqual(read['files'], ['msg/engus/item.msgbnd.dcx'])
+        found = fromsoft.read_messages((pack / 'payload/msg/engus/item.msgbnd.dcx').read_bytes())
+        talk = found.tables['1:Talk.fmg'].entries
+        self.assertTrue(all(shaped(talk[i]) for i in (10000, 10002)))
+        self.assertEqual(found.tables['0:Item.fmg'].entries[102], None)
+        self.assertEqual((game / 'msg' / 'engus' / 'item.msgbnd.dcx').read_bytes()[:4], b'DCX\0')  # the game's own file is untouched
+
     def test_a_game_with_no_readable_text_asks_for_a_recipe(self):
         game = self.tmp / 'Packed'
         (game / 'exec' / 'wad' / 'pc_le').mkdir(parents=True)

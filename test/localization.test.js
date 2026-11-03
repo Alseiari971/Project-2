@@ -175,7 +175,7 @@ test('packs can only add the files their engine allows', async () => {
 
 // ---- Adding and removing -------------------------------------------------------------
 
-test('Unreal: the patch pak is added beside the game\'s own and removed cleanly', async () => {
+test('Unreal: the patch pak is added in Content/Paks/~mods and removed cleanly', async () => {
   const root = await unrealGame();
   const l10n = await localization();
   const packDir = await unrealPack();
@@ -183,7 +183,7 @@ test('Unreal: the patch pak is added beside the game\'s own and removed cleanly'
 
   const result = await l10n.enable({ root, packDir, ...options });
   assert.equal(result.tier, 'unreal-pak');
-  assert.deepEqual((await fs.readdir(paks)).sort(), ['pakchunk0-Windows.pak', 'pakchunk99-ArabicLocalization_P.pak']);
+  assert.deepEqual((await fs.readdir(path.join(paks, '~mods'))).sort(), ['pakchunk99-ArabicLocalization_P.pak']);
   assert.equal((await l10n.status(root)).status, 'enabled');
   assert.equal((await l10n.enable({ root, packDir, ...options })).already, true);
 
@@ -195,10 +195,10 @@ test('Unreal: the patch pak is added beside the game\'s own and removed cleanly'
 });
 
 test('nothing is added when a file with the same name is already there', async () => {
-  const root = await unrealGame({ 'MyGame/Content/Paks/pakchunk99-ArabicLocalization_P.pak': 'someone else\'s' });
+  const root = await unrealGame({ 'MyGame/Content/Paks/~mods/pakchunk99-ArabicLocalization_P.pak': 'someone else\'s' });
   const l10n = await localization();
   await assert.rejects(l10n.enable({ root, packDir: await unrealPack(), ...options }), (err) => err.code === 'conflict');
-  assert.equal(await fs.readFile(path.join(root, 'MyGame/Content/Paks/pakchunk99-ArabicLocalization_P.pak'), 'utf8'), 'someone else\'s');
+  assert.equal(await fs.readFile(path.join(root, 'MyGame/Content/Paks/~mods/pakchunk99-ArabicLocalization_P.pak'), 'utf8'), 'someone else\'s');
   assert.equal(await l10n.status(root), null);
 });
 

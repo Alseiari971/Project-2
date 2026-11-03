@@ -27,7 +27,7 @@ const ALLOWED = {
   'copy.to': new Set(['work', 'out']),
   'stage.from': new Set(['work', 'extracted', 'edited', 'out', 'font', 'font_bold']),
 };
-const TEXT_FORMATS = new Set(['json', 'csv', 'tsv', 'xml', 'po', 'mo', 'lines', 'txt', 'ini', 'bethesda-strings']);
+const TEXT_FORMATS = new Set(['json', 'csv', 'tsv', 'xml', 'po', 'mo', 'lines', 'txt', 'ini', 'bethesda-strings', 'fmg', 'gxt2', 'gmd']);
 
 class RecipeError extends Error {
   constructor(message) {
@@ -62,6 +62,25 @@ function checkArg(arg, phase) {
   }
 }
 
+// An Unreal game's key recipe: no tool, only the game's AES key, which an admin
+// gives (GameShelf never looks for one), so its encrypted .pak/.utoc files can be
+// read by repak and retoc on the player's PC.
+const AES_KEY = /^0x[0-9a-fA-F]{64}$/;
+const KEY_RECIPE_FIELDS = new Set(['format', 'game', 'engine', 'aesKey', 'note']);
+
+function checkKeyRecipe(recipe) {
+  const extra = Object.keys(recipe).filter((k) => !KEY_RECIPE_FIELDS.has(k));
+  if (extra.length) throw new RecipeError(`An Unreal key recipe holds only the game's key ("aesKey"), not ${extra.map((k) => `"${k}"`).join(', ')}.`);
+  if (typeof recipe.aesKey !== 'string' || !AES_KEY.test(recipe.aesKey)) throw new RecipeError('"aesKey" must be "0x" and 64 hex digits.');
+  if (recipe.note !== undefined && (typeof recipe.note !== 'string' || recipe.note.length > 500)) throw new RecipeError('"note" must be short text.');
+  return recipe;
+}
+
+/** The AES key in a checked recipe for an Unreal game, or null. */
+function aesKeyOf(recipe) {
+  return recipe && recipe.engine === 'unreal' && typeof recipe.aesKey === 'string' && AES_KEY.test(recipe.aesKey) ? recipe.aesKey : null;
+}
+
 /**
  * Checks a recipe (an object) for the game `key` ("steam:<id>" or "game:<id>"),
  * with the same rules as the pack builder (recipes.py, check_recipe). Returns it.
@@ -79,6 +98,7 @@ function checkRecipe(recipe, key) {
     if (!same) throw new RecipeError('The recipe is for another game.');
   }
   if (typeof recipe.engine !== 'string' || !/^[\w-]{1,60}$/.test(recipe.engine)) throw new RecipeError('The recipe must name its engine ("engine").');
+  if (recipe.engine === 'unreal') return checkKeyRecipe(recipe);
   if ((recipe.extract?.length || recipe.repack?.length) && !registry.tools[recipe.tool]) {
     throw new RecipeError(`The recipe's tool "${recipe.tool}" isn't one GameShelf allows (${Object.keys(registry.tools).sort().join(', ')}).`);
   }
@@ -119,6 +139,9 @@ function checkRecipe(recipe, key) {
 /** A starting point for an admin writing a game's recipe (Admin Panel), for the engine its folder looks like. */
 function recipeTemplate(key, familyId = null) {
   const [kind, id] = String(key).split(':');
+  if (familyId === 'unreal') {
+    return { format: 1, game: kind === 'steam' ? { steamAppId: Number(id) } : { gameId: id }, engine: 'unreal', aesKey: '0x' + '0'.repeat(64), note: 'The key the game\'s publisher gave for modding.' };
+  }
   const family = registry.recipes.find((r) => r.id === familyId);
   const archive = family?.archives?.[0] || '.pak';
   return {
@@ -181,4 +204,4 @@ function createRecipes({ cloud, cacheDir, publicKeys = [] }) {
   };
 }
 
-module.exports = { createRecipes, checkRecipe, recipeTemplate, verifies, RecipeError, registry };
+module.exports = { createRecipes, checkRecipe, recipeTemplate, verifies, RecipeError, registry, aesKeyOf, AES_KEY };

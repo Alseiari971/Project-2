@@ -1119,7 +1119,9 @@ def build_unreal(source, translations: dict, args, payload: Path, stage_root: Pa
         names = sorted({PurePosixPath(p).name for p in iostore['font_packages']})
         log(f'This game\'s fonts are cooked packages in its IoStore containers ({", ".join(names[:6])}{"..." if len(names) > 6 else ""}). '
             'For Arabic letters, cook replacements from the Arabic font with the game\'s Unreal Engine version and give them with --font-assets.')
-    if args.font_assets:
+    if args.font_assets or iostore.get('containers'):
+        # UE5 games with IoStore containers: the Arabic .pak goes with a .utoc and .ucas of its own name (the
+        # game's cooked font replacements in them, or empty), since those games only mount a .pak that has them.
         build_zen_fonts(args, iostore, payload, stage_root, log)
 
 
@@ -1133,20 +1135,27 @@ def shipping_program(folder: Path) -> Path | None:
 
 
 def build_zen_fonts(args, iostore: dict, payload: Path, stage_root: Path, log):
-    """Cooked replacement font packages into pakchunk99-ArabicLocalization_P.utoc/.ucas, beside the Arabic .pak (retoc to-zen)."""
+    """pakchunk99-ArabicLocalization_P.utoc/.ucas beside the Arabic .pak (retoc to-zen): with the cooked replacement
+    font packages from --font-assets, or empty, for UE5 games that only mount a .pak with its own .utoc and .ucas."""
     try:
-        assets = retoc.font_assets(Path(args.font_assets))
-        if not assets:
+        assets = retoc.font_assets(Path(args.font_assets)) if args.font_assets else []
+        if args.font_assets and not assets:
             raise BuildError(f'{args.font_assets} has no cooked .uasset files.')
         tool = retoc.find_tool(args.retoc) or iostore.get('tool')
+        version = args.ue_version or retoc.engine_version(shipping_program(Path(args.source)))
+        if not args.font_assets and (not tool or not version):
+            missing = 'retoc (github.com/trumank/retoc)' if not tool else 'the game\'s Unreal Engine version (--ue-version)'
+            log(f'This game has IoStore containers, but without {missing} the Arabic .pak goes in alone; '
+                'UE5 games that only mount a .pak with its own .utoc and .ucas won\'t load it.')
+            return
         if not tool:
             raise BuildError('Putting cooked font packages into an IoStore container needs retoc (github.com/trumank/retoc): give --retoc.')
-        version = args.ue_version or retoc.engine_version(shipping_program(Path(args.source)))
         if not version:
             raise BuildError('Couldn\'t tell the game\'s Unreal Engine version from its program: give --ue-version (e.g. UE5_4).')
         zen = stage_root / 'zen'
         shutil.rmtree(zen, ignore_errors=True)
-        root = Path(args.font_assets)
+        zen.mkdir(parents=True)
+        root = Path(args.font_assets) if args.font_assets else zen
         for rel in assets:
             for ext in ('.uasset', '.uexp', '.ubulk', '.uptnl'):
                 part = root.joinpath(*rel.with_suffix(ext).parts)
@@ -1162,7 +1171,10 @@ def build_zen_fonts(args, iostore: dict, payload: Path, stage_root: Path, log):
     except retoc.RetocError as err:
         raise BuildError(str(err)) from None
     args.fonts_used = list(getattr(args, 'fonts_used', None) or []) + [a.as_posix() for a in assets]
-    log(f'Put {len(assets)} cooked font packages into {made[0].name} and {made[1].name} ({version}): ' + ', '.join(a.name for a in assets))
+    if assets:
+        log(f'Put {len(assets)} cooked font packages into {made[0].name} and {made[1].name} ({version}): ' + ', '.join(a.name for a in assets))
+    else:
+        log(f'Made {made[0].name} and {made[1].name} ({version}) to go with the Arabic .pak.')
 
 
 def sign(pack_dir: Path, args, kind: str):

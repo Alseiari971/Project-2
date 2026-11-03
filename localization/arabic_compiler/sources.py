@@ -6,7 +6,8 @@
 - XUnity.AutoTranslator text files ("English=translation" lines);
 - Unreal .locres files (see locres.py);
 - Unity asset files (.assets, .bundle, data.unity3d), with the UnityPy library;
-- Ren'Py scripts (.rpy), and Ren'Py archives (.rpa) holding them;
+- Ren'Py scripts (.rpy), compiled scripts (.rpyc, read without running them:
+  see renpyc.py), and Ren'Py archives (.rpa) holding either;
 - Godot translation tables (CSV with a "keys" column) and gettext .po/.pot files;
 - Capcom RE Engine message dumps (.msg.<version>.json/.csv from REMSG_Converter),
   or a folder of message files extracted from your own copy (natives/...);
@@ -37,7 +38,7 @@ from struct import error as struct_error
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import bethesda, godotpck, loose, retoc
+from . import bethesda, godotpck, loose, renpyc, retoc
 from . import locres as locres_format
 from . import remsg
 
@@ -141,7 +142,15 @@ _OUR_PAK = re.compile(r'ArabicLocalization', re.I)
 
 
 def _repak(tool: str, *args, binary=False):
-    return subprocess.run([tool, *args], capture_output=True, text=not binary, timeout=600)
+    """repak, with the game's key when an admin gave one (retoc.key_args); its error output never shows the key."""
+    try:
+        keys = retoc.key_args()
+    except retoc.RetocError as err:
+        raise SourceError(str(err)) from None
+    result = subprocess.run([tool, *keys, *args], capture_output=True, text=not binary, timeout=600)
+    if not binary:
+        result.stderr = retoc.redact(result.stderr)
+    return result
 
 
 def _unreal_paks(folder: Path) -> Source:
@@ -171,9 +180,13 @@ def _unreal_paks(folder: Path) -> Source:
             found = (pak, sorted(english, key=len)[0])
     # UE5: the cooked packages are in IoStore containers; their file lists name the game's font packages,
     # and the odd game keeps its .locres there too.
-    iostore = {'containers': [], 'encrypted': [], 'font_packages': [], 'tool': None}
+    iostore = {'containers': [], 'encrypted': [], 'font_packages': [], 'tool': None, 'keyed': False}
     in_container = None
     retoc_tool = retoc.find_tool()
+    try:
+        have_key = bool(retoc.aes_key())
+    except retoc.RetocError as err:
+        raise SourceError(str(err)) from None
     for utoc in containers:
         try:
             header = retoc.toc_header(utoc)
@@ -182,7 +195,10 @@ def _unreal_paks(folder: Path) -> Source:
         iostore['containers'].append(utoc.name)
         if header.encrypted:
             iostore['encrypted'].append(utoc.name)
-            continue
+            # Only with the key an admin gave for this game; GameShelf never looks for one.
+            if not have_key:
+                continue
+            iostore['keyed'] = True
         if not retoc_tool:
             continue
         iostore['tool'] = retoc_tool
@@ -198,7 +214,10 @@ def _unreal_paks(folder: Path) -> Source:
     if not found and not in_container:
         locked = encrypted + iostore['encrypted']
         if locked:
-            raise SourceError(f'The game\'s paks are encrypted ({", ".join(locked[:3])}); reading them needs the game\'s own key, which GameShelf won\'t look for.')
+            if have_key:
+                raise SourceError(f'The game\'s paks are encrypted ({", ".join(locked[:3])}), and the key in its recipe didn\'t open them.')
+            raise SourceError(f'The game\'s paks are encrypted ({", ".join(locked[:3])}). GameShelf never looks for keys: an admin can '
+                              'attach the game\'s key in a signed recipe, and the same button then makes its Arabic.')
         if containers and not retoc_tool:
             raise SourceError('Found no English Game.locres in the game\'s .pak files, and reading its .utoc/.ucas containers needs retoc '
                               '(github.com/trumank/retoc).')
@@ -231,7 +250,8 @@ def _unreal_paks(folder: Path) -> Source:
     source.notes.append(f'Read {inside} from {origin}.')
     if iostore['containers']:
         source.notes.append(f'IoStore containers: {len(iostore["containers"])}'
-                            + (f', {len(iostore["encrypted"])} encrypted (left alone)' if iostore['encrypted'] else '')
+                            + (f', {len(iostore["encrypted"])} encrypted ' + ('(read with the key from the game\'s recipe)' if iostore['keyed'] else '(left alone)')
+                               if iostore['encrypted'] else '')
                             + ('' if iostore['tool'] else '; retoc isn\'t installed, so their file lists weren\'t read') + '.')
     return source
 
@@ -369,67 +389,76 @@ def renpy_lines(script: str):
             yield number, text
 
 
-class _IndexOnly(pickle.Unpickler):
-    """Reads an archive's index (names and numbers) and refuses anything else."""
-
-    def find_class(self, module, name):
-        raise SourceError('This .rpa archive\'s index holds more than names and numbers, so it won\'t be read.')
-
-
-def read_rpa(path: Path) -> dict:
-    """The files in a Ren'Py archive: {name: bytes}, for .rpy scripts only."""
-    with path.open('rb') as f:
-        head = f.read(40)
-        if head.startswith(b'RPA-3.0 '):
-            offset, key = int(head[8:24], 16), int(head[25:33], 16)
-        elif head.startswith(b'RPA-2.0 '):
-            offset, key = int(head[8:24], 16), 0
-        else:
-            raise SourceError(f'{path.name} isn\'t a Ren\'Py archive GameShelf can read (RPA-2.0 or 3.0).')
-        f.seek(offset)
-        try:
-            index = _IndexOnly(io.BytesIO(zlib.decompress(f.read())), encoding='bytes').load()
-        except (zlib.error, pickle.UnpicklingError, EOFError, ValueError) as err:
-            raise SourceError(f'{path.name}\'s index can\'t be read ({err}).') from None
-        if not isinstance(index, dict):
-            raise SourceError(f'{path.name}\'s index can\'t be read.')
-        out = {}
-        for name, parts in index.items():
-            name = name.decode('utf-8', 'replace') if isinstance(name, bytes) else str(name)
-            if not name.lower().endswith('.rpy'):
-                continue
-            data = b''
-            for part in parts:
-                start = part[2] if len(part) > 2 else b''
-                start = start.encode('latin-1') if isinstance(start, str) else (start or b'')
-                f.seek(part[0] ^ key)
-                data += start + f.read((part[1] ^ key) - len(start))
-            out[name] = data
-        return out
+def read_rpa(path: Path, suffixes=('.rpy',)) -> dict:
+    """The files in a Ren'Py archive: {name: bytes}, for .rpy scripts only (see renpyc.py)."""
+    try:
+        return renpyc.read_rpa(Path(path), suffixes)
+    except renpyc.RenpyError as err:
+        raise SourceError(str(err)) from None
 
 
-def _renpy(files: list) -> Source:
-    """files: [(name, script text)]."""
+def _renpy(files: list, compiled: list = ()) -> Source:
+    """files: [(name, script text)]; compiled: [(name, .rpyc bytes)], for scripts there's no .rpy of."""
     rows, seen = [], set()
     for name, script in files:
         for number, text in renpy_lines(script):
             if text not in seen:
                 seen.add(text)
                 rows.append(Row(text, None, f'{name}:{number}'))
-    return Source(rows, engine='renpy')
+    unreadable = []
+    for name, data in compiled:
+        try:
+            found = renpyc.read_rpyc(data, name)
+        except renpyc.RenpyError as err:
+            unreadable.append(f'{name} ({err})')
+            continue
+        for kind, text, where in found:
+            text = text.strip()
+            if not text or text in seen or not _HAS_LETTERS.search(text) or _FILE_NAME.search(text):
+                continue
+            seen.add(text)
+            rows.append(Row(text, None, f'{name}:{where.rpartition(":")[2]}' if kind != 'string' else f'{name}:_'))
+    if compiled and not rows and unreadable:
+        raise SourceError('This Ren\'Py game\'s compiled scripts couldn\'t be read: ' + '; '.join(unreadable[:3])
+                          + '. Decompile your own copy (for example with unrpyc) and run this on the .rpy files, or give a CSV.')
+    source = Source(rows, engine='renpy')
+    if compiled:
+        source.notes.append(f'Read {len(compiled) - len(unreadable)} compiled scripts (.rpyc) without running them.')
+    if unreadable:
+        source.notes.append(f'Couldn\'t read {len(unreadable)} compiled scripts: ' + '; '.join(unreadable[:3]) + '.')
+    return source
 
 
 def _renpy_folder(game: Path) -> Source:
-    files = [(p.relative_to(game).as_posix(), p.read_text(encoding='utf-8-sig', errors='replace'))
-             for p in sorted(game.rglob('*.rpy')) if 'tl' not in p.relative_to(game).parts[:1]]
+    def is_translation(rel: str) -> bool:
+        return rel.split('/', 1)[0] == 'tl'
+    files, compiled, have = [], [], set()
+    for p in sorted(game.rglob('*.rpy')):
+        rel = p.relative_to(game).as_posix()
+        if not is_translation(rel):
+            files.append((rel, p.read_text(encoding='utf-8-sig', errors='replace')))
+            have.add(rel)
+    archived = []
     for archive in sorted(game.rglob('*.rpa')):
-        for name, data in read_rpa(archive).items():
-            if not name.startswith('tl/'):
-                files.append((f'{archive.name}/{name}', data.decode('utf-8-sig', 'replace')))
-    if not files:
-        raise SourceError('This Ren\'Py game has only compiled scripts (.rpyc), which don\'t keep the text readably. '
-                          'Decompile your own copy (for example with unrpyc) and run this on the .rpy files, or give a CSV.')
-    return _renpy(files)
+        for name, data in read_rpa(archive, ('.rpy', '.rpyc')).items():
+            if not is_translation(name):
+                archived.append((archive.name, name, data))
+    for archive, name, data in archived:
+        if name.lower().endswith('.rpy'):
+            files.append((f'{archive}/{name}', data.decode('utf-8-sig', 'replace')))
+            have.add(name)
+    for p in sorted(game.rglob('*.rpyc')):
+        rel = p.relative_to(game).as_posix()
+        if not is_translation(rel) and rel[:-1] not in have:
+            compiled.append((rel, p.read_bytes()))
+            have.add(rel[:-1])
+    for archive, name, data in archived:
+        if name.lower().endswith('.rpyc') and name[:-1] not in have:
+            compiled.append((f'{archive}/{name}', data))
+            have.add(name[:-1])
+    if not files and not compiled:
+        raise SourceError('Found no Ren\'Py scripts (.rpy or .rpyc) in this game.')
+    return _renpy(files, compiled)
 
 
 # ---- Godot ----
@@ -724,7 +753,12 @@ def read_source(path: str | Path, *, locres_path: str | None = None, msg_path: s
     if suffix == '.rpy':
         return _renpy([(path.name, path.read_text(encoding='utf-8-sig', errors='replace'))])
     if suffix == '.rpa':
-        return _renpy(sorted((name, data.decode('utf-8-sig', 'replace')) for name, data in read_rpa(path).items()))
+        found = read_rpa(path, ('.rpy', '.rpyc'))
+        scripts = sorted((n, d.decode('utf-8-sig', 'replace')) for n, d in found.items() if n.lower().endswith('.rpy'))
+        have = {n for n, _ in scripts}
+        return _renpy(scripts, sorted((n, d) for n, d in found.items() if n.lower().endswith('.rpyc') and n[:-1] not in have))
+    if suffix == '.rpyc':
+        return _renpy([], [(path.name, path.read_bytes())])
     if suffix == '.json':
         return _json(path)
     if suffix == '.txt':

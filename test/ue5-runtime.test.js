@@ -15,7 +15,7 @@ const { spawnSync } = require('node:child_process');
 const { writePack } = require('../desktop/localization/pack');
 const { peImports } = require('../desktop/localization/pe');
 const { fingerprint } = require('../desktop/localization/engine');
-const { preflight, createLocalization, runtimeFolder } = require('../desktop/localization/index');
+const { preflight, createLocalization, runtimeFolder, runtimeSettings } = require('../desktop/localization/index');
 const { playedAlone, createArabicRequests } = require('../desktop/localization/requests');
 const { createApp } = require('../server');
 const { openDatabase } = require('../src/db');
@@ -173,6 +173,32 @@ test('custom engines whose text goes through Windows\' text functions get the ru
   assert.equal((await preflight(await tree(textGame({ 'EasyAntiCheat/x.txt': 'x' })))).tier, 'overlay');
 });
 
+test('games drawing their own text on Direct3D 11 get the adapter\'s canvas; Direct3D 12 ones are told why not', async () => {
+  const gpuGame = (imports) => ({
+    'Game.exe': fakePe({ imports: { 'version.dll': ['GetFileVersionInfoSizeW'], 'kernel32.dll': ['MultiByteToWideChar'], ...imports } }),
+    'freetype.dll': fakePe({ imports: { 'kernel32.dll': ['CreateFileW'] } }),
+  });
+  const check = await preflight(await tree(gpuGame({ 'd3d11.dll': ['D3D11CreateDevice'], 'api-ms-win-crt-stdio-l1-1-0.dll': ['__stdio_common_vswprintf'] })));
+  assert.equal(check.tier, 'native-runtime');
+  assert.equal(check.adapter.mode, 'canvas');
+  const runtime = check.engine.custom.runtime;
+  assert.deepEqual([runtime.textApis, runtime.buffers, runtime.d3d11, runtime.freetype], [[], ['MultiByteToWideChar', '__stdio_common_vswprintf'], true, true]);
+  // Windows' text functions mean the strings themselves are swapped.
+  assert.equal((await preflight(await tree(textGame()))).adapter.mode, 'text');
+  const dx12 = await preflight(await tree(gpuGame({ 'd3d12.dll': ['D3D12CreateDevice'] })));
+  assert.match(dx12.adapter.why, /Direct3D 12/);
+});
+
+test('the adapter\'s settings say how it runs: swapping strings, or drawing on the game\'s frames', () => {
+  const lines = (text) => Object.fromEntries(text.split('\r\n').filter((l) => l.includes('=') && !l.startsWith(';')).map((l) => l.split(/=(.*)/s).slice(0, 2)));
+  const text = lines(runtimeSettings({ exe: 'Game.exe', root: 'C:\\Games\\Lantern', folder: 'C:\\data' }));
+  assert.deepEqual([text.buffers, text.swap, text.canvas, text.canvas_region], ['1', '1', '0', undefined]);
+  const canvas = lines(runtimeSettings({ exe: 'Game.exe', root: 'C:\\G', folder: 'C:\\d', mode: 'canvas', region: [0, 0.8, 1, 0.2] }));
+  assert.deepEqual([canvas.buffers, canvas.swap, canvas.canvas, canvas.canvas_region], ['1', '0', '1', '0,0.8,1,0.2']);
+  // A region that isn't one falls back to the bottom of the frame.
+  assert.equal(lines(runtimeSettings({ exe: 'G.exe', root: 'r', folder: 'f', mode: 'canvas', region: [0, 2, 'x'] })).canvas_region, '0.08,0.76,0.84,0.2');
+});
+
 test('UE5 containers are checked for encryption from their header', async () => {
   const header = (flags) => {
     const head = Buffer.alloc(144);
@@ -216,10 +242,18 @@ test('a UE5 patch\'s .pak, .utoc and .ucas go in together and come out together'
   const localization = createLocalization({ dataDir: data });
   await localization.enable({ root: game, packDir: pack, publicKey: PUBLIC });
   const paks = path.join(game, 'Blade', 'Content', 'Paks');
-  assert.deepEqual((await fs.readdir(paks)).filter((n) => n.includes('Arabic')).sort(),
+  // In Content/Paks/~mods, apart from the game's own.
+  assert.deepEqual((await fs.readdir(path.join(paks, '~mods'))).sort(),
     ['pakchunk99-ArabicLocalization_P.pak', 'pakchunk99-ArabicLocalization_P.ucas', 'pakchunk99-ArabicLocalization_P.utoc']);
   assert.deepEqual((await localization.disable({ root: game })).kept, []);
   assert.deepEqual((await fs.readdir(paks)).sort(), ['pakchunk0-Windows.pak', 'pakchunk0-Windows.utoc']);
+
+  // A ~mods folder the player already had stays, with their mods in it.
+  await fs.mkdir(path.join(paks, '~mods'));
+  await fs.writeFile(path.join(paks, '~mods', 'Their_Mod_P.pak'), 'mod');
+  await localization.enable({ root: game, packDir: pack, publicKey: PUBLIC });
+  await localization.disable({ root: game });
+  assert.deepEqual(await fs.readdir(path.join(paks, '~mods')), ['Their_Mod_P.pak']);
 });
 
 test('the runtime adapter goes in with its settings, only as the library GameShelf ships, and comes out cleanly', async (t) => {
@@ -264,14 +298,22 @@ test('a runtime pack for the other library is refused', async (t) => {
 
 // ---- Played alone --------------------------------------------------------------------------
 
-test('the runtime adapter only goes into games Steam lists as single-player and nothing else', async () => {
+test('the runtime adapter goes into Steam, Epic, GOG and other games alike, but never online-only or VAC games', async () => {
   const online = (features) => ({ features: async () => features });
-  assert.equal((await playedAlone(online(['Single-player', 'Steam Achievements']), { steamAppId: 1 })).ok, true);
-  for (const features of [['Single-player', 'Online PvP'], ['Single-player', 'Online Co-op'], ['Single-player', 'Shared/Split Screen'], ['Multi-player'], ['Steam Cloud']]) {
-    assert.match((await playedAlone(online(features), { steamAppId: 1 })).why, /played online or with others/, features.join());
+  // Played alone, or alone and online: the folder's anti-cheat scan already passed.
+  for (const features of [['Single-player', 'Steam Achievements'], ['Single-player', 'Online Co-op'], ['Single-player', 'Shared/Split Screen'], ['Steam Cloud']]) {
+    assert.equal((await playedAlone(online(features), { steamAppId: 1 })).ok, true, features.join());
   }
-  assert.match((await playedAlone(online(null), { steamAppId: 1 })).why, /couldn't check/);
-  assert.match((await playedAlone(online(['Single-player']), { gameId: 'x' })).why, /only for Steam games/);
+  // Only online.
+  for (const features of [['Multi-player'], ['Online PvP', 'MMO'], ['Online Co-op']]) {
+    assert.match((await playedAlone(online(features), { steamAppId: 1 })).why, /only played online/, features.join());
+  }
+  assert.match((await playedAlone(online(['Single-player', 'Valve Anti-Cheat enabled']), { steamAppId: 1 })).why, /Valve Anti-Cheat/);
+  // Epic, GOG or a folder: nothing to ask, so the folder scan is the check; a store page that can't be had is the same.
+  assert.deepEqual(await playedAlone(online(['Multi-player']), { gameId: 'x' }), { ok: true, why: null, checked: false });
+  assert.deepEqual(await playedAlone(online(null), { steamAppId: 1 }), { ok: true, why: null, checked: false });
+  // Anti-cheat in the folder still keeps the adapter out (no tier but the overlay is picked).
+  assert.equal((await preflight(await tree(textGame({ 'BattlEye/BEClient_x64.dll': 'be' })))).tier, 'overlay');
 });
 
 // ---- The whole flow -----------------------------------------------------------------------
@@ -285,7 +327,7 @@ test('request, the adapter\'s table from the game\'s own data, lines seen in pla
       const translations = JSON.parse(user.slice(user.indexOf('['))).map(({ id, text }) => ({ id, arabic: `عربي ${text}` }));
       return { ok: true, status: 200, headers: new Map(), json: async () => ({ choices: [{ message: { content: JSON.stringify({ translations }) } }] }) };
     };
-    const features = { 4242: ['Single-player', 'Steam Achievements'], 4343: ['Single-player', 'Online Co-op'] };
+    const features = { 4242: ['Single-player', 'Steam Achievements'], 4343: ['Online PvP', 'Online Co-op'] };
     const steamStore = { details: async (id) => (features[id] ? { features: features[id] } : null) };
     const db = openDatabase(':memory:');
     const translations = createTranslationMemory({ db, env: { OPENAI_API_KEY: 'server-key' }, fetch: fetchAi });
@@ -354,11 +396,21 @@ test('request, the adapter\'s table from the game\'s own data, lines seen in pla
     assert.equal((await arabic.set(game, false)).error, null);
     assert.equal(await fs.stat(path.join(dir, 'version.dll')).catch(() => null), null);
 
-    // A game Steam lists with online co-op never gets the adapter: the request goes to the admins instead.
+    // A game Steam lists as online-only never gets the adapter: the request goes to the admins instead.
     const coop = path.join(tmp, 'Coop');
     await fs.cp(dir, coop, { recursive: true });
     const blocked = await requests.run({ key: 'steam:4343', dir: coop, steamAppId: 4343, gameId: null, title: 'Coop' }, { consent: true });
     assert.equal(blocked.requested, true);
-    assert.match(blocked.reason, /played online or with others/);
+    assert.match(blocked.reason, /only played online/);
     assert.equal(await fs.stat(path.join(coop, 'version.dll')).catch(() => null), null);
+
+    // A GOG or Epic copy (no Steam app ID) gets it, the anti-cheat scan having found nothing.
+    const gog = path.join(tmp, 'LanternGOG');
+    await fs.cp(dir, gog, { recursive: true });
+    await fs.rm(path.join(gog, 'gameshelf_arabic'), { recursive: true, force: true });
+    const fromGog = await requests.run({ key: 'game:lantern', dir: gog, steamAppId: null, gameId: 'lantern', title: 'Lantern' }, { consent: true });
+    assert.equal(fromGog.done, true, JSON.stringify(fromGog.error || fromGog));
+    const gogGame = { key: 'game:lantern', dir: gog, steamAppId: null, gameId: 'lantern', title: 'Lantern' };
+    assert.deepEqual(await arabic.prepareLaunch(gogGame).then((l) => [l.mode, l.ok]), ['native', true]);
+    assert.deepEqual(await fs.readFile(path.join(gog, 'version.dll')), await fs.readFile(path.join(PREBUILT, 'version.dll')));
   });

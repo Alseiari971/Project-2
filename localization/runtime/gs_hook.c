@@ -20,6 +20,22 @@
  * lays them out right to left itself, so the table holds plain Arabic. The
  * bundled IBM Plex Sans Arabic is added for GDI (privately, for this process).
  *
+ * Engines that draw their own text (GPU font atlases, Scaleform, FreeType)
+ * never call those. For them, with buffers=1 in the settings, it also watches
+ * the strings the game converts, copies and formats on their way to its UI:
+ * MultiByteToWideChar, WideCharToMultiByte (UTF-8), wcscpy_s, wcsncpy, and the
+ * CRT's formatting functions (_vsnwprintf, _vsnprintf, vsnprintf, and UCRT's
+ * __stdio_common_vswprintf / __stdio_common_vsprintf). Only strings whose
+ * length some English line has are hashed (the table's length filter), so
+ * the rest pass through untouched. A string found in the table:
+ *   - swap=1: its Arabic goes into the game's buffer, when it fits (a size
+ *     query gets the Arabic's size, so the game makes room for it); a format
+ *     is swapped only when its Arabic takes the same arguments in the same
+ *     order (gs_same_specifiers);
+ *   - canvas=1: the Arabic is drawn by gs_render.c onto the game's own frame,
+ *     in its IDXGISwapChain::Present, for games whose fonts have no Arabic
+ *     letters (then the game's buffer is left as it is).
+ *
  * English it has no Arabic for is written, once per string, to the file
  * GameShelf names in the settings (outside the game's folder), so the next
  * "Request Arabic subtitles" can translate it too, and a status file counts
@@ -27,7 +43,8 @@
  *
  * It only wakes when gameshelf_arabic\gameshelf_runtime.ini is beside it and
  * names the program it's in; otherwise it's a plain pass-through library.
- * GameShelf only installs it for 64-bit games without anti-cheat or online play.
+ * GameShelf only installs it for 64-bit games whose folder has no anti-cheat,
+ * and never into games Steam lists as played only online.
  */
 #define WIN32_LEAN_AND_MEAN
 #ifndef UNICODE
@@ -36,11 +53,15 @@
 #include <windows.h>
 #include <tlhelp32.h>
 #include <dwrite.h>
+#include <stdarg.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <wchar.h>
 
 #include "gs_core.h"
+#include "gs_render.h"
 
 /* The DirectWrite methods hooked, by their place in the real vtables (mingw-w64's dwrite.h). */
 #define SLOT(type, method) (offsetof(type, method) / sizeof(void *))
@@ -72,6 +93,18 @@ typedef HMODULE (WINAPI *LoadLibraryExW_t)(LPCWSTR, HANDLE, DWORD);
 typedef HMODULE (WINAPI *LoadLibraryExA_t)(LPCSTR, HANDLE, DWORD);
 typedef FARPROC (WINAPI *GetProcAddress_t)(HMODULE, LPCSTR);
 typedef int (WINAPI *AddFontResourceExW_t)(LPCWSTR, DWORD, PVOID);
+typedef int (WINAPI *MultiByteToWideChar_t)(UINT, DWORD, LPCCH, int, LPWSTR, int);
+typedef int (WINAPI *WideCharToMultiByte_t)(UINT, DWORD, LPCWCH, int, LPSTR, int, LPCCH, LPBOOL);
+typedef int (__cdecl *wcscpy_s_t)(wchar_t *, size_t, const wchar_t *);
+typedef wchar_t *(__cdecl *wcsncpy_t)(wchar_t *, const wchar_t *, size_t);
+typedef int (__cdecl *vsnwprintf_t)(wchar_t *, size_t, const wchar_t *, va_list);
+typedef int (__cdecl *vsnprintf_t)(char *, size_t, const char *, va_list);
+typedef int (__cdecl *common_vswprintf_t)(unsigned __int64, wchar_t *, size_t, const wchar_t *, void *, va_list);
+typedef int (__cdecl *common_vsprintf_t)(unsigned __int64, char *, size_t, const char *, void *, va_list);
+typedef HRESULT (WINAPI *D3D11CreateDevice_t)(void *, int, HMODULE, UINT, const void *, UINT, UINT, void **, void *, void **);
+typedef HRESULT (WINAPI *D3D11CreateDeviceAndSwapChain_t)(void *, int, HMODULE, UINT, const void *, UINT, UINT, const void *, void **, void **, void *, void **);
+#define BGRA_SUPPORT 0x20   /* D3D11_CREATE_DEVICE_BGRA_SUPPORT, which Direct2D needs to draw on the game's frames */
+#define BUFFER_CAP 2048
 
 /* ---- Settings and state ------------------------------------------------------------- */
 
@@ -84,6 +117,13 @@ static WCHAR g_font[PATH_CAP];
 static WCHAR g_dump[PATH_CAP];
 static WCHAR g_status[PATH_CAP];
 static int g_rtl = 1;
+static int g_buffers;       /* watch the strings the game converts, copies and formats */
+static int g_swap = 1;      /* put the Arabic into those buffers */
+static int g_narrow;        /* narrow (char) strings are UTF-8 in this game: swap those too */
+static int g_canvas;        /* draw the Arabic onto the game's frames (gs_render.c) */
+static float g_region[4] = { 0.08f, 0.76f, 0.84f, 0.2f };
+static DWORD g_busy = TLS_OUT_OF_INDEXES;   /* set while a hook works, so its own calls pass straight through */
+static volatile LONG g_buffer_hits, g_swaps;
 static volatile LONG g_active;
 static volatile LONG g_stop;
 static HANDLE g_worker;
@@ -177,6 +217,26 @@ static void read_settings(void) {
                 else if (!strcmp(line, "dump")) wcopy(g_dump, PATH_CAP, value);
                 else if (!strcmp(line, "status")) wcopy(g_status, PATH_CAP, value);
                 else if (!strcmp(line, "rtl")) g_rtl = eq[1] == '1';
+                else if (!strcmp(line, "buffers")) g_buffers = eq[1] == '1';
+                else if (!strcmp(line, "swap")) g_swap = eq[1] == '1';
+                else if (!strcmp(line, "narrow")) g_narrow = eq[1] == '1';
+                else if (!strcmp(line, "canvas")) g_canvas = eq[1] == '1';
+                else if (!strcmp(line, "canvas_region")) {
+                    float r[4];
+                    char *at = eq + 1, *end = NULL;
+                    int got = 0;
+                    for (; got < 4; got++) {
+                        r[got] = (float)strtod(at, &end);
+                        if (end == at) break;
+                        at = end;
+                        if (got < 3) {
+                            if (*at != ',') break;
+                            at++;
+                        }
+                    }
+                    if (got == 4 && r[0] >= 0 && r[1] >= 0 && r[2] > 0.05f && r[3] > 0.02f
+                        && r[0] + r[2] <= 1.001f && r[1] + r[3] <= 1.001f) memcpy(g_region, r, sizeof(r));
+                }
             }
         }
         line = next;
@@ -281,9 +341,10 @@ static void flush(int may_wait) {
         HeapFree(GetProcessHeap(), 0, copy);
     }
     if (g_status[0]) {
-        char status[200];
-        int len = snprintf(status, sizeof(status), "calls=%ld\ntranslated=%ld\nmissed=%ld\nentries=%lu\n",
-                           (long)g_calls, (long)g_translated, (long)g_missed, (unsigned long)g_dict.count);
+        char status[400];
+        int len = snprintf(status, sizeof(status), "calls=%ld\ntranslated=%ld\nmissed=%ld\nentries=%lu\nbuffer_hits=%ld\nswaps=%ld\ncanvas=%s\n",
+                           (long)g_calls, (long)g_translated, (long)g_missed, (unsigned long)g_dict.count,
+                           (long)g_buffer_hits, (long)g_swaps, g_canvas ? gs_canvas_state() : "off");
         if (len > 0) write_file(g_status, status, (size_t)len, 0);
     }
 }
@@ -295,35 +356,71 @@ static BOOL WINAPI hook_TextOutW(HDC, int, int, LPCWSTR, int);
 static int WINAPI hook_DrawTextW(HDC, LPCWSTR, int, LPRECT, UINT);
 static int WINAPI hook_DrawTextExW(HDC, LPWSTR, int, LPRECT, UINT, LPDRAWTEXTPARAMS);
 static HRESULT WINAPI hook_DWriteCreateFactory(DWRITE_FACTORY_TYPE, REFIID, IUnknown **);
+static int WINAPI hook_MultiByteToWideChar(UINT, DWORD, LPCCH, int, LPWSTR, int);
+static int WINAPI hook_WideCharToMultiByte(UINT, DWORD, LPCWCH, int, LPSTR, int, LPCCH, LPBOOL);
+static int __cdecl hook_wcscpy_s(wchar_t *, size_t, const wchar_t *);
+static wchar_t *__cdecl hook_wcsncpy(wchar_t *, const wchar_t *, size_t);
+static int __cdecl hook_vsnwprintf(wchar_t *, size_t, const wchar_t *, va_list);
+static int __cdecl hook_vsnprintf(char *, size_t, const char *, va_list);
+static int __cdecl hook_vsnprintf_std(char *, size_t, const char *, va_list);
+static int __cdecl hook_common_vswprintf(unsigned __int64, wchar_t *, size_t, const wchar_t *, void *, va_list);
+static int __cdecl hook_common_vsprintf(unsigned __int64, char *, size_t, const char *, void *, va_list);
+static HRESULT WINAPI hook_D3D11CreateDevice(void *, int, HMODULE, UINT, const void *, UINT, UINT, void **, void *, void **);
+static HRESULT WINAPI hook_D3D11CreateDeviceAndSwapChain(void *, int, HMODULE, UINT, const void *, UINT, UINT, const void *, void **, void **, void *, void **);
 static HMODULE WINAPI hook_LoadLibraryW(LPCWSTR);
 static HMODULE WINAPI hook_LoadLibraryA(LPCSTR);
 static HMODULE WINAPI hook_LoadLibraryExW(LPCWSTR, HANDLE, DWORD);
 static HMODULE WINAPI hook_LoadLibraryExA(LPCSTR, HANDLE, DWORD);
 static FARPROC WINAPI hook_GetProcAddress(HMODULE, LPCSTR);
 
-enum { H_EXTTEXTOUTW, H_TEXTOUTW, H_DRAWTEXTW, H_DRAWTEXTEXW, H_DWRITECREATEFACTORY, H_TEXT_END = H_DWRITECREATEFACTORY,
+enum { H_EXTTEXTOUTW, H_TEXTOUTW, H_DRAWTEXTW, H_DRAWTEXTEXW, H_DWRITECREATEFACTORY,
+       H_MULTIBYTETOWIDECHAR, H_WIDECHARTOMULTIBYTE, H_WCSCPY_S, H_WCSNCPY, H_VSNWPRINTF, H_VSNPRINTF, H_VSNPRINTF_STD,
+       H_COMMON_VSWPRINTF, H_COMMON_VSPRINTF, H_D3D11CREATEDEVICE, H_D3D11CREATEDEVICEANDSWAPCHAIN, H_TEXT_END = H_D3D11CREATEDEVICEANDSWAPCHAIN,
        H_LOADLIBRARYW, H_LOADLIBRARYA, H_LOADLIBRARYEXW, H_LOADLIBRARYEXA, H_GETPROCADDRESS, H_COUNT };
+enum { ALWAYS, BUFFERS, CANVAS };
 
-static struct { const char *name; const WCHAR *library; void *hook; void *volatile real; } g_hooks[H_COUNT] = {
-    { "ExtTextOutW", L"gdi32.dll", (void *)hook_ExtTextOutW, NULL },
-    { "TextOutW", L"gdi32.dll", (void *)hook_TextOutW, NULL },
-    { "DrawTextW", L"user32.dll", (void *)hook_DrawTextW, NULL },
-    { "DrawTextExW", L"user32.dll", (void *)hook_DrawTextExW, NULL },
-    { "DWriteCreateFactory", L"dwrite.dll", (void *)hook_DWriteCreateFactory, NULL },
-    { "LoadLibraryW", L"kernel32.dll", (void *)hook_LoadLibraryW, NULL },
-    { "LoadLibraryA", L"kernel32.dll", (void *)hook_LoadLibraryA, NULL },
-    { "LoadLibraryExW", L"kernel32.dll", (void *)hook_LoadLibraryExW, NULL },
-    { "LoadLibraryExA", L"kernel32.dll", (void *)hook_LoadLibraryExA, NULL },
-    { "GetProcAddress", L"kernel32.dll", (void *)hook_GetProcAddress, NULL },
+static struct { const char *name; const WCHAR *library; void *hook; void *volatile real; int when; } g_hooks[H_COUNT] = {
+    { "ExtTextOutW", L"gdi32.dll", (void *)hook_ExtTextOutW, NULL, ALWAYS },
+    { "TextOutW", L"gdi32.dll", (void *)hook_TextOutW, NULL, ALWAYS },
+    { "DrawTextW", L"user32.dll", (void *)hook_DrawTextW, NULL, ALWAYS },
+    { "DrawTextExW", L"user32.dll", (void *)hook_DrawTextExW, NULL, ALWAYS },
+    { "DWriteCreateFactory", L"dwrite.dll", (void *)hook_DWriteCreateFactory, NULL, ALWAYS },
+    { "MultiByteToWideChar", L"kernel32.dll", (void *)hook_MultiByteToWideChar, NULL, BUFFERS },
+    { "WideCharToMultiByte", L"kernel32.dll", (void *)hook_WideCharToMultiByte, NULL, BUFFERS },
+    { "wcscpy_s", L"ucrtbase.dll", (void *)hook_wcscpy_s, NULL, BUFFERS },
+    { "wcsncpy", L"ucrtbase.dll", (void *)hook_wcsncpy, NULL, BUFFERS },
+    { "_vsnwprintf", L"msvcrt.dll", (void *)hook_vsnwprintf, NULL, BUFFERS },
+    { "_vsnprintf", L"msvcrt.dll", (void *)hook_vsnprintf, NULL, BUFFERS },
+    { "vsnprintf", L"msvcrt.dll", (void *)hook_vsnprintf_std, NULL, BUFFERS },
+    { "__stdio_common_vswprintf", L"ucrtbase.dll", (void *)hook_common_vswprintf, NULL, BUFFERS },
+    { "__stdio_common_vsprintf", L"ucrtbase.dll", (void *)hook_common_vsprintf, NULL, BUFFERS },
+    { "D3D11CreateDevice", L"d3d11.dll", (void *)hook_D3D11CreateDevice, NULL, CANVAS },
+    { "D3D11CreateDeviceAndSwapChain", L"d3d11.dll", (void *)hook_D3D11CreateDeviceAndSwapChain, NULL, CANVAS },
+    { "LoadLibraryW", L"kernel32.dll", (void *)hook_LoadLibraryW, NULL, ALWAYS },
+    { "LoadLibraryA", L"kernel32.dll", (void *)hook_LoadLibraryA, NULL, ALWAYS },
+    { "LoadLibraryExW", L"kernel32.dll", (void *)hook_LoadLibraryExW, NULL, ALWAYS },
+    { "LoadLibraryExA", L"kernel32.dll", (void *)hook_LoadLibraryExA, NULL, ALWAYS },
+    { "GetProcAddress", L"kernel32.dll", (void *)hook_GetProcAddress, NULL, ALWAYS },
 };
 
-/* The real function, from the system library (this library's own imports are never hooked). */
+static int enabled(int which) {
+    int when = g_hooks[which].when;
+    return when == ALWAYS || (when == BUFFERS && g_buffers) || (when == CANVAS && g_canvas);
+}
+
+/* The real function: the one the game's import table had, else the system library's
+ * (this library's own imports are never hooked). */
 static void *real(int which) {
     void *found = g_hooks[which].real;
     if (found) return found;
     HMODULE library = GetModuleHandleW(g_hooks[which].library);
-    if (!library && which == H_DWRITECREATEFACTORY) library = LoadLibraryW(g_hooks[which].library);
+    if (!library && (which == H_DWRITECREATEFACTORY || g_hooks[which].when == BUFFERS)) library = LoadLibraryW(g_hooks[which].library);
     found = library ? (void *)GetProcAddress(library, g_hooks[which].name) : NULL;
+    if (!found && g_hooks[which].when == BUFFERS) {
+        HMODULE crt = GetModuleHandleW(L"msvcrt.dll");
+        if (!crt) crt = LoadLibraryW(L"msvcrt.dll");
+        found = crt ? (void *)GetProcAddress(crt, g_hooks[which].name) : NULL;
+    }
     g_hooks[which].real = found;
     return found;
 }
@@ -348,8 +445,9 @@ static void patch_thunks(BYTE *base, DWORD names_rva, DWORD table_rva) {
         if (IMAGE_SNAP_BY_ORDINAL(*names)) continue;
         const IMAGE_IMPORT_BY_NAME *by_name = (const IMAGE_IMPORT_BY_NAME *)(base + (DWORD)*names);
         int i = hook_index((const char *)by_name->Name);
-        if (i >= 0 && *table != g_hooks[i].hook) {
-            real(i);
+        if (i >= 0 && enabled(i) && *table != g_hooks[i].hook) {
+            /* The game's own CRT (msvcr120, ucrtbase...) is the real one for it. */
+            if (!g_hooks[i].real) g_hooks[i].real = *table;
             patch_pointer(table, g_hooks[i].hook);
         }
     }
@@ -415,7 +513,7 @@ static FARPROC WINAPI hook_GetProcAddress(HMODULE module, LPCSTR name) {
     FARPROC found = ((GetProcAddress_t)real(H_GETPROCADDRESS))(module, name);
     if (found && g_active && ((ULONG_PTR)name >> 16)) {
         int i = hook_index(name);
-        if (i >= 0 && i <= H_TEXT_END && real(i) == (void *)found) return (FARPROC)g_hooks[i].hook;
+        if (i >= 0 && i <= H_TEXT_END && enabled(i) && real(i) == (void *)found) return (FARPROC)g_hooks[i].hook;
     }
     return found;
 }
@@ -451,6 +549,280 @@ static int WINAPI hook_DrawTextExW(HDC dc, LPWSTR text, int count, LPRECT rect, 
     const WCHAR *arabic = (format & DT_MODIFYSTRING) ? NULL : arabic_for(text, count < 0 ? wlen(text) : (size_t)count, &n);
     if (arabic) return call(dc, (LPWSTR)arabic, (int)n, rect, format | (g_rtl ? DT_RTLREADING : 0), params);
     return call(dc, text, count, rect, format, params);
+}
+
+/* ---- Strings on their way to the game's UI: conversions, copies, formats ----------------- */
+
+static int busy(void) {
+    return g_busy == TLS_OUT_OF_INDEXES || TlsGetValue(g_busy) != NULL;
+}
+
+static void set_busy(int on) {
+    TlsSetValue(g_busy, on ? (LPVOID)1 : NULL);
+}
+
+/* The Arabic for a string seen in a buffer, or NULL. With the canvas on, it's drawn on the next frames. */
+static const WCHAR *seen_in_buffer(const WCHAR *text, size_t units, UINT *out_units) {
+    if (!g_active || !text || !units || units > 2000) return NULL;
+    InitOnceExecuteOnce(&g_loaded, load_table, NULL, NULL);
+    uint32_t n = 0;
+    const uint16_t *found = gs_find(&g_dict, (const uint16_t *)text, units, &n);
+    if (found && n) {
+        InterlockedIncrement(&g_buffer_hits);
+        if (g_canvas) gs_canvas_show(found, n);
+        *out_units = n;
+        return (const WCHAR *)found;
+    }
+    /* Games drawing their own text: dialogue the table doesn't have yet is noted, as the GDI hooks note theirs. */
+    if (g_canvas && gs_looks_like_line((const uint16_t *)text, units)) {
+        uint64_t hash = 0;
+        if (!gs_lookup(&g_dict, (const uint16_t *)text, units, &n, &hash) && hash) note_untranslated(text, units, hash);
+    }
+    return NULL;
+}
+
+/* Whether the Arabic goes into the game's buffer (not with the canvas: the game's font has no Arabic). */
+static int swapping(void) {
+    return g_swap && !g_canvas;
+}
+
+static int WINAPI hook_MultiByteToWideChar(UINT cp, DWORD flags, LPCCH src, int srclen, LPWSTR dst, int cap) {
+    MultiByteToWideChar_t call = (MultiByteToWideChar_t)real(H_MULTIBYTETOWIDECHAR);
+    int n = call(cp, flags, src, srclen, dst, cap);
+    if (n == 0 && cap > 0 && dst && g_active && swapping() && GetLastError() == ERROR_INSUFFICIENT_BUFFER && !busy()) {
+        /* The game made room for the Arabic a size query asked for, which is shorter than the English. */
+        set_busy(1);
+        WCHAR tmp[BUFFER_CAP];
+        UINT an = 0;
+        int m = call(cp, flags, src, srclen, tmp, BUFFER_CAP);
+        int term = m > 0 && tmp[m - 1] == 0;
+        const WCHAR *arabic = m > 1 ? seen_in_buffer(tmp, (size_t)(m - term), &an) : NULL;
+        if (arabic && (int)an + term <= cap) {
+            memcpy(dst, arabic, an * sizeof(WCHAR));
+            if (term) dst[an] = 0;
+            n = (int)an + term;
+            InterlockedIncrement(&g_swaps);
+            SetLastError(ERROR_SUCCESS);
+        }
+        set_busy(0);
+        return n;
+    }
+    if (n <= 1 || n > BUFFER_CAP || !g_active || busy()) return n;
+    set_busy(1);
+    UINT an = 0;
+    if (cap == 0) {
+        /* A size query: the game makes room for what comes next, so the Arabic's size goes back. */
+        WCHAR tmp[BUFFER_CAP];
+        int m = call(cp, flags, src, srclen, tmp, n);
+        int term = m > 0 && tmp[m - 1] == 0;
+        if (m == n && seen_in_buffer(tmp, (size_t)(m - term), &an) && swapping() && an + term <= BUFFER_CAP) n = (int)an + term;
+    } else if (dst) {
+        int term = dst[n - 1] == 0;
+        const WCHAR *arabic = seen_in_buffer(dst, (size_t)(n - term), &an);
+        if (arabic && swapping() && (int)an + term <= cap) {
+            memcpy(dst, arabic, an * sizeof(WCHAR));
+            if (term) dst[an] = 0;
+            n = (int)an + term;
+            InterlockedIncrement(&g_swaps);
+        }
+    }
+    set_busy(0);
+    return n;
+}
+
+static int WINAPI hook_WideCharToMultiByte(UINT cp, DWORD flags, LPCWCH src, int srclen, LPSTR dst, int cap, LPCCH def, LPBOOL used) {
+    WideCharToMultiByte_t call = (WideCharToMultiByte_t)real(H_WIDECHARTOMULTIBYTE);
+    /* Arabic only goes into UTF-8: other code pages have no Arabic letters. */
+    if (!g_active || busy() || !src || srclen == 0) return call(cp, flags, src, srclen, dst, cap, def, used);
+    set_busy(1);
+    size_t units = srclen < 0 ? wlen(src) : (size_t)srclen;
+    int term = srclen < 0 || (units && src[units - 1] == 0);
+    if (srclen > 0 && term) units--;
+    UINT an = 0;
+    const WCHAR *arabic = units <= BUFFER_CAP ? seen_in_buffer(src, units, &an) : NULL;
+    int result = -1;
+    if (arabic && swapping() && cp == CP_UTF8 && an + term <= BUFFER_CAP) {
+        WCHAR buf[BUFFER_CAP + 1];
+        memcpy(buf, arabic, an * sizeof(WCHAR));
+        buf[an] = 0;
+        int need = call(cp, flags, buf, (int)an + term, NULL, 0, def, used);
+        if (need > 0 && (cap == 0 || need <= cap)) {
+            result = cap == 0 ? need : call(cp, flags, buf, (int)an + term, dst, cap, def, used);
+            if (cap && result > 0) InterlockedIncrement(&g_swaps);
+        }
+    }
+    set_busy(0);
+    return result > 0 ? result : call(cp, flags, src, srclen, dst, cap, def, used);
+}
+
+static int __cdecl hook_wcscpy_s(wchar_t *dst, size_t size, const wchar_t *src) {
+    wcscpy_s_t call = (wcscpy_s_t)real(H_WCSCPY_S);
+    if (g_active && !busy() && dst && src && size) {
+        set_busy(1);
+        UINT an = 0;
+        size_t units = wlen(src);
+        const WCHAR *arabic = units <= BUFFER_CAP ? seen_in_buffer(src, units, &an) : NULL;
+        set_busy(0);
+        if (arabic && swapping() && an + 1 <= size) {
+            memcpy(dst, arabic, an * sizeof(WCHAR));
+            dst[an] = 0;
+            InterlockedIncrement(&g_swaps);
+            return 0;
+        }
+    }
+    return call(dst, size, src);
+}
+
+static wchar_t *__cdecl hook_wcsncpy(wchar_t *dst, const wchar_t *src, size_t count) {
+    wcsncpy_t call = (wcsncpy_t)real(H_WCSNCPY);
+    if (g_active && !busy() && dst && src && count) {
+        set_busy(1);
+        UINT an = 0;
+        size_t units = 0;
+        while (units < count && src[units]) units++;
+        const WCHAR *arabic = units <= BUFFER_CAP ? seen_in_buffer(src, units, &an) : NULL;
+        set_busy(0);
+        if (arabic && swapping() && an <= count) {
+            /* As wcsncpy does: the rest of the count filled with zeros. */
+            memcpy(dst, arabic, an * sizeof(WCHAR));
+            for (size_t i = an; i < count; i++) dst[i] = 0;
+            InterlockedIncrement(&g_swaps);
+            return dst;
+        }
+    }
+    return call(dst, src, count);
+}
+
+/* A format the game passes: its Arabic (zero-terminated in `out`) when that takes the same arguments in the same order. */
+static const WCHAR *arabic_format(const WCHAR *format, WCHAR *out) {
+    size_t units = wlen(format);
+    UINT an = 0;
+    if (!units || units > BUFFER_CAP || !wcschr(format, L'%')) return NULL;
+    const WCHAR *arabic = seen_in_buffer(format, units, &an);
+    if (!arabic || !swapping() || an >= BUFFER_CAP || !gs_same_specifiers((const uint16_t *)format, units, (const uint16_t *)arabic, an)) return NULL;
+    memcpy(out, arabic, an * sizeof(WCHAR));
+    out[an] = 0;
+    return out;
+}
+
+/* What the game formatted: its Arabic in place, when it's a whole line the table has and fits. */
+static int arabic_output(WCHAR *buf, size_t count, int n) {
+    UINT an = 0;
+    if (n <= 0 || !buf || (size_t)n >= count || n > BUFFER_CAP) return n;
+    const WCHAR *arabic = seen_in_buffer(buf, (size_t)n, &an);
+    if (!arabic || !swapping() || an + 1 > count) return n;
+    memcpy(buf, arabic, an * sizeof(WCHAR));
+    buf[an] = 0;
+    InterlockedIncrement(&g_swaps);
+    return (int)an;
+}
+
+static int __cdecl hook_vsnwprintf(wchar_t *buf, size_t count, const wchar_t *format, va_list args) {
+    vsnwprintf_t call = (vsnwprintf_t)real(H_VSNWPRINTF);
+    if (!g_active || busy() || !format) return call(buf, count, format, args);
+    set_busy(1);
+    WCHAR swapped[BUFFER_CAP + 1];
+    const WCHAR *use = arabic_format(format, swapped);
+    int n = call(buf, count, use ? use : format, args);
+    if (!use) n = arabic_output(buf, count, n);
+    set_busy(0);
+    return n;
+}
+
+static int __cdecl hook_common_vswprintf(unsigned __int64 options, wchar_t *buf, size_t count, const wchar_t *format, void *locale, va_list args) {
+    common_vswprintf_t call = (common_vswprintf_t)real(H_COMMON_VSWPRINTF);
+    if (!g_active || busy() || !format) return call(options, buf, count, format, locale, args);
+    set_busy(1);
+    WCHAR swapped[BUFFER_CAP + 1];
+    const WCHAR *use = arabic_format(format, swapped);
+    int n = call(options, buf, count, use ? use : format, locale, args);
+    if (!use) n = arabic_output(buf, count, n);
+    set_busy(0);
+    return n;
+}
+
+/* Narrow strings, read as UTF-8: always looked up (for the canvas), swapped only with narrow=1. */
+static const char *arabic_format8(const char *format, char *out) {
+    size_t bytes = strlen(format);
+    uint16_t wide[BUFFER_CAP];
+    if (!bytes || bytes > BUFFER_CAP || !strchr(format, '%')) return NULL;
+    size_t units = gs_utf8_to_utf16(format, bytes, wide, BUFFER_CAP);
+    if (units == (size_t)-1) return NULL;
+    UINT an = 0;
+    const WCHAR *arabic = seen_in_buffer((const WCHAR *)wide, units, &an);
+    if (!arabic || !g_narrow || !swapping() || !gs_same_specifiers(wide, units, (const uint16_t *)arabic, an)) return NULL;
+    size_t n = gs_utf16_to_utf8((const uint16_t *)arabic, an, out, BUFFER_CAP * 3);
+    if (n == (size_t)-1) return NULL;
+    out[n] = 0;
+    return out;
+}
+
+static int arabic_output8(char *buf, size_t count, int n) {
+    uint16_t wide[BUFFER_CAP];
+    if (n <= 0 || !buf || (size_t)n >= count || n > BUFFER_CAP) return n;
+    size_t units = gs_utf8_to_utf16(buf, (size_t)n, wide, BUFFER_CAP);
+    UINT an = 0;
+    const WCHAR *arabic = units == (size_t)-1 ? NULL : seen_in_buffer((const WCHAR *)wide, units, &an);
+    if (!arabic || !g_narrow || !swapping()) return n;
+    char utf8[BUFFER_CAP * 3 + 1];
+    size_t m = gs_utf16_to_utf8((const uint16_t *)arabic, an, utf8, BUFFER_CAP * 3);
+    if (m == (size_t)-1 || m + 1 > count) return n;
+    memcpy(buf, utf8, m);
+    buf[m] = 0;
+    InterlockedIncrement(&g_swaps);
+    return (int)m;
+}
+
+static int narrow_format(int which, char *buf, size_t count, const char *format, va_list args) {
+    vsnprintf_t call = (vsnprintf_t)real(which);
+    if (!g_active || busy() || !format) return call(buf, count, format, args);
+    set_busy(1);
+    char swapped[BUFFER_CAP * 3 + 1];
+    const char *use = arabic_format8(format, swapped);
+    int n = call(buf, count, use ? use : format, args);
+    if (!use) n = arabic_output8(buf, count, n);
+    set_busy(0);
+    return n;
+}
+
+static int __cdecl hook_vsnprintf(char *buf, size_t count, const char *format, va_list args) {
+    return narrow_format(H_VSNPRINTF, buf, count, format, args);
+}
+
+static int __cdecl hook_vsnprintf_std(char *buf, size_t count, const char *format, va_list args) {
+    return narrow_format(H_VSNPRINTF_STD, buf, count, format, args);
+}
+
+static int __cdecl hook_common_vsprintf(unsigned __int64 options, char *buf, size_t count, const char *format, void *locale, va_list args) {
+    common_vsprintf_t call = (common_vsprintf_t)real(H_COMMON_VSPRINTF);
+    if (!g_active || busy() || !format) return call(options, buf, count, format, locale, args);
+    set_busy(1);
+    char swapped[BUFFER_CAP * 3 + 1];
+    const char *use = arabic_format8(format, swapped);
+    int n = call(options, buf, count, use ? use : format, locale, args);
+    if (!use) n = arabic_output8(buf, count, n);
+    set_busy(0);
+    return n;
+}
+
+/* ---- Direct3D 11: devices Direct2D can draw on, and their swap chains (gs_render.c) -------- */
+
+static HRESULT WINAPI hook_D3D11CreateDevice(void *adapter, int type, HMODULE software, UINT flags, const void *levels, UINT count,
+                                             UINT sdk, void **device, void *level, void **context) {
+    D3D11CreateDevice_t call = (D3D11CreateDevice_t)real(H_D3D11CREATEDEVICE);
+    if (!call) return E_FAIL;
+    HRESULT hr = g_canvas ? call(adapter, type, software, flags | BGRA_SUPPORT, levels, count, sdk, device, level, context) : E_FAIL;
+    return SUCCEEDED(hr) ? hr : call(adapter, type, software, flags, levels, count, sdk, device, level, context);
+}
+
+static HRESULT WINAPI hook_D3D11CreateDeviceAndSwapChain(void *adapter, int type, HMODULE software, UINT flags, const void *levels, UINT count,
+                                                         UINT sdk, const void *desc, void **swap, void **device, void *level, void **context) {
+    D3D11CreateDeviceAndSwapChain_t call = (D3D11CreateDeviceAndSwapChain_t)real(H_D3D11CREATEDEVICEANDSWAPCHAIN);
+    if (!call) return E_FAIL;
+    HRESULT hr = g_canvas ? call(adapter, type, software, flags | BGRA_SUPPORT, levels, count, sdk, desc, swap, device, level, context) : E_FAIL;
+    if (FAILED(hr)) hr = call(adapter, type, software, flags, levels, count, sdk, desc, swap, device, level, context);
+    if (SUCCEEDED(hr) && g_canvas && swap && *swap) gs_canvas_hook_swapchain(*swap);
+    return hr;
 }
 
 static void *factory_real(void *factory, int gdi) {
@@ -517,6 +889,7 @@ static HRESULT WINAPI hook_DWriteCreateFactory(DWRITE_FACTORY_TYPE type, REFIID 
 static DWORD WINAPI worker(LPVOID unused) {
     (void)unused;
     patch_game_modules();
+    if (g_canvas) gs_canvas_start(g_font[0] ? g_font : NULL, g_region);
     while (!g_stop) {
         Sleep(2000);
         flush(1);
@@ -535,7 +908,10 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved) {
         read_settings();
         if (!host_is_the_game()) return TRUE;   /* a pass-through library, nothing more */
         InitializeCriticalSection(&g_lock);
+        g_busy = TlsAlloc();
         g_active = 1;
+        /* With the canvas, the program's own imports are hooked now, before it makes its Direct3D device. */
+        if (g_canvas) patch_module(GetModuleHandleW(NULL));
         /* The thread starts once Windows has finished loading libraries (it waits for the loader). */
         g_worker = CreateThread(NULL, 0, worker, NULL, 0, NULL);
     } else if (reason == DLL_PROCESS_DETACH && g_active) {

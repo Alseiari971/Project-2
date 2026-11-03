@@ -50,7 +50,8 @@ def build(out: Path) -> dict:
     for name, (define, exports) in PROXIES.items():
         target = out / name
         command = [*cc, *FLAGS, f'-D{define}', '-o', str(target),
-                   str(SOURCES / 'gs_core.c'), str(SOURCES / 'gs_hook.c'), str(SOURCES / 'gs_proxy.c'), str(SOURCES / exports)]
+                   str(SOURCES / 'gs_core.c'), str(SOURCES / 'gs_hook.c'), str(SOURCES / 'gs_render.c'), str(SOURCES / 'gs_proxy.c'),
+                   str(SOURCES / exports)]
         print(' '.join(command))
         subprocess.run(command, check=True)
         hashes[name] = hashlib.sha256(target.read_bytes()).hexdigest()

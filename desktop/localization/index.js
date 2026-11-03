@@ -2,8 +2,9 @@
 // adds or removes the pack's files.
 //
 // Tiers, decided before launch:
-// - 'unreal-pak'    Unreal Engine 4/5: a _P patch pak in Content/Paks that the
-//                   game loads after its own, with the Arabic text and font.
+// - 'unreal-pak'    Unreal Engine 4/5: a _P patch pak in Content/Paks/~mods that
+//                   the game loads after its own, with the Arabic text and font
+//                   (UE5 IoStore games: with its own .utoc and .ucas).
 // - 'unity-bepinex' Unity: BepInEx + XUnity.AutoTranslator reading the compiled
 //                   dictionary, with an Arabic TextMeshPro fallback font.
 // - 're-patch'      Capcom RE Engine: the pack's .pak as the game's next
@@ -25,13 +26,15 @@
 //                   admin signed (see localization/arabic_compiler/recipes.py);
 //                   the repacked files replace the game's, kept and put back too.
 // - 'native-runtime' Other single-player 64-bit engines whose archives no tool
-//                   can repack, but whose UI text goes through Windows' text
-//                   functions (GDI, DirectWrite): GameShelf's runtime adapter
-//                   (localization/runtime/) stands in for a library the game
-//                   loads from its folder, and swaps each English string for its
-//                   Arabic right before Windows lays it out, so the game's own UI
-//                   draws it. Nothing in the game's files changes; only the
-//                   library this copy of GameShelf ships is ever installed.
+//                   can repack: GameShelf's runtime adapter (localization/runtime/)
+//                   stands in for a library the game loads from its folder. Games
+//                   whose UI text goes through Windows' text functions (GDI,
+//                   DirectWrite) get each English string swapped for its Arabic
+//                   right before Windows lays it out; games that draw their own
+//                   text on Direct3D 11 get the Arabic of the lines they use drawn
+//                   onto their own frames (runtimeCheck, modes). Nothing in the
+//                   game's files changes; only the library this copy of GameShelf
+//                   ships is ever installed.
 // - 'overlay'       Every game with anti-cheat (and packs made for the overlay):
 //                   subtitles drawn in GameShelf's own window, without touching the game.
 const fs = require('node:fs/promises');
@@ -57,6 +60,9 @@ const ENGINE_NAMES = {
 };
 // Tiers whose packs replace some of the game's own files (kept aside, and put back when Arabic is turned off).
 const REPLACING_TIERS = new Set(['bethesda-strings', 'loose-files', 'recipe']);
+const NATIVE_TABLES = /\.(fmg|msgbnd|msgbnd\.dcx|fmg\.dcx|gxt2|gmd)$|(^|\/)(msg|message)\/.*\.arc$/i;
+// Where Unreal patches go, inside Content/Paks.
+const UNREAL_MODS = '~mods';
 // RE Engine patch numbers have three digits.
 const MAX_RE_PATCH = 999;
 const native = (tier) => ({ tier, fileChanges: true, reason: null, why: null });
@@ -127,23 +133,40 @@ async function preflight(root, { steamAppId, ownMods = false, maxEntries } = {})
   // known to pack their text, the game's engine recipe; otherwise the runtime
   // adapter, when it can reach the game's text; else an engine recipe.
   const { family, looseText, runtime } = engine.custom || {};
-  if (looseText?.length && family?.needs !== 'recipe') return { ...base, ...native('loose-files') };
+  // Message tables GameShelf reads natively (FromSoftware .fmg/.msgbnd, Rockstar .gxt2, MT Framework .gmd/.arc)
+  // go in as loose files even for engines whose archives otherwise need a recipe.
+  const nativeTables = (looseText || []).some((rel) => NATIVE_TABLES.test(rel));
+  if (looseText?.length && (family?.needs !== 'recipe' || nativeTables)) return { ...base, ...native('loose-files') };
   if (family?.needs === 'recipe') return { ...base, ...native('recipe') };
   const adapter = runtimeCheck(runtime, ownMods);
   if (adapter.ok) return { ...base, ...native('native-runtime'), adapter };
   return { ...base, ...native('recipe'), adapter };
 }
 
-/** Whether the runtime adapter can serve a custom-engine game ({ ok, why }; `runtime` from engine.js). */
+/**
+ * Whether the runtime adapter can serve a custom-engine game, and how
+ * ({ ok, why, mode }; `runtime` from engine.js). Modes:
+ * - 'text':   the game draws with Windows' text functions (GDI, DirectWrite),
+ *             which lay Arabic out: its strings are swapped for their Arabic;
+ * - 'canvas': it draws its own text (font atlases, Scaleform, FreeType) on
+ *             Direct3D 11: the Arabic of the lines it uses is drawn onto its
+ *             frames by the adapter, inside the game (gs_render.c).
+ */
 function runtimeCheck(runtime, ownMods = false) {
   if (!runtime) return { ok: false, why: 'GameShelf couldn\'t find the game\'s program.' };
   if (runtime.arch !== 'x64') return { ok: false, why: 'The runtime adapter is for 64-bit games.' };
-  if (!runtime.textApis.length) return { ok: false, why: 'This game doesn\'t draw its text with Windows\' text functions (GDI or DirectWrite).' };
+  const text = runtime.textApis.length > 0;
+  const canvas = !text && runtime.d3d11 && (runtime.buffers || []).length > 0;
+  if (!text && !canvas) {
+    return { ok: false, why: runtime.d3d12 && !runtime.d3d11
+      ? 'This game draws its own text with Direct3D 12, which the runtime adapter can\'t draw on yet.'
+      : 'This game doesn\'t draw its text with Windows\' text functions (GDI or DirectWrite), or on Direct3D 11.' };
+  }
   if (!runtime.proxy) return { ok: false, why: 'This game doesn\'t load a Windows library the runtime adapter can stand in for.' };
   if (runtime.present.includes(runtime.proxy) && !ownMods) {
     return { ok: false, why: `This game already has a ${runtime.proxy} in its folder (another mod's). GameShelf leaves it as it is.` };
   }
-  return { ok: true, why: null };
+  return { ok: true, why: null, mode: text ? 'text' : 'canvas' };
 }
 
 /** Where the runtime adapter writes what it saw in a game (outside the game's folder). */
@@ -151,8 +174,13 @@ function runtimeFolder(dataDir, root) {
   return path.join(dataDir, 'localization', 'runtime', sha256(fold(path.resolve(root))).slice(0, 16));
 }
 
-/** The adapter's settings (gameshelf_arabic/gameshelf_runtime.ini), written by GameShelf when Arabic goes in. */
-function runtimeSettings({ exe, root, font, folder }) {
+/**
+ * The adapter's settings (gameshelf_arabic/gameshelf_runtime.ini), written by GameShelf when Arabic goes in.
+ * `mode` is runtimeCheck's; `region` the subtitle area for the canvas (x, y, width, height, as parts of the frame).
+ */
+function runtimeSettings({ exe, root, font, folder, mode = 'text', region = null }) {
+  const canvas = mode === 'canvas';
+  const area = Array.isArray(region) && region.length === 4 && region.every((n) => Number.isFinite(n) && n >= 0 && n <= 1) ? region : [0.08, 0.76, 0.84, 0.2];
   return [
     '; GameShelf\'s runtime adapter settings. GameShelf writes this when Arabic is turned on and removes it when it\'s turned off.',
     `exe=${exe}`,
@@ -162,6 +190,11 @@ function runtimeSettings({ exe, root, font, folder }) {
     `dump=${path.join(folder, 'untranslated.txt')}`,
     `status=${path.join(folder, 'status.txt')}`,
     'rtl=1',
+    // The strings the game converts, copies and formats: swapped for their Arabic, or (canvas) drawn onto its frames.
+    'buffers=1',
+    `swap=${canvas ? 0 : 1}`,
+    `canvas=${canvas ? 1 : 0}`,
+    ...(canvas ? [`canvas_region=${area.map((n) => Number(n.toFixed(3))).join(',')}`] : []),
     '',
   ].join('\r\n');
 }
@@ -219,7 +252,8 @@ async function stagePlan(check, pack, { runtimeDir } = {}) {
   if (check.tier === 'native-runtime') {
     const { runtime } = engine.custom;
     const font = files.find((f) => /^gameshelf_arabic\/[^/]+\.(ttf|otf)$/i.test(f.target));
-    const settings = runtimeSettings({ exe: path.basename(runtime.exe), root: check.root, font: font?.target, folder: runtimeDir });
+    const mode = runtimeCheck(runtime, true).mode || 'text';
+    const settings = runtimeSettings({ exe: path.basename(runtime.exe), root: check.root, font: font?.target, folder: runtimeDir, mode, region: pack.manifest.overlay?.region || null });
     files.push({ target: RUNTIME_SETTINGS, content: settings, sha256: sha256(settings), mutable: true });
     return { anchor: runtime.dir, files, generated: [] };
   }
@@ -229,7 +263,8 @@ async function stagePlan(check, pack, { runtimeDir } = {}) {
     return { anchor: engine.base, files, generated: [] };
   }
   if (check.tier === 'unreal-pak') {
-    return { anchor: engine.unreal.paksDir, files, generated: [] };
+    // Content/Paks/~mods: the game mounts every pak under Paks, and ~mods keeps GameShelf's apart from its own.
+    return { anchor: engine.unreal.paksDir, files: files.map((f) => ({ ...f, target: `${UNREAL_MODS}/${f.target}` })), generated: [] };
   }
   if (check.tier === 're-patch') {
     // The pack's one .pak, as the next patch number, checked again as it's added.
@@ -242,7 +277,10 @@ async function stagePlan(check, pack, { runtimeDir } = {}) {
     };
   }
   if (check.tier === 'renpy-tl') {
-    files.push({ target: renpy.HOOK_SCRIPT, content: renpy.SCRIPT, sha256: sha256(renpy.SCRIPT) });
+    const json = files.find((f) => f.target === `${renpy.HOOK_DIR}/strings.json`);
+    for (const script of renpy.scriptsFor(json ? await fs.readFile(json.source, 'utf8') : '{}')) {
+      files.push({ ...script, sha256: sha256(script.content) });
+    }
     return { anchor: engine.base, files, generated: renpy.GENERATED };
   }
   if (check.tier === 'godot-override') {
@@ -367,5 +405,5 @@ function createLocalization({ dataDir, runtimeHooks = null }) {
 
 module.exports = {
   preflight, enableArabic, disableArabic, retireArabic, watchList, createLocalization, LocalizationError, StageError, fill, TIER_ENGINES, REPLACING_TIERS, ENGINE_NAMES,
-  runtimeCheck, runtimeFolder, runtimeSettings,
+  runtimeCheck, runtimeFolder, runtimeSettings, UNREAL_MODS,
 };

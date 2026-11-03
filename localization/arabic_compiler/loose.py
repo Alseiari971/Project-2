@@ -19,6 +19,11 @@ text, strings, dialog, subtitles...), or with an English marker in their path
 marked for another language are left alone, and in tables with a column per
 language only the English column changes.
 
+Message tables in games' own binary formats are read and written natively too:
+FromSoftware .fmg (and .msgbnd/.dcx binders of them, fromsoft.py), Rockstar
+.gxt2 (rage.py), and Capcom MT Framework .gmd (and .arc archives of them,
+mtframework.py); each comes back in its own format.
+
 Loose font files in the game's fonts folders (.ttf, .otf) can be swapped for
 IBM Plex Sans Arabic too, keeping their names, so the game draws the Arabic
 letters; icon and symbol fonts are left alone.
@@ -32,20 +37,24 @@ import json
 import os
 import re
 import struct
+import zlib
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-TEXT_EXTENSIONS = {'.json', '.csv', '.tsv', '.xml', '.po', '.mo', '.txt', '.ini', '.cfg', '.lang', '.loc', '.yaml', '.yml', '.strings'}
+TEXT_EXTENSIONS = {'.json', '.csv', '.tsv', '.xml', '.po', '.mo', '.txt', '.ini', '.cfg', '.lang', '.loc', '.yaml', '.yml', '.strings',
+                   '.fmg', '.msgbnd', '.dcx', '.gxt2', '.gmd', '.arc'}
+BINARY_TEXT = {'.fmg', '.msgbnd', '.dcx', '.gxt2', '.gmd', '.arc'}
 FONT_EXTENSIONS = {'.ttf', '.otf'}
 TEXT_DIRS = {'localization', 'localisation', 'locale', 'locales', 'lang', 'langs', 'language', 'languages', 'i18n', 'l10n',
              'loc', 'text', 'texts', 'strings', 'string', 'dialog', 'dialogs', 'dialogue', 'dialogues', 'subtitles', 'subs',
-             'translation', 'translations', 'messages'}
+             'translation', 'translations', 'messages', 'msg', 'message'}
 WEAK_DIRS = {'data', 'content', 'assets', 'resources', 'res', 'gamedata', 'game'}
 FONT_DIRS = {'font', 'fonts', 'typeface', 'typefaces'}
 SKIP_DIRS = {'_commonredist', 'redist', 'redistributables', 'directx', 'vcredist', '.git', 'crashreporter', 'crashpad',
              'easyanticheat', 'battleye', 'licenses', 'license', 'legal', 'eula', 'manual', 'docs', 'mono', 'monobleedingedge',
              'jre', 'java', 'python', 'node_modules', 'saves', 'savegames', 'logs', 'shadercache', 'gameshelf_arabic'}
-ENGLISH_CODES = {'en', 'eng', 'english', 'en_us', 'en-us', 'enus', 'en_gb', 'en-gb', 'engb', 'en_uk', 'en-uk', 'us', 'default'}
+ENGLISH_CODES = {'en', 'eng', 'english', 'en_us', 'en-us', 'enus', 'en_gb', 'en-gb', 'engb', 'en_uk', 'en-uk', 'us', 'default',
+                 'engus', 'american'}
 OTHER_CODES = {
     'fr', 'fra', 'fre', 'french', 'de', 'deu', 'ger', 'german', 'es', 'esp', 'spa', 'spanish', 'es_mx', 'es-mx', 'mx',
     'it', 'ita', 'italian', 'pt', 'por', 'portuguese', 'pt_br', 'pt-br', 'ptbr', 'br', 'brazilian', 'ru', 'rus', 'russian',
@@ -54,6 +63,9 @@ OTHER_CODES = {
     'ara', 'arabic', 'nl', 'dutch', 'sv', 'swedish', 'da', 'danish', 'no', 'nb', 'norwegian', 'fi', 'finnish', 'cs', 'cz',
     'czech', 'hu', 'hungarian', 'ro', 'romanian', 'uk', 'ua', 'ukrainian', 'el', 'greek', 'th', 'thai', 'vi', 'vietnamese',
     'id', 'indonesian', 'he', 'hebrew', 'bg', 'bulgarian', 'latam',
+    # FromSoftware's msg/<language> folders, Rockstar's language names
+    'jpnjp', 'frafr', 'deude', 'itait', 'spaes', 'spaar', 'polpl', 'porbr', 'rusru', 'korkr', 'zhotw', 'zhocn', 'thath', 'araae',
+    'engbr', 'mexican', 'chinesesimp', 'tur',
 }
 ALL_CODES = ENGLISH_CODES | OTHER_CODES
 # Codes that are also ordinary words or abbreviations in file names ("item_id", "no_save"): only a whole name counts.
@@ -533,10 +545,84 @@ def read_lines(path: Path, rel: str, data: bytes) -> TextFile | None:
     return TextFile(path, rel, 'lines', entries, writer, breaks=False)
 
 
+# ---- Message tables in games' own binary formats ------------------------------------------
+
+def _binary_entries(tables: dict, items) -> list:
+    entries = []
+    for table, pairs in tables.items():
+        for place, text in items(pairs):
+            if text and looks_like_text(text):
+                entries.append((f'{table}#{place}', text))
+    return entries
+
+
+def read_fromsoft(path: Path, rel: str, data: bytes) -> TextFile | None:
+    """A FromSoftware .fmg, .msgbnd or .dcx of them."""
+    from . import fromsoft
+    if not (data[:4] in (b'DCX\0', b'BND4') or data[:1] == b'\0'):
+        return None
+    try:
+        found = fromsoft.read_messages(data, path)
+    except fromsoft.FromSoftError:
+        return None
+    entries = _binary_entries(found.tables, lambda fmg: fmg.entries.items())
+
+    def writer(arabic):
+        changed = {}
+        for key, text in arabic.items():
+            table, _, place = key.rpartition('#')
+            fmg = found.tables.get(table)
+            if fmg is None or not place.lstrip('-').isdigit():
+                continue
+            if table not in changed:
+                changed[table] = fromsoft.Fmg(fmg.version, fmg.big_endian, dict(fmg.entries))
+            changed[table].entries[int(place)] = text
+        return found.rebuild(changed)
+    return TextFile(path, rel, 'fmg', entries, writer)
+
+
+def read_gxt2(path: Path, rel: str, data: bytes) -> TextFile | None:
+    from . import rage
+    try:
+        strings = rage.read_gxt2(data)
+    except rage.RageError:
+        return None
+    entries = [(f'{h:08X}', text) for h, text in strings.items() if looks_like_text(text)]
+
+    def writer(arabic):
+        out = dict(strings)
+        for key, text in arabic.items():
+            out[int(key, 16)] = text
+        return rage.write_gxt2(out)
+    return TextFile(path, rel, 'gxt2', entries, writer)
+
+
+def read_mt(path: Path, rel: str, data: bytes) -> TextFile | None:
+    """A Capcom MT Framework .gmd, or an .arc archive's .gmd tables."""
+    from . import mtframework
+    if data[:4] not in (b'GMD\0', b'ARC\0'):
+        return None
+    try:
+        found = mtframework.read_messages(data)
+    except mtframework.MtError:
+        return None
+    entries = _binary_entries(found.tables, lambda gmd: enumerate(gmd.strings))
+
+    def writer(arabic):
+        changed = {}
+        for key, text in arabic.items():
+            table, _, place = key.rpartition('#')
+            if table in found.tables and place.isdigit():
+                changed.setdefault(table, list(found.tables[table].strings))[int(place)] = text
+        return found.rebuild(changed)
+    return TextFile(path, rel, 'gmd', entries, writer)
+
+
 READERS = {'.json': read_json, '.csv': read_csv, '.tsv': lambda p, r, d: read_csv(p, r, d, '\t'), '.xml': read_xml,
-           '.po': read_po, '.mo': read_mo}
+           '.po': read_po, '.mo': read_mo, '.fmg': read_fromsoft, '.msgbnd': read_fromsoft, '.dcx': read_fromsoft,
+           '.gxt2': read_gxt2, '.gmd': read_mt, '.arc': read_mt}
 FORMATS = {'json': read_json, 'csv': read_csv, 'tsv': READERS['.tsv'], 'xml': read_xml, 'po': read_po, 'mo': read_mo,
-           'lines': read_lines, 'txt': read_lines, 'ini': read_lines}
+           'lines': read_lines, 'txt': read_lines, 'ini': read_lines, 'fmg': read_fromsoft, 'gxt2': read_gxt2, 'gmd': read_mt}
 
 
 def read_file(path: Path, rel: str | None = None, fmt: str | None = None) -> TextFile | None:
@@ -548,7 +634,7 @@ def read_file(path: Path, rel: str | None = None, fmt: str | None = None) -> Tex
         raise LooseError(f'GameShelf can\'t read "{fmt}" files.')
     try:
         found = reader(path, rel, data)
-    except (ValueError, csv.Error, UnicodeError, RecursionError):
+    except (ValueError, csv.Error, UnicodeError, RecursionError, struct.error, IndexError, zlib.error):
         return None
     return found if found and found.entries else None
 

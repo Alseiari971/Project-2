@@ -75,7 +75,8 @@ const RUNTIME_SETTINGS = 'gameshelf_arabic/gameshelf_runtime.ini';
 const BETHESDA_TABLE = /^[\w .'()&+!\-]+_[a-z]+\.(strings|dlstrings|ilstrings)$/i;
 const BETHESDA_FILES = new Set(['data/interface/fontconfig.txt', 'data/interface/gameshelf_arabic.swf']);
 // What a loose-file pack may hold: text, data and fonts.
-const LOOSE_FILE = /\.(json|csv|tsv|xml|po|mo|txt|ini|cfg|loc|lang|yaml|yml|strings|ttf|otf)$/i;
+// Text files, the message tables loose.py writes natively (.fmg, .msgbnd, .dcx, .gxt2, .gmd, .arc: data, never code), and fonts.
+const LOOSE_FILE = /\.(json|csv|tsv|xml|po|mo|txt|ini|cfg|loc|lang|yaml|yml|strings|fmg|msgbnd|dcx|gxt2|gmd|arc|ttf|otf)$/i;
 // What no pack may put into a game: programs, libraries and scripts.
 const EXECUTABLE = /\.(exe|dll|bat|cmd|ps1|psm1|vbs|vbe|js|jse|wsf|wsh|hta|msi|msp|scr|com|cpl|lnk|url|sys|drv|ocx|so|dylib|jar|py|pyw|sh|reg)$/i;
 /** Engines whose packs replace the game's own files (the originals are kept and put back). */

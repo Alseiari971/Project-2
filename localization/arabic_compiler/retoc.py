@@ -7,8 +7,10 @@ packages (.locres text tables and .ufont font files usually stay there, which
 repak reads). This module:
 
 - reads a container's header itself, to tell an encrypted container from an
-  open one (encrypted ones need the game's own key, which GameShelf never
-  looks for or uses: retoc is never given --aes-key);
+  open one. Encrypted ones are read only with a key an admin gave for that
+  game, in its signed recipe (handed to the builder in GAMESHELF_AES_KEY, see
+  aes_key below), and passed on to retoc and repak as --aes-key. GameShelf
+  never looks for a key: not in the game's program, its memory or anywhere else;
 - lists a container's files with `retoc list --path <utoc>` (one chunk per
   line: container, chunk ID, chunk type, path);
 - takes one file out with `retoc get <utoc> <chunk ID> <file>`, for a .locres
@@ -73,15 +75,42 @@ def toc_header(path: Path) -> TocHeader:
     return TocHeader(version, entries, head[80])
 
 
+AES_KEY = re.compile(r'0x[0-9A-Fa-f]{64}')
+
+
+def aes_key(env=None) -> str | None:
+    """The game's AES key an admin gave (GAMESHELF_AES_KEY, "0x" and 64 hex digits), or None."""
+    value = (os.environ if env is None else env).get('GAMESHELF_AES_KEY', '').strip()
+    if not value:
+        return None
+    if not AES_KEY.fullmatch(value):
+        raise RetocError('The game\'s key from its recipe isn\'t "0x" and 64 hex digits.')
+    return value
+
+
+def key_args(env=None) -> list:
+    """['--aes-key', key] for retoc and repak, when an admin gave the game's key; [] otherwise."""
+    key = aes_key(env)
+    return ['--aes-key', key] if key else []
+
+
+def redact(text: str) -> str:
+    """A tool's output, with any key in it hidden."""
+    return AES_KEY.sub('0x…', text or '')
+
+
 def find_tool(given: str | None = None) -> str | None:
     return given or os.environ.get('GAMESHELF_RETOC') or shutil.which('retoc')
 
 
-def _run(tool: str, *args, binary=False, timeout=900):
+def _run(tool: str, *args, binary=False, timeout=900, keyed=True):
     try:
-        return subprocess.run([tool, *args], capture_output=True, text=not binary, timeout=timeout)
+        result = subprocess.run([tool, *(key_args() if keyed else []), *args], capture_output=True, text=not binary, timeout=timeout)
     except (OSError, subprocess.TimeoutExpired) as err:
-        raise RetocError(f'retoc couldn\'t run: {err}') from None
+        raise RetocError(redact(f'retoc couldn\'t run: {err}')) from None
+    if not binary:
+        result.stdout, result.stderr = (result.stdout or ''), redact(result.stderr)
+    return result
 
 
 def game_containers(folder: Path) -> list:
@@ -165,7 +194,7 @@ def to_zen(tool: str, legacy: Path, out_utoc: Path, version: str, log=print) -> 
     """Converts a folder of cooked (legacy) packages into a container: returns the .utoc, .ucas and .pak paths."""
     command = [tool, 'to-zen', str(legacy), str(out_utoc), '--version', check_version(version)]
     log('Converting to an IoStore container: ' + ' '.join(command))
-    result = _run(*command, timeout=1800)
+    result = _run(*command, timeout=1800, keyed=False)
     made = [Path(out_utoc).with_suffix(ext) for ext in ('.utoc', '.ucas', '.pak')]
     if result.returncode != 0 or not all(p.is_file() for p in made):
         raise RetocError(f'retoc to-zen failed: {(result.stderr or result.stdout).strip()[-500:]}')

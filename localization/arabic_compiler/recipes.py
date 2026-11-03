@@ -124,6 +124,14 @@ def check_recipe(recipe: dict, registry: dict) -> dict:
         raise RecipeError('The recipe must say which game it\'s for (steamAppId or gameId).')
     if not isinstance(recipe.get('engine'), str) or not re.fullmatch(r'[\w\-]{1,60}', recipe['engine']):
         raise RecipeError('The recipe must name its engine.')
+    if recipe['engine'] == 'unreal':
+        # An Unreal game's key recipe: only the AES key an admin gave (GameShelf never looks for one).
+        extra = sorted(set(recipe) - {'format', 'game', 'engine', 'aesKey', 'note'})
+        if extra:
+            raise RecipeError(f'An Unreal key recipe holds only the game\'s key ("aesKey"), not {", ".join(extra)}.')
+        if not isinstance(recipe.get('aesKey'), str) or not re.fullmatch(r'0x[0-9A-Fa-f]{64}', recipe['aesKey']):
+            raise RecipeError('"aesKey" must be "0x" and 64 hex digits.')
+        return recipe
     tool = recipe.get('tool')
     needs_tool = bool(recipe.get('extract') or recipe.get('repack'))
     if needs_tool and tool not in registry['tools']:

@@ -43,11 +43,16 @@ import json, sys
 from pathlib import Path
 # Stands in for retoc: a .utoc here is a real header followed by a JSON list of chunks {id, type, path, hex}.
 args = sys.argv[1:]
-if '--aes-key' in args or '-a' in args:
-    sys.exit('this stand-in is never given a key')
+key = None
+if args[:1] == ['--aes-key']:
+    key, args = args[1], args[2:]
 cmd = args[0]
+GOOD = '0x' + 'ab' * 32
 def chunks(utoc):
-    return json.loads(Path(utoc).read_bytes()[144:])
+    data = Path(utoc).read_bytes()
+    if data[80] & 2 and key != GOOD:
+        sys.exit(f'{Path(utoc).name} is encrypted; the key {key} is wrong' if key else f'{Path(utoc).name} is encrypted')
+    return json.loads(data[144:])
 if cmd == 'list':
     utoc = [a for a in args[1:] if not a.startswith('--')][0]
     for c in chunks(utoc):
@@ -59,6 +64,8 @@ elif cmd == 'get':
         sys.exit('no such chunk')
     Path(out).write_bytes(bytes.fromhex(found[0]['hex']))
 elif cmd == 'to-zen':
+    if key:
+        sys.exit('our own container is never encrypted')
     folder, out = Path(args[1]), Path(args[2])
     version = args[args.index('--version') + 1]
     files = sorted(p.relative_to(folder).as_posix() for p in folder.rglob('*') if p.is_file())
@@ -73,10 +80,16 @@ else:
 FAKE_REPAK = r'''
 import json, sys
 from pathlib import Path
-cmd, args = sys.argv[1], sys.argv[2:]
+argv = sys.argv[1:]
+key = None
+if argv[:1] == ['--aes-key']:
+    key, argv = argv[1], argv[2:]
+cmd, args = argv[0], argv[1:]
 if cmd == 'pack':
     Path(args[-1]).write_bytes(b'the Arabic pak'); sys.exit(0)
 pak = json.loads(Path(args[0]).read_text())
+if pak.get('encrypted') and key != '0x' + 'ab' * 32:
+    sys.exit('the pak is AES encrypted')
 if cmd == 'list':
     print('\n'.join(pak['files']))
 elif cmd == 'info':
@@ -115,7 +128,7 @@ class IoStore(unittest.TestCase):
         game = self.tmp / 'PhantomBlade'
         paks = game / 'PhantomBlade' / 'Content' / 'Paks'
         paks.mkdir(parents=True)
-        (paks / 'pakchunk0-Windows.pak').write_text(json.dumps({'files': pak_files}))
+        (paks / 'pakchunk0-Windows.pak').write_text(json.dumps({'files': pak_files, 'encrypted': encrypted}))
         utoc(paks / 'pakchunk0-Windows.utoc', chunks, encrypted)
         (paks / 'pakchunk0-Windows.ucas').write_bytes(b'ucas')
         binaries = game / 'PhantomBlade' / 'Binaries' / 'Win64'
@@ -159,8 +172,59 @@ class IoStore(unittest.TestCase):
     def test_encrypted_containers_are_left_alone(self):
         game = self.game({}, [{'id': '0c' * 12, 'type': 'ExternalFile', 'path': '../../../PhantomBlade/Content/Localization/Game/en/Game.locres', 'hex': '00'}],
                          encrypted=True)
-        with self.assertRaisesRegex(SourceError, 'encrypted .*won\'t look for'):
+        with self.assertRaisesRegex(SourceError, 'encrypted .*never looks for keys: an admin can attach'):
             read_source(game)
+
+    def encrypted_game(self):
+        return self.game({}, [
+            {'id': '0c' * 12, 'type': 'ExternalFile', 'path': '../../../PhantomBlade/Content/Localization/Game/en/Game.locres', 'hex': english_locres().hex()},
+        ], encrypted=True)
+
+    def test_an_admin_given_key_is_passed_to_retoc_and_repak_and_opens_them(self):
+        game = self.encrypted_game()
+        with mock.patch.dict(os.environ, {'GAMESHELF_AES_KEY': '0x' + 'ab' * 32}):
+            source = read_source(game)
+        self.assertEqual([r.source for r in source.rows], ['Start the journey', 'Leave the blade behind'])
+        self.assertTrue(source.extra['iostore']['keyed'])
+        self.assertTrue(any('read with the key from the game\'s recipe' in n for n in source.notes))
+
+    def test_a_wrong_key_fails_without_showing_it_and_a_malformed_one_is_refused(self):
+        game = self.encrypted_game()
+        wrong = '0x' + 'cd' * 32
+        with mock.patch.dict(os.environ, {'GAMESHELF_AES_KEY': wrong}):
+            with self.assertRaisesRegex(SourceError, 'key in its recipe didn\'t open') as caught:
+                read_source(game)
+            self.assertNotIn(wrong, str(caught.exception))
+            result = retoc._run(os.environ['GAMESHELF_RETOC'], 'list', '--path', str(next(game.rglob('*.utoc'))))
+            self.assertIn('0x…', result.stderr)
+            self.assertNotIn(wrong, result.stderr)
+        for bad in ('abcd', '0x' + 'ab' * 31, '0x' + 'zz' * 32, '0x' + 'ab' * 32 + '; rm -rf /'):
+            with mock.patch.dict(os.environ, {'GAMESHELF_AES_KEY': bad}):
+                with self.assertRaises((SourceError, retoc.RetocError)):
+                    read_source(game)
+        self.assertEqual(retoc.key_args({}), [])
+        self.assertEqual(retoc.key_args({'GAMESHELF_AES_KEY': '0x' + 'AB' * 32}), ['--aes-key', '0x' + 'AB' * 32])
+
+    @unittest.skipUnless(HAS_NODE, 'signing needs Node.js')
+    def test_a_ue5_game_gets_the_pak_utoc_ucas_triplet_even_without_cooked_fonts(self):
+        game = self.game({'PhantomBlade/Content/Localization/Game/en/Game.locres': english_locres().hex()},
+                         [{'id': '0b' * 12, 'type': 'ExportBundleData', 'path': '../../../PhantomBlade/Content/Maps/Town.umap', 'hex': '00'}])
+        keys = self.tmp / 'keys'
+        subprocess.run(['node', str(REPO / 'scripts/localization-pack.js'), 'keygen', str(keys)], check=True, capture_output=True)
+        api = FakeApi()
+        self.addCleanup(api.close)
+        logged = []
+        with mock.patch.dict(os.environ, {'OPENAI_API_KEY': 'secret-key'}):
+            args = parse_args([str(game), '--id', 'pbz-ar', '--version', '1.0.0', '--steam-app-id', '2109880', '--key', str(keys / 'pack-signing.key'),
+                               '--out', str(self.tmp / 'out'), '--provider', 'openai', '--model', 'm', '--api-base', api.base])
+            pack = build(args, log=logged.append)
+        read = node_read_pack(pack, keys / 'pack-signing.pub')
+        self.assertEqual(sorted(read['files']), ['pakchunk99-ArabicLocalization_P.pak', 'pakchunk99-ArabicLocalization_P.ucas',
+                                                 'pakchunk99-ArabicLocalization_P.utoc'])
+        zen = json.loads((pack / 'payload' / 'pakchunk99-ArabicLocalization_P.utoc').read_bytes()[16:])
+        self.assertEqual(zen, {'version': 'UE5_4', 'files': []})
+        self.assertEqual((pack / 'payload' / 'pakchunk99-ArabicLocalization_P.pak').read_bytes(), b'the Arabic pak')
+        self.assertTrue(any('to go with the Arabic .pak' in line for line in logged))
 
     @unittest.skipUnless(HAS_NODE, 'signing needs Node.js')
     def test_cooked_font_packages_go_into_the_arabic_utoc_and_ucas_beside_the_pak(self):
@@ -220,8 +284,13 @@ class StringTable(unittest.TestCase):
         self.assertEqual(len(table), 2)
         self.assertEqual(runtime.lookup(table, 'Hello there,  traveler.\n'), 'مرحبًا أيها المسافر.')
         self.assertEqual(runtime.lookup(table, 'Continue'), 'متابعة')
-        hashes = [struct.unpack_from('<Q', data, 16 + i * 16)[0] for i in range(2)]
+        hashes = [struct.unpack_from('<Q', data, runtime.ENTRIES_AT + i * 16)[0] for i in range(2)]
         self.assertEqual(hashes, sorted(hashes))
+        # The length filter: the lengths English lines have (bytes of normalized UTF-8), and the shortest and longest.
+        self.assertEqual(struct.unpack_from('<HHII', data, 4), (2, 1, 2, len(data[runtime.ENTRIES_AT + 32:]) // 2))
+        self.assertEqual(struct.unpack_from('<HH', data, 16), (8, 22))
+        bitmap = data[24:24 + 512]
+        self.assertEqual([n for n in range(4096) if bitmap[n >> 3] >> (n & 7) & 1], [8, 22])
 
     def test_what_reads_like_text(self):
         for text in ('Where are you going, stranger?', 'The bridge is out. Find another way.', 'Continue', '"I never asked for this."',
@@ -355,12 +424,99 @@ class AdapterCore(unittest.TestCase):
         good = runtime.write_table([('One line here', 'سطر'), ('Another line', 'آخر')])
         self.assertEqual(self.run_harness(b'NOPE' + good[4:], [])[0], 'open -1')
         self.assertEqual(self.run_harness(good[:-2], [])[0], 'open -3')
+        at = runtime.ENTRIES_AT
         swapped = bytearray(good)
-        swapped[16:32], swapped[32:48] = good[32:48], good[16:32]
+        swapped[at:at + 16], swapped[at + 16:at + 32] = good[at + 16:at + 32], good[at:at + 16]
         self.assertEqual(self.run_harness(bytes(swapped), [])[0], 'open -4')
         too_long = bytearray(good)
-        struct.pack_into('<I', too_long, 16 + 12, 999)
+        struct.pack_into('<I', too_long, at + 12, 999)
         self.assertEqual(self.run_harness(bytes(too_long), [])[0], 'open -5')
+
+
+BUFFERS_HARNESS = r"""
+#include "gs_core.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static size_t widen(const char *s, uint16_t *out) {
+    size_t n = gs_utf8_to_utf16(s, strlen(s), out, 512);
+    return n == (size_t)-1 ? 0 : n;
+}
+
+int main(int argc, char **argv) {
+    (void)argc;
+    FILE *f = fopen(argv[1], "rb");
+    static unsigned char table[1 << 20];
+    size_t size = fread(table, 1, sizeof(table), f);
+    fclose(f);
+    gs_dict dict;
+    int opened = gs_dict_open(&dict, table, size);
+    printf("open %d filter %d %u %u\n", opened, dict.lengths != NULL, dict.min_bytes, dict.max_bytes);
+    const char *seen[] = { "Where are you going, stranger?", "  Where are you going,\tstranger?\n", "C:\\Games\\Lantern\\data\\ui.dat",
+                           "Continue", "%s has joined the party.", "x" };
+    for (int i = 0; i < 6; i++) {
+        uint16_t w[512]; size_t n = widen(seen[i], w); uint32_t len = 0;
+        const uint16_t *found = gs_find(&dict, w, n, &len);
+        char out[2048]; size_t m = found ? gs_utf16_to_utf8(found, len, out, sizeof(out)) : 0;
+        printf("find %d %.*s\n", found != NULL, (int)m, out);
+    }
+    const char *pairs[][2] = {
+        { "%s has joined the party.", "\xd8\xa7\xd9\x86\xd8\xb6\xd9\x85 %s \xd8\xa5\xd9\x84\xd9\x89 \xd8\xa7\xd9\x84\xd9\x81\xd8\xb1\xd9\x8a\xd9\x82." },
+        { "%s gave you %d gold", "%d gold from %s" },
+        { "%-10s %5.2f%%", "%s %.1f%%" },
+        { "%*d items", "%d items" },
+        { "%I64d points", "%lld points" },
+        { "%I64d points", "%I64d \xd9\x86\xd9\x82\xd8\xb7\xd8\xa9" },
+        { "100%% done", "\xd8\xaa\xd9\x85 100%%" },
+        { "%s and %s", "%s" },
+        { "%ls", "%s" },
+    };
+    for (int i = 0; i < 9; i++) {
+        uint16_t a[512], b[512]; size_t an = widen(pairs[i][0], a), bn = widen(pairs[i][1], b);
+        printf("same %d\n", gs_same_specifiers(a, an, b, bn));
+    }
+    const char *lines[] = { "Where are you going, stranger?", "Continue", "textures/ui/menu_bg.dds", "PLAYER_NAME_KEY", "Press <b>E</b> now please",
+                            "The gate opens at dawn." };
+    for (int i = 0; i < 6; i++) { uint16_t w[512]; size_t n = widen(lines[i], w); printf("line %d\n", gs_looks_like_line(w, n)); }
+    uint16_t w[8]; char back[16];
+    size_t bad = gs_utf8_to_utf16("\xc3\x28", 2, w, 8) == (size_t)-1 ? 0 : 1;
+    size_t emoji = gs_utf8_to_utf16("\xf0\x9f\x98\x80", 4, w, 8);
+    size_t again = gs_utf16_to_utf8(w, 2, back, sizeof(back));
+    printf("utf8 %zu %zu %zu\n", bad, emoji, again);
+    printf("ms %u %u %u\n", gs_subtitle_ms(3), gs_subtitle_ms(80), gs_subtitle_ms(500));
+    return 0;
+}
+"""
+
+
+@unittest.skipUnless(CC, 'needs a C compiler')
+class AdapterBuffers(unittest.TestCase):
+    """What the adapter's buffer hooks decide (gs_find, gs_same_specifiers...), in its own C, on a table the Python wrote."""
+
+    def test_buffers_formats_and_lines(self):
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp)
+        (tmp / 'h.c').write_text(BUFFERS_HARNESS, encoding='utf-8')
+        subprocess.run([CC, '-std=c11', '-Wall', '-Wextra', '-Werror', '-O1', f'-I{RUNTIME}', str(RUNTIME / 'gs_core.c'), str(tmp / 'h.c'), '-o', str(tmp / 'h')], check=True)
+        pairs = [('Where are you going, stranger?', 'إلى أين أنت ذاهب أيها الغريب؟'), ('Continue', 'متابعة'),
+                 ('%s has joined the party.', 'انضم %s إلى الفريق.')]
+        (tmp / 't.bin').write_bytes(runtime.write_table(pairs))
+        out = subprocess.run([str(tmp / 'h'), str(tmp / 't.bin')], capture_output=True, text=True, check=True).stdout.splitlines()
+        self.assertEqual(out[0], 'open 0 filter 1 8 30')
+        self.assertEqual(out[1:7], ['find 1 إلى أين أنت ذاهب أيها الغريب؟', 'find 1 إلى أين أنت ذاهب أيها الغريب؟', 'find 0 ',
+                                    'find 1 متابعة', 'find 1 انضم %s إلى الفريق.', 'find 0 '])
+        # Same arguments in the same order, or no swap: reordered, dropped or other-sized arguments are refused.
+        self.assertEqual([line.split()[1] for line in out[7:16]], ['1', '0', '1', '0', '0', '1', '1', '0', '0'])
+        self.assertEqual([line.split()[1] for line in out[16:22]], ['1', '0', '0', '0', '0', '1'])
+        self.assertEqual(out[22], 'utf8 0 2 4')
+        self.assertEqual(out[23], 'ms 2500 4800 8000')
+
+    def test_version_1_tables_still_open(self):
+        data = runtime.write_table([('Continue', 'متابعة')])
+        old = bytearray(data[:16] + data[runtime.ENTRIES_AT:])
+        struct.pack_into('<HH', old, 4, 1, 0)
+        self.assertEqual(runtime.read_table(bytes(old)), runtime.read_table(data))
 
 
 def pe_exports(data: bytes) -> list:

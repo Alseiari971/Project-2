@@ -32,7 +32,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 MAGIC = b'GSAR'
-VERSION = 1
+VERSION = 2
+LENGTH_FILTER = 1   # flags: the length filter follows the header (gs_core.h)
+MAX_UTF8 = 4096
+ENTRIES_AT = 16 + 520  # where a version 2 table's entries start, after its length filter
 SCAN_EXTENSIONS = {'.bin', '.dat', '.lang', '.wad', '.loc', '.str', '.locale', '.txt'}
 SKIP_DIRS = {'_commonredist', 'redist', 'directx', 'vcredist', '.git', 'crashreporter', 'easyanticheat', 'battleye',
              'gameshelf_arabic', 'saves', 'logs', 'shadercache', 'mono', 'monobleedingedge'}
@@ -81,30 +84,42 @@ def key_of(english: str) -> int:
 def write_table(pairs) -> bytes:
     """gameshelf_strings.bin from (English, Arabic) pairs; the first Arabic wins for an English line given twice."""
     entries = {}
+    lengths = set()
     for english, arabic in pairs:
         if not english or not arabic or not normalize(english):
             continue
         entries.setdefault(key_of(english), arabic)
+        lengths.add(len(normalize(english).encode('utf-8', 'replace')))
     blob = bytearray()
     table = []
     for hash_, arabic in sorted(entries.items()):
         units = arabic.encode('utf-16-le')
         table.append(struct.pack('<QII', hash_, len(blob) // 2, len(units) // 2))
         blob += units
-    return MAGIC + struct.pack('<HHII', VERSION, 0, len(table), len(blob) // 2) + b''.join(table) + bytes(blob)
+    # The length filter: which lengths (bytes of normalized UTF-8) English lines have, so the adapter can pass
+    # over the many strings a game converts and copies without hashing them.
+    bitmap = bytearray(512)
+    for n in lengths:
+        if n < MAX_UTF8:
+            bitmap[n >> 3] |= 1 << (n & 7)
+    short = min((n for n in lengths if n < MAX_UTF8), default=0)
+    long_ = max((n for n in lengths if n < MAX_UTF8), default=0)
+    head = MAGIC + struct.pack('<HHII', VERSION, LENGTH_FILTER, len(table), len(blob) // 2)
+    return head + struct.pack('<HHI', short, long_, 0) + bytes(bitmap) + b''.join(table) + bytes(blob)
 
 
 def read_table(data: bytes) -> dict:
     """{hash: Arabic} from gameshelf_strings.bin (for checks and tests)."""
     if data[:4] != MAGIC:
         raise TableError('Not a GameShelf string table.')
-    version, _, count, units = struct.unpack_from('<HHII', data, 4)
-    if version != VERSION or 16 + count * 16 + units * 2 > len(data):
+    version, flags, count, units = struct.unpack_from('<HHII', data, 4)
+    head = 16 + (520 if version >= 2 and flags & LENGTH_FILTER else 0)
+    if version not in (1, 2) or head + count * 16 + units * 2 > len(data):
         raise TableError('The string table is damaged.')
-    blob = data[16 + count * 16:16 + count * 16 + units * 2]
+    blob = data[head + count * 16:head + count * 16 + units * 2]
     out = {}
     for i in range(count):
-        hash_, offset, length = struct.unpack_from('<QII', data, 16 + i * 16)
+        hash_, offset, length = struct.unpack_from('<QII', data, head + i * 16)
         out[hash_] = blob[offset * 2:(offset + length) * 2].decode('utf-16-le')
     return out
 

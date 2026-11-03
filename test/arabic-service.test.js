@@ -102,7 +102,8 @@ test('native patch: switched on, added at Play, taken out when switched off', as
   assert.deepEqual(await fs.readdir(paks), ['pakchunk0-Windows.pak']); // nothing yet: it's added at Play
 
   assert.deepEqual(await arabic.prepareLaunch(game), { mode: 'native', ok: true });
-  assert.deepEqual((await fs.readdir(paks)).sort(), ['pakchunk0-Windows.pak', 'pakchunk99-ArabicLocalization_P.pak']);
+  assert.deepEqual((await fs.readdir(paks)).sort(), ['pakchunk0-Windows.pak', '~mods']);
+  assert.deepEqual(await fs.readdir(path.join(paks, '~mods')), ['pakchunk99-ArabicLocalization_P.pak']);
   assert.equal((await arabic.info(game)).staged, true);
 
   const running = await arabic.set(game, false, { isRunning: async () => true });

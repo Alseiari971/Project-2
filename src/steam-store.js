@@ -13,7 +13,7 @@ const MAX_BLOCKS = 80;
 // Features worth showing, in this order. Steam lists many more.
 const FEATURES = [
   'Single-player', 'Multi-player', 'Online PvP', 'PvP', 'Co-op', 'Online Co-op', 'Shared/Split Screen',
-  'Cross-Platform Multiplayer', 'Remote Play Together', 'Steam Achievements', 'Full controller support',
+  'Cross-Platform Multiplayer', 'MMO', 'Valve Anti-Cheat enabled', 'Remote Play Together', 'Steam Achievements', 'Full controller support',
   'Partial Controller Support', 'Steam Cloud', 'Steam Workshop', 'In-App Purchases', 'Family Sharing',
 ];
 
