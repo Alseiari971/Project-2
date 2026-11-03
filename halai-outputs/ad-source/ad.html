@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="ar" dir="rtl"><head><meta charset="utf-8">
+<style>
+@font-face { font-family: Alexandria; src: url(alexandria-arabic.woff2); font-weight: 100 900; }
+@font-face { font-family: Manrope; src: url(manrope.woff2); font-weight: 200 800; }
+:root { --bg: #0b0c0e; --accent: #e7ff0c; --text: #f2f3f5; }
+* { box-sizing: border-box; margin: 0; }
+html, body { width: 1080px; height: 1920px; background: var(--bg); overflow: hidden; font-family: Alexandria, Manrope, sans-serif; color: var(--text); }
+.glow { position: absolute; inset: 0; background: radial-gradient(900px 700px at 50% 38%, rgba(231,255,12,.16), transparent 70%), radial-gradient(700px 600px at 85% 90%, rgba(120,80,255,.18), transparent 70%); }
+.scene { position: absolute; inset: 0; opacity: 0; }
+.cap { position: absolute; top: 210px; left: 70px; right: 70px; text-align: center; font-weight: 800; font-size: 96px; line-height: 1.25; letter-spacing: 0; }
+.cap em { font-style: normal; color: var(--accent); }
+.sub { position: absolute; top: 470px; left: 90px; right: 90px; text-align: center; font-weight: 500; font-size: 52px; line-height: 1.35; color: #c9ccd3; }
+.card { position: absolute; left: 50%; overflow: hidden; border-radius: 48px; box-shadow: 0 40px 120px rgba(0,0,0,.7), 0 0 0 3px rgba(255,255,255,.08); background: #000; }
+.phone { width: 760px; height: 1050px; top: 640px; margin-left: -380px; }
+.phone img { position: absolute; width: 760px; top: 0; left: 0; transform-origin: 50% 0; }
+.desk { width: 1000px; height: 760px; top: 700px; margin-left: -500px; border-radius: 36px; }
+.desk img { position: absolute; left: 0; top: 0; width: 2560px; transform-origin: 0 0; }
+.tag { position: absolute; top: 1520px; left: 50%; transform: translateX(-50%); padding: 18px 40px; border-radius: 999px; background: var(--accent); color: #0b0c0e; font-weight: 800; font-size: 46px; white-space: nowrap; }
+.logo { position: absolute; top: 640px; left: 0; right: 0; text-align: center; direction: ltr; font-family: Manrope, sans-serif; font-weight: 800; font-size: 150px; letter-spacing: -3px; }
+.logo span { color: var(--accent); }
+.slogan { position: absolute; top: 860px; left: 0; right: 0; text-align: center; font-weight: 800; font-size: 92px; }
+.cta { position: absolute; top: 1090px; left: 50%; transform: translateX(-50%); padding: 34px 70px; border-radius: 999px; background: var(--accent); color: #0b0c0e; font-weight: 800; font-size: 64px; white-space: nowrap; box-shadow: 0 0 80px rgba(231,255,12,.45); }
+.note { position: absolute; top: 1290px; left: 0; right: 0; text-align: center; font-size: 42px; color: #aeb2bb; }
+</style></head><body>
+<div class="glow"></div>
+
+<div class="scene" id="s0"><div class="cap">تحب <em>الألعاب</em>؟</div><div class="sub">بس نص ألعابك ما فيها عربي؟</div>
+  <div class="card phone"><img src="01-home.png"></div></div>
+<div class="scene" id="s1"><div class="cap">كل ألعابك<br><em>في مكان واحد</em></div>
+  <div class="card phone"><img src="05-browse.png"></div></div>
+<div class="scene" id="s2"><div class="cap">اكتشف · <em>قارن الأسعار</em></div><div class="sub">وتابع مكتبتك</div>
+  <div class="card phone"><img src="03-game-elden-ring.png"></div></div>
+<div class="scene" id="s3"><div class="cap">ضغطة وحدة…<br><em>واللعبة بالعربي!</em></div>
+  <div class="card desk"><img src="10-app-arabic-switch-on.png"></div><div class="tag">تطبيق GameShelf لويندوز</div></div>
+<div class="scene" id="s4"><div class="cap">لعبتك بدون عربي؟<br><em>اطلبها!</em></div>
+  <div class="card desk"><img src="11-app-request-arabic.png"></div></div>
+<div class="scene" id="s5"><div class="cap"><span dir="ltr">GameShelf</span><br><em>يجهّزها لك</em></div>
+  <div class="card desk"><img src="12-app-consent.png"></div></div>
+<div class="scene" id="s6"><div class="cap">صوّت <em>للعبتك</em></div><div class="sub">الأكثر طلبًا تُترجم أولًا</div>
+  <div class="card phone"><img src="08-most-requested.png"></div></div>
+<div class="scene" id="s7"><div class="logo">Game<span>Shelf</span></div><div class="slogan">ألعابك، <span style="color:var(--accent)">بلغتك</span></div>
+  <div class="cta">حمّله الآن مجانًا</div><div class="note">للويب وويندوز</div></div>
+
+<script>
+// Each scene: [start, end, image move]. Desktop moves: [x, y, scale] from -> to, in source pixels (2560x1600).
+const W = 1000, H = 760;
+const scenes = [
+  { id: 's0', a: 0, b: 3.6, phone: [1.0, 1.06, 0, -40] },
+  { id: 's1', a: 3.6, b: 7.2, phone: [1.0, 1.05, 0, -120] },
+  { id: 's2', a: 7.2, b: 10.4, phone: [1.0, 1.05, 0, -60] },
+  { id: 's3', a: 10.4, b: 15.6, desk: [[1280, 800, 0.39], [1020, 720, 1.05]] },
+  { id: 's4', a: 15.6, b: 19.0, desk: [[1280, 800, 0.45], [900, 800, 1.1]] },
+  { id: 's5', a: 19.0, b: 22.4, desk: [[1280, 800, 0.62], [1280, 740, 0.86]] },
+  { id: 's6', a: 22.4, b: 24.9, phone: [1.0, 1.04, 0, -100] },
+  { id: 's7', a: 24.9, b: 30.01 },
+];
+const ease = (x) => (x < 0 ? 0 : x > 1 ? 1 : x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2);
+window.setTime = (t) => {
+  for (const s of scenes) {
+    const el = document.getElementById(s.id);
+    const fadeIn = ease((t - s.a) / 0.35), fadeOut = s.id === 's7' ? 1 : 1 - ease((t - (s.b - 0.2)) / 0.2);
+    const on = t >= s.a - 0.01 && t < s.b + 0.01;
+    el.style.opacity = on ? Math.min(fadeIn, fadeOut) : 0;
+    if (!on) continue;
+    const p = Math.min(1, Math.max(0, (t - s.a) / (s.b - s.a)));
+    const lift = (1 - fadeIn) * 60;
+    el.querySelectorAll('.cap, .sub').forEach((c) => (c.style.transform = `translateY(${lift}px)`));
+    const card = el.querySelector('.card');
+    if (card) card.style.transform = `translateY(${lift * 1.6}px) scale(${0.96 + 0.04 * fadeIn})`;
+    if (s.phone) {
+      const [s0, s1, y0, y1] = s.phone, k = ease(p);
+      el.querySelector('img').style.transform = `translateY(${y0 + (y1 - y0) * k}px) scale(${s0 + (s1 - s0) * k})`;
+    }
+    if (s.desk) {
+      const k = ease(Math.min(1, p * 1.25));
+      const [[x0, y0, z0], [x1, y1, z1]] = s.desk;
+      const x = x0 + (x1 - x0) * k, y = y0 + (y1 - y0) * k, z = z0 + (z1 - z0) * k;
+      el.querySelector('img').style.transform = `translate(${W / 2 - x * z}px, ${H / 2 - y * z}px) scale(${z})`;
+    }
+    if (s.id === 's7') {
+      const pop = ease((t - s.a - 0.6) / 0.4);
+      el.querySelector('.cta').style.transform = `translateX(-50%) scale(${0.85 + 0.15 * pop + 0.03 * Math.sin((t - s.a) * 5) * pop})`;
+      el.querySelector('.cta').style.opacity = pop;
+      el.querySelector('.note').style.opacity = ease((t - s.a - 1.1) / 0.4);
+    }
+  }
+};
+setTime(0);
+</script></body></html>
