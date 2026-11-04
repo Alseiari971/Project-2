@@ -182,6 +182,12 @@ test('email Guard: a checked address, a code by email at sign-in, and no resend 
   const login = await cafe('/api/auth/login', { method: 'POST', body: { username: 'layla', password: 'a long passphrase' } });
   assert.deepEqual([login.body.guard.method, login.body.guard.email], ['email', 'l****@mail.example']);
   assert.match(mailer.sent.at(-1).subject, /Guard code/);
+  // The designed email, with a plain-text copy, both with the code.
+  const sent = mailer.sent.at(-1);
+  const code = lastCode('layla@mail.example');
+  assert.match(sent.html, /^<!doctype html>/);
+  assert.ok(sent.html.includes(`>${code[0]}</div>`) && sent.html.includes('dir="rtl"'));
+  assert.ok(sent.text.includes(code) && !/</.test(sent.text));
   assert.equal((await cafe('/api/auth/guard/resend', { method: 'POST', body: { challenge: login.body.guard.challenge } })).status, 429);
   const passed = await cafe('/api/auth/guard', { method: 'POST', body: { challenge: login.body.guard.challenge, code: lastCode('layla@mail.example') } });
   assert.deepEqual([passed.status, passed.body.via], [200, 'email']);

@@ -36,10 +36,13 @@ try {
   process.exit(1);
 }
 console.log(`Sending through ${shown}, from ${env.MAIL_FROM || `GameShelf <${decodeURIComponent(new URL(env.SMTP_URL).username)}> (MAIL_FROM isn't set, so the mailbox you sign in with)`} …`);
+// A sample of the real code email, so the design can be checked too.
+const sample = require('../src/email-templates').codeEmail('verify', '123456', { site: env.PUBLIC_URL || null });
 createMailer(env).send({
   to,
-  subject: 'GameShelf test email',
-  text: 'This is a test from your GameShelf server. Email works.\n\nهذه رسالة تجريبية من خادم GameShelf. البريد يعمل.',
+  subject: 'GameShelf test email (sample design)',
+  text: `This is a test from your GameShelf server. Email works. The code below is only a sample.\n\n${sample.text}`,
+  html: sample.html,
 }).then(() => {
   console.log(`Sent. Check ${to} (and its spam folder).`);
 }, (err) => {

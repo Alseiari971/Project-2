@@ -11,6 +11,7 @@
 // five tries.
 const crypto = require('node:crypto');
 const { verifyTotp } = require('./totp');
+const { codeEmail } = require('./email-templates');
 const { hashToken, parseCookies } = require('./auth');
 
 const DEVICE_COOKIE = 'gs_device';
@@ -46,7 +47,8 @@ function maskEmail(email) {
   return `${name.slice(0, 1)}${'*'.repeat(Math.max(1, Math.min(6, name.length - 1)))}@${domain}`;
 }
 
-function createGuard({ db, mailer, now = () => Date.now() }) {
+// `site` is the site's address (PUBLIC_URL), linked in the emails' footer.
+function createGuard({ db, mailer, now = () => Date.now(), site = process.env.PUBLIC_URL || null }) {
   const q = {
     deleteBackups: db.prepare('DELETE FROM backup_codes WHERE user_id = ?'),
     addBackup: db.prepare('INSERT INTO backup_codes (user_id, code_hash) VALUES (?, ?)'),
@@ -88,17 +90,6 @@ function createGuard({ db, mailer, now = () => Date.now() }) {
 
   // ---- Codes by email ----
 
-  const SUBJECTS = {
-    verify: 'Check your GameShelf email address',
-    login: 'Your GameShelf Guard code',
-    enable: 'Turn on GameShelf Guard by email',
-  };
-  const BODIES = {
-    verify: (code) => `Your code to check this email address for GameShelf is:\n\n    ${code}\n\nIt works for 10 minutes. If you didn't make a GameShelf account, you can ignore this email.\n\nرمز التحقق من بريدك في GameShelf: ${code}`,
-    login: (code) => `Someone (hopefully you) just signed in to GameShelf with your password. Your GameShelf Guard code is:\n\n    ${code}\n\nIt works for 10 minutes. If this wasn't you, change your password now.\n\nرمز GameShelf Guard لتسجيل الدخول: ${code}`,
-    enable: (code) => `Your code to turn on GameShelf Guard by email is:\n\n    ${code}\n\nIt works for 10 minutes.\n\nرمز تفعيل GameShelf Guard عبر البريد: ${code}`,
-  };
-
   /** Sends a six-digit code for `purpose` ('verify', 'login' or 'enable') to `email`. */
   async function sendCode(userId, purpose, email) {
     if (!mailer?.enabled) throw new GuardError('Email isn\'t set up on this server.', 503);
@@ -108,7 +99,7 @@ function createGuard({ db, mailer, now = () => Date.now() }) {
     const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
     q.putCode.run(userId, purpose, codeHash(userId, purpose, code), now() + CODE_TTL_MS, now());
     try {
-      await mailer.send({ to: email, subject: SUBJECTS[purpose], text: BODIES[purpose](code) });
+      await mailer.send({ to: email, ...codeEmail(purpose, code, { site }) });
     } catch (err) {
       q.dropCode.run(userId, purpose);
       // The reason goes to the server log (journalctl -u gameshelf), where whoever runs it can fix it.

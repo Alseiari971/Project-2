@@ -50,17 +50,28 @@ function replies(socket) {
 
 const header = (text) => (/^[\x20-\x7e]*$/.test(text) ? text : `=?UTF-8?B?${Buffer.from(text, 'utf8').toString('base64')}?=`);
 
-function message({ from, to, subject, text }) {
-  const body = Buffer.from(text, 'utf8').toString('base64').replace(/.{76}/g, '$&\r\n');
+const b64 = (text) => Buffer.from(text, 'utf8').toString('base64').replace(/.{76}/g, '$&\r\n');
+
+/** The message: plain text, or plain text and HTML as alternatives (mail apps show the HTML when they can). */
+function message({ from, to, subject, text, html = null }) {
   const host = /@([^>\s]+)/.exec(from)?.[1] || 'gameshelf.local';
-  return [
+  const head = [
     `From: ${from}`, `To: ${to}`, `Subject: ${header(subject)}`, `Date: ${new Date().toUTCString()}`,
-    `Message-ID: <${crypto.randomUUID()}@${host}>`, 'MIME-Version: 1.0', 'Content-Type: text/plain; charset=UTF-8',
-    'Content-Transfer-Encoding: base64', '', body, '',
+    `Message-ID: <${crypto.randomUUID()}@${host}>`, 'MIME-Version: 1.0',
+  ];
+  if (!html) {
+    return [...head, 'Content-Type: text/plain; charset=UTF-8', 'Content-Transfer-Encoding: base64', '', b64(text), ''].join('\r\n');
+  }
+  const boundary = `gs-${crypto.randomUUID()}`;
+  return [
+    ...head, `Content-Type: multipart/alternative; boundary="${boundary}"`, '',
+    `--${boundary}`, 'Content-Type: text/plain; charset=UTF-8', 'Content-Transfer-Encoding: base64', '', b64(text),
+    `--${boundary}`, 'Content-Type: text/html; charset=UTF-8', 'Content-Transfer-Encoding: base64', '', b64(html),
+    `--${boundary}--`, '',
   ].join('\r\n');
 }
 
-async function sendSmtp(url, { from, to, subject, text }, { timeoutMs = 20000 } = {}) {
+async function sendSmtp(url, { from, to, subject, text, html }, { timeoutMs = 20000 } = {}) {
   const secure = url.protocol === 'smtps:';
   const host = url.hostname;
   const port = Number(url.port) || (secure ? 465 : 587);
@@ -97,7 +108,7 @@ async function sendSmtp(url, { from, to, subject, text }, { timeoutMs = 20000 } 
     await say(`MAIL FROM:<${address(from)}>`, [250]);
     await say(`RCPT TO:<${address(to)}>`, [250, 251]);
     await say('DATA', [354]);
-    const data = message({ from, to, subject, text }).replace(/^\./gm, '..');
+    const data = message({ from, to, subject, text, html }).replace(/^\./gm, '..');
     await say(`${data}\r\n.`, [250]);
     await say('QUIT', [221]).catch(() => {});
   } finally {
@@ -124,8 +135,8 @@ function createMailer(env = process.env) {
   const from = senderOf(env, url);
   return {
     enabled: Boolean(url) || devLog,
-    async send({ to, subject, text }) {
-      if (url) return sendSmtp(url, { from, to, subject, text });
+    async send({ to, subject, text, html }) {
+      if (url) return sendSmtp(url, { from, to, subject, text, html });
       if (devLog) {
         console.log(`[mail to ${to}] ${subject}\n${text}`);
         return;
