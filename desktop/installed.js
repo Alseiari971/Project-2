@@ -325,4 +325,4 @@ function suggestedStatus(game, now = Date.now()) {
   return 'want';
 }
 
-module.exports = { LAUNCHER_NAMES, scanInstalledGames, parseVdf, suggestedStatus, parseLibraryFolders, parseAppManifest, parseEpicManifest, parseGogRegistry, parseGogInfo, guessMainExe };
+module.exports = { LAUNCHER_NAMES, scanInstalledGames, defaultSteamRoots, parseVdf, suggestedStatus, parseLibraryFolders, parseAppManifest, parseEpicManifest, parseGogRegistry, parseGogInfo, guessMainExe };

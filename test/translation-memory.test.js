@@ -61,7 +61,7 @@ function client(base) {
 
 async function signedIn(base, username) {
   const call = client(base);
-  assert.equal((await call('/api/auth/register', { method: 'POST', body: { username, password: 'correct horse' } })).status, 201);
+  assert.equal((await call('/api/auth/register', { method: 'POST', body: { username, password: 'correct horse', email: `${username}@test.example`, nationality: 'AE' } })).status, 201);
   return call;
 }
 

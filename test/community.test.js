@@ -66,7 +66,7 @@ async function start(t, { env = {} } = {}) {
   const users = {};
   const as = async (username) => {
     if (!users[username]) {
-      const res = await fetch(`${base}/api/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password: 'correct horse' }) });
+      const res = await fetch(`${base}/api/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password: 'correct horse', email: `${username}@test.example`, nationality: 'AE' }) });
       const cookie = /gs_session=([^;]+)/.exec(res.headers.get('set-cookie'))[1];
       users[username] = createCloudClient({ server: () => base, session: async () => cookie });
     }

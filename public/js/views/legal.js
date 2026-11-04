@@ -60,6 +60,8 @@ export async function legalView(app) {
       <section class="panel">
         <h2>${t('Fonts')}</h2>
         <p>${th('Manrope and Alexandria are used under the {ofl}. When the Thmanyah Sans font is installed on your computer, the Arabic text uses it instead; it is not part of GameShelf.', { ofl: link('https://openfontlicense.org', 'SIL Open Font License') })}</p>
+        <p>${th('Flags are drawn with {flags} ({mit}), which uses flag art from Twitter\'s {twemoji}, licensed under {ccby}.', { flags: link('https://github.com/talkjs/country-flag-emoji-polyfill', 'Twemoji Country Flags'), mit: 'MIT', twemoji: link('https://twitter.github.io/twemoji', 'Twemoji'), ccby: link('https://creativecommons.org/licenses/by/4.0/', 'CC-BY 4.0') })}</p>
+        <p>${th('QR codes are drawn with {qr} ({mit}).', { qr: link('https://github.com/kazuhikoarase/qrcode-generator', 'qrcode-generator'), mit: 'MIT' })}</p>
       </section>
     </div>
   `);

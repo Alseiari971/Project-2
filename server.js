@@ -20,6 +20,7 @@ const { createPackRegistry, packKeys } = require('./src/pack-registry');
 const { createSubmissions } = require('./src/submissions');
 const { createEngineRecipes } = require('./src/engine-recipes');
 const { createCommunity } = require('./src/community');
+const { createMailer } = require('./src/mailer');
 
 // Where uploaded Arabic packs and the Windows installer are kept: beside the database.
 const defaultDataDir = () => process.env.DATA_DIR || path.dirname(path.resolve(process.env.DB_FILE || path.join(__dirname, 'data', 'gameshelf.db')));
@@ -50,6 +51,10 @@ function createApp({
   submissions = createSubmissions({ db, translations, publicKeys: packKeys() }),
   recipes = createEngineRecipes({ db, publicKeys: packKeys() }),
   community = createCommunity({ db, translations, arabicGames, submissions }),
+  // Email for Guard codes (src/mailer.js), and Steam's sign-in check (fetch); tests pass stand-ins.
+  mailer = createMailer(),
+  fetchImpl = fetch,
+  now = () => Date.now(),
 } = {}) {
   const downloadsDir = path.join(dataDir, 'downloads');
   const app = express();
@@ -61,7 +66,7 @@ function createApp({
   // Large enough for a resized avatar image.
   app.use(express.json({ limit: '500kb' }));
   app.use(loadUser(db));
-  app.use('/api', createApi({ db, games, prices, steam, steamStore, translations, arabicGames, packs, submissions, recipes, community, downloadsDir }));
+  app.use('/api', createApi({ db, games, prices, steam, steamStore, translations, arabicGames, packs, submissions, recipes, community, downloadsDir, mailer, fetchImpl, now }));
   // The website's "Download GameShelf for Windows" button: the installer an admin
   // uploaded in the Admin Panel, or else DOWNLOAD_URL (a GitHub release, say).
   app.get('/download/windows', (_req, res) => {

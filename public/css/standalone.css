@@ -1,0 +1,57 @@
+/* The small pages the server sends on its own (Steam's sign-in coming back):
+   the GameShelf look, no app shell. */
+@font-face {
+  font-family: "Manrope";
+  src: url("/fonts/manrope.woff2") format("woff2");
+  font-weight: 200 800;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Alexandria";
+  src: url("/fonts/alexandria-arabic.woff2") format("woff2");
+  font-weight: 300 800;
+  font-display: swap;
+  unicode-range: U+0600-06FF, U+0750-077F, U+0870-08FF, U+FB50-FDFF, U+FE70-FEFF;
+}
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 32px 16px;
+  background: radial-gradient(1200px 600px at 50% -10%, #1b2838 0%, #0b0c0e 60%) #0b0c0e;
+  color: #f2f3f5;
+  font: 600 15px/1.6 "Manrope", "Alexandria", -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+.standalone {
+  width: 100%;
+  max-width: 480px;
+  padding: 32px;
+  border-radius: 16px;
+  background: #15161a;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+}
+.standalone-logo { display: inline-block; margin-bottom: 24px; color: #f2f3f5; text-decoration: none; font-weight: 800; font-size: 20px; letter-spacing: -0.02em; }
+.standalone-logo span { color: #e7ff0c; }
+.standalone h1 { margin: 0 0 12px; font-size: 24px; line-height: 1.2; }
+.standalone h2 { margin: 0 0 8px; font-size: 18px; }
+.standalone p { margin: 0; color: #a3a6ad; }
+.standalone b { color: #f2f3f5; }
+.standalone form { margin: 24px 0 0; }
+.standalone-btn {
+  width: 100%;
+  padding: 12px 24px;
+  border: 0;
+  border-radius: 999px;
+  background: #f2f3f5;
+  color: #000;
+  font: 800 15px/1 inherit;
+  font-family: inherit;
+  cursor: pointer;
+}
+.standalone-btn:hover { background: #fff; }
+.standalone-btn:focus-visible { outline: 2px solid #e7ff0c; outline-offset: 2px; }
+.standalone-ar { margin-top: 24px; padding-top: 24px; border-top: 1px solid rgba(255, 255, 255, 0.07); font-family: "Alexandria", "Manrope", sans-serif; }

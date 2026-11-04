@@ -15,6 +15,8 @@ const { processesOf, listProcesses, stopProcesses } = require('./processes');
 const { createCustomGames, suggestName } = require('./custom-games');
 const { getGpuPreference, setGpuPreference, pickMainProgram, createProgramStore, gogUninstaller } = require('./game-options');
 const { createDiscordPresence } = require('./discord');
+const { createPresenceLoop } = require('./presence');
+const { localSteamAccount } = require('./steam-account');
 const { createArabicService } = require('./localization/service');
 const { createOcrHelper, defaultSpawn } = require('./localization/ocr');
 const { createOverlayManager } = require('./localization/overlay-manager');
@@ -72,6 +74,7 @@ if (!app.requestSingleInstanceLock()) {
   // Closing the connection clears the activity on Discord.
   app.on('will-quit', () => {
     presence?.close();
+    friendsPresence.stop();
     overlays?.stopAll();
     packBuilder.stopAll();
     ocrHelper.close();
@@ -328,6 +331,8 @@ const ocrHelper = createOcrHelper({ spawnHelper: defaultSpawn({ dataDir, devHelp
 // The app's own requests to GameShelf's server, as the signed-in player (the
 // sign-in cookie the window keeps for the app's own address).
 const cloud = createCloudClient({
+  // The app says what it is, so the server shows friends "in the desktop app" and lists its sessions as such.
+  userAgent: `GameShelf-Desktop/${app.getVersion()} Electron/${process.versions.electron}`,
   server: () => cloudServer || origin,
   session: async () => (origin ? (await session.defaultSession.cookies.get({ url: origin, name: SESSION_COOKIE }))[0]?.value || null : null),
 });
@@ -493,6 +498,7 @@ function checkRunning() {
       for (const key of now.keys()) if (!runningSince.has(key)) runningSince.set(key, Date.now());
       for (const key of runningSince.keys()) if (!now.has(key)) runningSince.delete(key);
       updatePresence(installed);
+      friendsPresence.nudge().catch(() => {});
       for (const [key, since] of starting) {
         if (running.has(key) || Date.now() - since > START_TIMEOUT_MS) starting.delete(key);
       }
@@ -510,6 +516,23 @@ function schedulePoll() {
   clearTimeout(pollTimer);
   if (starting.size || running.size) pollTimer = setTimeout(checkRunning, POLL_MS);
 }
+
+// ---- Friends' presence -------------------------------------------------------------
+
+/** What friends see: the game started most recently (and whether its Arabic is on), or just online. */
+async function presenceNow() {
+  const [key] = [...runningSince].sort((a, b) => b[1] - a[1])[0] || [];
+  if (!key) return { status: 'online' };
+  const game = (await installedGames().catch(() => [])).find((g) => g.key === key);
+  if (!game) return { status: 'online' };
+  const page = pageOf(game);
+  let arabicEnabled = badges.get(key) === 'on';
+  try {
+    arabicEnabled = Boolean((await arabic.info(arabicGame(game))).enabled);
+  } catch {}
+  return { status: 'in_game', gameId: page?.id || null, gameTitle: page?.name || game.name, steamAppId: game.steamAppId || null, arabicEnabled };
+}
+const friendsPresence = createPresenceLoop({ cloud, current: presenceNow });
 
 // ---- Discord activity ---------------------------------------------------------------
 
@@ -824,6 +847,20 @@ function registerIpc() {
   });
 
   // The "Arabic subtitles" switch next to Play.
+  // Steam: the account signed in on this PC is only shown; linking always goes
+  // through Steam's own sign-in, opened in the normal web browser.
+  handle('steam:local-account', async () => localSteamAccount().catch(() => null));
+  handle('steam:open-link', async () => {
+    const { url } = await cloud.json('/api/auth/steam/link', { method: 'POST' });
+    if (!String(url).startsWith('https://steamcommunity.com/openid/login?')) throw new Error('GameShelf\'s server sent an unexpected address.');
+    shell.openExternal(url);
+    return { opened: true };
+  });
+  // Signing in or out in the window: tell friends now.
+  handle('presence:refresh', async () => {
+    await friendsPresence.beat();
+    return true;
+  });
   handle('arabic:info', async (key) => {
     const game = await installedGame(key);
     return { ...(await arabic.info(arabicGame(game))), overlayRunning: Boolean(overlays?.has(key)), overlay: overlays?.status(key) || null };
@@ -1031,6 +1068,7 @@ async function start() {
   scannedGames();
   await startServer();
   registerIpc();
+  friendsPresence.start();
   overlays = createOverlayManager({ BrowserWindow, desktopCapturer, screen, ipcMain, helper: ocrHelper });
   arabic.overlayStyle().then((style) => overlays.setStyle(style)).catch((err) => console.error('Arabic overlay style:', err.message));
   // Takes back any Arabic patch that was cut short by a crash.

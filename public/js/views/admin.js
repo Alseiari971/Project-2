@@ -7,11 +7,13 @@ import { html, bdi, mount, state, api, toast, onLeave } from '../lib.js';
 import { pillGroup, emptyState } from '../components.js';
 import { icon } from '../icons.js';
 import { t } from '../i18n.js';
+import { flagBadge } from '../country-picker.js';
+import { CATEGORY_LABELS, TICKET_STATUS, statusChip, threadHtml, when } from './support.js';
 
 const desktop = window.gameshelfDesktop;
-const TABS = ['overview', 'approvals', 'requests', 'fixes', 'packs', 'users', 'installer', ...(desktop?.studio ? ['studio'] : [])];
+const TABS = ['overview', 'support', 'approvals', 'requests', 'fixes', 'packs', 'users', 'installer', ...(desktop?.studio ? ['studio'] : [])];
 const TAB_LABELS = {
-  overview: 'Overview', approvals: 'Pending approvals', users: 'Users', packs: 'Arabic packs', requests: 'Requests', fixes: 'Translation fixes',
+  overview: 'Overview', support: 'Support', approvals: 'Pending approvals', users: 'Users', packs: 'Arabic packs', requests: 'Requests', fixes: 'Translation fixes',
   installer: 'Windows app', studio: 'Pack Studio',
 };
 const ENGINE_LABELS = {
@@ -90,7 +92,7 @@ export async function adminView(app, params) {
       <div id="admin-body" class="admin-body"></div>
     </div>`);
   const body = document.getElementById('admin-body');
-  await { overview, approvals, users, packs, requests, fixes, installer, studio }[tab](body, params);
+  await { overview, support, approvals, users, packs, requests, fixes, installer, studio }[tab](body, params);
 }
 
 // ---- Overview ------------------------------------------------------------------
@@ -110,6 +112,125 @@ async function overview(body) {
       ${tile(s.requests, t('Arabic requests'))}
     </div>
     ${s.packKey ? '' : html`<p class="form-error">${t('The server has no pack signing key, so it can\'t take packs. Put the public key in desktop/config.json (localizationPackKey) or PACK_PUBLIC_KEY.')}</p>`}`);
+}
+
+// ---- Support ---------------------------------------------------------------------
+
+const SUPPORT_POLL_MS = 10 * 1000;
+
+/** Who sent a ticket: their flag, Steam link, Guard and email at a glance. */
+function senderCard(from) {
+  if (!from) return '';
+  const yes = (ok, good, bad) => html`<span class="chip ${ok ? 'chip-good' : 'chip-warn'}">${ok ? good : bad}</span>`;
+  return html`
+    <div class="sender-card">
+      <div><strong>${bdi(from.displayName)}</strong> <a class="muted small" href="#/u/${encodeURIComponent(from.username)}">${bdi(`@${from.username}`)}</a> ${flagBadge(from.nationality, { withName: true })}</div>
+      <div class="chip-row">
+        ${yes(from.steamLinked, t('Steam linked'), t('No Steam link'))}
+        ${yes(Boolean(from.guard), t('Guard: {method}', { method: from.guard === 'totp' ? t('Authenticator app') : t('Email codes') }), t('Guard off'))}
+        ${yes(from.emailVerified, t('Email confirmed'), t('Email not confirmed'))}
+      </div>
+    </div>`;
+}
+
+async function support(body, params) {
+  const filter = { status: params.get('status') || '', category: params.get('category') || '' };
+  const href = (changes) => `#/admin?${new URLSearchParams({ tab: 'support', ...filter, ...changes, ...(changes.id ? {} : { id: '' }) })}`.replace(/&?\w+=(?=&|$)/g, '');
+  const openId = params.get('id');
+
+  const drawQueue = async (polling = false) => {
+    const q = await api(`/admin/support?${new URLSearchParams(filter)}`);
+    mount(body, html`
+      <div class="support-admin">
+        <div class="support-filters">
+          ${pillGroup([{ key: '', label: t('All'), href: href({ status: '' }) }, ...q.statuses.map((s) => ({ key: s, label: t(TICKET_STATUS[s]), count: q.counts[s], href: href({ status: s }) }))], filter.status)}
+          <select class="input input-sm" id="support-category" aria-label="${t('Category')}">
+            <option value="">${t('Every category')}</option>
+            ${q.categories.map((c) => html`<option value="${c}" ${c === filter.category ? html`selected` : ''}>${t(CATEGORY_LABELS[c])}</option>`)}
+          </select>
+        </div>
+        <div class="support-split ${openId ? 'has-open' : ''}">
+          <div class="ticket-list" id="support-queue">${q.tickets.length ? q.tickets.map((tk) => html`
+            <a class="ticket-row ${String(tk.id) === openId ? 'active' : ''}" href="${href({ id: tk.id })}">
+              <div class="ticket-row-main">
+                <strong>${bdi(tk.subject)}</strong>
+                <span class="muted small">${flagBadge(tk.from.nationality)} ${bdi(`@${tk.from.username}`)} · ${t(CATEGORY_LABELS[tk.category])} · ${when(tk.updatedAt)} · ${t('{n} messages', { n: tk.messages })}${tk.userTickets > 1 ? html` · ${t('{n} tickets from them', { n: tk.userTickets })}` : ''}</span>
+              </div>
+              <span class="row-tail">${tk.from.steamLinked ? html`<span class="chip chip-good" title="${t('Steam linked')}">${icon('link')}</span>` : ''}${statusChip(tk.status)}</span>
+            </a>`) : html`<p class="muted">${t('No tickets here.')}</p>`}</div>
+          <div id="support-open"></div>
+        </div>
+      </div>`);
+    document.getElementById('support-category').addEventListener('change', (e) => {
+      location.hash = href({ category: e.target.value });
+    });
+    if (openId) await drawTicket(document.getElementById('support-open'), openId, polling);
+  };
+
+  let data = null;
+  let draft = '';
+  const drawTicket = async (el, id, polling) => {
+    data = await api(`/admin/support/${encodeURIComponent(id)}`);
+    const draw = () => {
+      const { ticket, messages, from, history } = data;
+      mount(el, html`
+        <section class="panel ticket-admin">
+          <header class="ticket-head">
+            <div><h2>${bdi(ticket.subject)}</h2>
+              <p class="muted small">${t('Ticket #{id}', { id: ticket.id })} · ${t(CATEGORY_LABELS[ticket.category])}${ticket.game ? html` · ${bdi(ticket.game.name)}` : ''} · ${t('Opened {when}', { when: when(ticket.createdAt) })}</p></div>
+            ${statusChip(ticket.status)}
+          </header>
+          ${senderCard(from)}
+          ${history.length ? html`<details class="settings-more"><summary>${t('Their other tickets ({n})', { n: history.length })}</summary>
+            <ul class="history-list">${history.map((h) => html`<li><a href="${href({ id: h.id })}">${bdi(h.subject)}</a> ${statusChip(h.status)}</li>`)}</ul></details>` : ''}
+          ${threadHtml(messages, { viewer: 'admin' })}
+          <form class="ticket-reply" id="admin-reply">
+            <label>${t('Reply as GameShelf Support')}<textarea class="input" name="body" rows="4" maxlength="5000"></textarea></label>
+            <div class="row-actions">
+              <button class="btn btn-light" type="submit" data-status="">${t('Send reply')}</button>
+              <button class="btn" type="submit" data-status="resolved">${t('Reply & resolve')}</button>
+              <span class="spacer"></span>
+              ${ticket.status !== 'resolved' ? html`<button class="btn btn-sm" type="button" data-set="resolved">${t('Mark resolved')}</button>` : ''}
+              ${ticket.status !== 'closed' ? html`<button class="btn btn-sm" type="button" data-set="closed">${t('Close')}</button>` : html`<button class="btn btn-sm" type="button" data-set="open">${t('Reopen')}</button>`}
+            </div>
+          </form>
+        </section>`);
+      const form = document.getElementById('admin-reply');
+      form.body.value = draft;
+      form.body.addEventListener('input', () => { draft = form.body.value; });
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const status = e.submitter?.dataset.status || null;
+        if (!form.body.value.trim()) return toast(t('Write a message first.'), { error: true });
+        try {
+          data = await api(`/admin/support/${ticket.id}/messages`, { method: 'POST', body: { body: form.body.value, status } });
+          draft = '';
+          toast(t('Reply sent.'));
+          drawQueue();
+        } catch (err) {
+          toast(err.message, { error: true });
+        }
+      });
+      form.querySelectorAll('[data-set]').forEach((b) => b.addEventListener('click', async () => {
+        try {
+          data = await api(`/admin/support/${ticket.id}`, { method: 'PATCH', body: { status: b.dataset.set } });
+          drawQueue();
+        } catch (err) {
+          toast(err.message, { error: true });
+        }
+      }));
+    };
+    draw();
+    if (!polling) el.scrollIntoView({ block: 'nearest' });
+  };
+
+  await drawQueue();
+  // New tickets and replies show up by themselves, unless a reply is being typed.
+  const timer = setInterval(() => {
+    if (document.hidden || document.activeElement?.name === 'body') return;
+    drawQueue(true).catch(() => {});
+  }, SUPPORT_POLL_MS);
+  onLeave(() => clearInterval(timer));
 }
 
 // ---- Users -----------------------------------------------------------------------

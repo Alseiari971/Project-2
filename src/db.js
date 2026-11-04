@@ -37,6 +37,30 @@ const ADDED_COLUMNS = {
     showcases: "TEXT NOT NULL DEFAULT '[]'",
     // 'user' or 'admin' (see ADMIN_USERS in src/roles.js).
     role: "TEXT NOT NULL DEFAULT 'user'",
+    // Sign-in and GameShelf Guard (src/guard.js). Accounts made before email was asked for have none.
+    email: 'TEXT',
+    email_verified: 'INTEGER NOT NULL DEFAULT 0',
+    // ISO 3166-1 alpha-2 country code ('' when not given), shown as a flag on profiles.
+    nationality: "TEXT NOT NULL DEFAULT ''",
+    // '' (off), 'totp' (an authenticator app) or 'email' (a code sent by email).
+    twofa_method: "TEXT NOT NULL DEFAULT ''",
+    totp_secret: 'TEXT',
+    totp_pending: 'TEXT',
+    totp_last_step: 'INTEGER NOT NULL DEFAULT 0',
+    // GS-XXXX-XXXX, for adding friends (src/friends.js).
+    friend_code: 'TEXT',
+    // The Steam account proved with Steam's OpenID sign-in (src/steam-openid.js): one GameShelf account each.
+    steam_id: 'TEXT',
+    steam_name: "TEXT NOT NULL DEFAULT ''",
+    steam_linked_at: 'TEXT',
+  },
+  // Where and when each sign-in was made, for Security settings' Active sessions.
+  sessions: {
+    created_at: 'INTEGER NOT NULL DEFAULT 0',
+    last_seen: 'INTEGER NOT NULL DEFAULT 0',
+    user_agent: "TEXT NOT NULL DEFAULT ''",
+    ip: "TEXT NOT NULL DEFAULT ''",
+    device: "TEXT NOT NULL DEFAULT 'web'",
   },
   // Why a player's PC couldn't make the Arabic itself (encrypted files, say), for admins.
   arabic_requests: {
@@ -279,6 +303,111 @@ function openDatabase(file = process.env.DB_FILE || path.join(__dirname, '..', '
   `);
 
   migrate(db);
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS users_email ON users (email COLLATE NOCASE) WHERE email IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS users_friend_code ON users (friend_code) WHERE friend_code IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS users_steam_id ON users (steam_id) WHERE steam_id IS NOT NULL;
+
+    -- GameShelf Guard: one-time recovery codes (hashed), each good once.
+    CREATE TABLE IF NOT EXISTS backup_codes (
+      user_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      code_hash TEXT NOT NULL,
+      used_at   INTEGER,
+      PRIMARY KEY (user_id, code_hash)
+    );
+    -- Six-digit codes sent by email: 'verify' (the address) or 'login' (a Guard sign-in) or 'enable'.
+    CREATE TABLE IF NOT EXISTS email_codes (
+      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      purpose    TEXT NOT NULL,
+      code_hash  TEXT NOT NULL,
+      expires_at INTEGER NOT NULL,
+      attempts   INTEGER NOT NULL DEFAULT 0,
+      sent_at    INTEGER NOT NULL,
+      PRIMARY KEY (user_id, purpose)
+    );
+    -- A password that was right, waiting for its Guard code before a session is made.
+    CREATE TABLE IF NOT EXISTS login_challenges (
+      id_hash    TEXT PRIMARY KEY,
+      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      device     TEXT NOT NULL DEFAULT 'web',
+      expires_at INTEGER NOT NULL,
+      attempts   INTEGER NOT NULL DEFAULT 0
+    );
+    -- Browsers and apps that passed Guard and were asked to be remembered.
+    CREATE TABLE IF NOT EXISTS trusted_devices (
+      token_hash TEXT PRIMARY KEY,
+      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL
+    );
+    -- One Steam sign-in attempt each (src/steam-openid.js): single use, ten minutes.
+    CREATE TABLE IF NOT EXISTS steam_link_states (
+      state_hash   TEXT PRIMARY KEY,
+      user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      expires_at   INTEGER NOT NULL,
+      steam_id     TEXT,
+      confirm_hash TEXT,
+      used         INTEGER NOT NULL DEFAULT 0
+    );
+
+    -- Friends (src/friends.js): requests, friendships (user_a < user_b) and blocks.
+    CREATE TABLE IF NOT EXISTS friend_requests (
+      from_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      to_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (from_id, to_id)
+    );
+    CREATE TABLE IF NOT EXISTS friendships (
+      user_a     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      user_b     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      since      TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (user_a, user_b),
+      CHECK (user_a < user_b)
+    );
+    CREATE TABLE IF NOT EXISTS user_blocks (
+      blocker_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      blocked_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (blocker_id, blocked_id)
+    );
+    -- Live presence from heartbeats; a row older than two minutes reads as offline.
+    CREATE TABLE IF NOT EXISTS presence (
+      user_id       INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      status        TEXT NOT NULL CHECK (status IN ('online', 'in_game')),
+      game_id       TEXT,
+      game_title    TEXT NOT NULL DEFAULT '',
+      steam_app_id  INTEGER,
+      arabic        INTEGER NOT NULL DEFAULT 0,
+      source        TEXT NOT NULL DEFAULT 'web',
+      started_at    INTEGER NOT NULL,
+      updated_at    INTEGER NOT NULL
+    );
+
+    -- Customer support (src/support.js).
+    CREATE TABLE IF NOT EXISTS support_tickets (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      category   TEXT NOT NULL,
+      subject    TEXT NOT NULL,
+      game_id    TEXT,
+      game_name  TEXT NOT NULL DEFAULT '',
+      status     TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'replied', 'resolved', 'closed')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS support_tickets_status ON support_tickets (status, updated_at);
+    CREATE TABLE IF NOT EXISTS support_messages (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      ticket_id  INTEGER NOT NULL REFERENCES support_tickets(id) ON DELETE CASCADE,
+      author_id  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      from_admin INTEGER NOT NULL DEFAULT 0,
+      body       TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+  // Every account has a friend code (accounts made before friends get theirs here).
+  const { assignFriendCodes } = require('./friends');
+  assignFriendCodes(db);
   return db;
 }
 

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { createApp } = require('../server');
 const { openDatabase } = require('../src/db');
 const { createLocalProvider } = require('../src/games/local');
-const { createSteamService, parseProfileInput } = require('../src/steam');
+const { createSteamService } = require('../src/steam');
 const { createPriceService } = require('../src/prices');
 
 // Simulated responses, keyed by URL path (plus query where it matters).
@@ -35,6 +35,9 @@ const OWNED = {
 
 let server;
 let baseUrl;
+let db;
+// A Steam account proved with Steam's sign-in (that flow is tested in steam-link.test.js).
+const linkSteam = (username, steamId) => db.prepare('UPDATE users SET steam_id = ? WHERE username = ?').run(steamId, username);
 
 before(async () => {
   const steam = createSteamService('test-key', {
@@ -44,7 +47,8 @@ before(async () => {
       '/IPlayerService/GetOwnedGames/v1/': (u) => (u.searchParams.get('steamid') === '76561198000000002' ? { response: {} } : OWNED),
     }),
   });
-  const app = createApp({ db: openDatabase(':memory:'), games: createLocalProvider(), steam });
+  db = openDatabase(':memory:');
+  const app = createApp({ db, games: createLocalProvider(), steam });
   server = app.listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
   baseUrl = `http://127.0.0.1:${server.address().port}`;
@@ -66,21 +70,28 @@ function client() {
   };
 }
 
-test('reads Steam profile links in every common form', () => {
-  assert.deepEqual(parseProfileInput('76561198000000001'), { steamId: '76561198000000001' });
-  assert.deepEqual(parseProfileInput('https://steamcommunity.com/profiles/76561198000000001/'), { steamId: '76561198000000001' });
-  assert.deepEqual(parseProfileInput('steamcommunity.com/id/hamad'), { vanity: 'hamad' });
-  assert.deepEqual(parseProfileInput('hamad'), { vanity: 'hamad' });
-  assert.equal(parseProfileInput('not a profile!'), null);
+test('a Steam library is only imported from the account linked with Steam\'s sign-in, never a typed-in profile', async () => {
+  const me = client();
+  await me('/api/auth/register', { method: 'POST', body: { username: 'typist', password: 'shelf-pass-42', email: 'typist@test.example', nationality: 'SA' } });
+  // Someone else's public profile, typed in: refused, whatever form it takes.
+  for (const profile of ['76561198000000001', 'https://steamcommunity.com/profiles/76561198000000001/', 'hamad']) {
+    const tried = await me('/api/me/import/steam/preview', { method: 'POST', body: { profile } });
+    assert.equal(tried.status, 403);
+    assert.equal(tried.body.code, 'link_required');
+  }
+  // The service itself takes only a SteamID64, never a custom name.
+  await assert.rejects(createSteamService('k', { fetchImpl: fakeFetch({}) }).ownedGames('hamad'), { code: 'link_required' });
 });
 
 test('imports a Steam library without overwriting existing entries', async () => {
   const me = client();
-  await me('/api/auth/register', { method: 'POST', body: { username: 'steamer', password: 'password123' } });
+  await me('/api/auth/register', { method: 'POST', body: { username: 'steamer', password: 'shelf-pass-42', email: 'steamer@test.example', nationality: 'AE' } });
+  linkSteam('steamer', '76561198000000001');
   // Already on the list, rated by hand.
   await me('/api/me/library/hollow-knight', { method: 'PUT', body: { status: 'completed', rating: 10 } });
 
-  const { status, body: preview } = await me('/api/me/import/steam/preview', { method: 'POST', body: { profile: 'steamcommunity.com/id/hamad' } });
+  // A profile in the body is ignored: the linked account is what's read.
+  const { status, body: preview } = await me('/api/me/import/steam/preview', { method: 'POST', body: { profile: '76561198000000002' } });
   assert.equal(status, 200);
   assert.equal(preview.total, 4);
   const byName = Object.fromEntries(preview.items.map((i) => [i.name, i]));
@@ -118,21 +129,18 @@ test('imports a Steam library without overwriting existing entries', async () =>
   assert.equal((await me('/api/me/import/steam/commit', { method: 'POST', body: { previewId: preview.previewId, items: [] } })).status, 410);
 });
 
-test('explains private profiles and bad links', async () => {
+test('explains private profiles', async () => {
   const me = client();
-  await me('/api/auth/register', { method: 'POST', body: { username: 'private_p', password: 'password123' } });
-  const priv = await me('/api/me/import/steam/preview', { method: 'POST', body: { profile: '76561198000000002' } });
+  await me('/api/auth/register', { method: 'POST', body: { username: 'private_p', password: 'shelf-pass-42', email: 'private_p@test.example', nationality: 'AE' } });
+  linkSteam('private_p', '76561198000000002');
+  const priv = await me('/api/me/import/steam/preview', { method: 'POST' });
   assert.equal(priv.status, 400);
   assert.equal(priv.body.code, 'private');
-  const missing = await me('/api/me/import/steam/preview', { method: 'POST', body: { profile: 'nobody' } });
-  assert.equal(missing.body.code, 'not_found');
-  const bad = await me('/api/me/import/steam/preview', { method: 'POST', body: { profile: '???' } });
-  assert.equal(bad.body.code, 'bad_input');
-  assert.equal((await client()('/api/me/import/steam/preview', { method: 'POST', body: { profile: 'hamad' } })).status, 401);
+  assert.equal((await client()('/api/me/import/steam/preview', { method: 'POST' })).status, 401);
 });
 
 test('Steam import reports when no API key is configured', async () => {
-  await assert.rejects(createSteamService('').ownedGames('hamad'), { code: 'no_key' });
+  await assert.rejects(createSteamService('').ownedGames('76561198000000001'), { code: 'no_key' });
 });
 
 test('prices come back cheapest first from active stores only', async () => {

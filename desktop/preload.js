@@ -8,6 +8,10 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('gameshelfDesktop', {
   getSettings: () => ipcRenderer.invoke('settings:get'),
+  // Steam on this PC (shown only) and Steam's sign-in in the normal browser; friends' presence.
+  localSteamAccount: () => ipcRenderer.invoke('steam:local-account'),
+  openSteamLink: () => ipcRenderer.invoke('steam:open-link'),
+  refreshPresence: () => ipcRenderer.invoke('presence:refresh'),
   saveSettings: (values) => ipcRenderer.invoke('settings:save', values),
   openDataFolder: () => ipcRenderer.invoke('data-folder:open'),
   installedGames: () => ipcRenderer.invoke('installed:list'),

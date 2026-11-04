@@ -30,10 +30,17 @@ function parseCookies(header = '') {
   return cookies;
 }
 
-function createSession(db, res, userId) {
+// The desktop app's window is Electron; everything else is a browser.
+const deviceOf = (req) => (/\bElectron\//.test(req?.headers?.['user-agent'] || '') ? 'desktop' : 'web');
+
+/** Signs a user in on this browser or app: a new session, with where and when it was made (Security settings lists them). */
+function createSession(db, res, userId, req = null) {
   const token = crypto.randomBytes(32).toString('base64url');
-  db.prepare('INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)')
-    .run(hashToken(token), userId, Date.now() + SESSION_TTL_MS);
+  const now = Date.now();
+  db.prepare(`INSERT INTO sessions (token_hash, user_id, expires_at, created_at, last_seen, user_agent, ip, device)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(hashToken(token), userId, now + SESSION_TTL_MS, now, now, String(req?.headers?.['user-agent'] || '').slice(0, 300),
+      String(req?.ip || '').slice(0, 64), deviceOf(req));
   res.cookie(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: 'lax',
@@ -64,10 +71,12 @@ function createApiToken(db, userId, name) {
 // personal access token in "Authorization: Bearer gst_...".
 function loadUser(db) {
   const find = db.prepare(`
-    SELECT u.id, u.username, u.display_name, u.bio, u.created_at, u.role
+    SELECT u.id, u.username, u.display_name, u.bio, u.created_at, u.role, s.rowid AS session_id, s.last_seen
     FROM sessions s JOIN users u ON u.id = s.user_id
     WHERE s.token_hash = ? AND s.expires_at > ?
   `);
+  // When each session was last used, a minute at a time at most.
+  const touchSession = db.prepare('UPDATE sessions SET last_seen = ? WHERE rowid = ?');
   const findToken = db.prepare(`
     SELECT u.id, u.username, u.display_name, u.bio, u.created_at, u.role, t.id AS token_id
     FROM api_tokens t JOIN users u ON u.id = t.user_id
@@ -84,7 +93,9 @@ function loadUser(db) {
       return next();
     }
     const token = parseCookies(req.headers.cookie)[SESSION_COOKIE];
-    req.user = token ? find.get(hashToken(token), Date.now()) || null : null;
+    const now = Date.now();
+    req.user = token ? find.get(hashToken(token), now) || null : null;
+    if (req.user && now - req.user.last_seen > 60 * 1000) touchSession.run(now, req.user.session_id);
     next();
   };
 }
@@ -119,6 +130,10 @@ function rateLimit({ windowMs, max }) {
 }
 
 module.exports = {
+  SESSION_COOKIE,
+  hashToken,
+  parseCookies,
+  deviceOf,
   createApiToken,
   requireAdmin,
   hashPassword,

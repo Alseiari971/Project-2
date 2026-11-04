@@ -18,6 +18,10 @@ import { appSettingsView } from './views/app-settings.js';
 import { installedView } from './views/installed.js';
 import { adminView } from './views/admin.js';
 import { arabicRequestsView } from './views/arabic-requests.js';
+import { securityView } from './views/security.js';
+import { supportView } from './views/support.js';
+import { initFriends, wireFriendsButton } from './friends.js';
+import { flagBadge } from './country-picker.js';
 
 const app = document.getElementById('app');
 const SIDEBAR_GAMES = 12;
@@ -40,7 +44,7 @@ function renderTopbar() {
   label('search-open', 'Search games (Ctrl+K)');
   document.querySelector('.topbar .logo').setAttribute('aria-label', t('GameShelf home'));
   mount(document.querySelector('.footer'), html`
-    <p>${th("GameShelf doesn't sell anything. Every buy button goes straight to the store. {legal}", { legal: html`<a href="#/legal">${t('About & legal')}</a>` })}</p>
+    <p>${th("GameShelf doesn't sell anything. Every buy button goes straight to the store. {legal}", { legal: html`<a href="#/legal">${t('About & legal')}</a>` })} · <a href="#/support">${t('Support')}</a></p>
     <p id="data-credit"></p>
     <p>${t('Game names, art and trademarks belong to their owners. Not affiliated with Valve, Twitch or any publisher.')}</p>`);
   document.getElementById('go-back').addEventListener('click', () => history.back());
@@ -79,23 +83,29 @@ function renderAccount() {
   // Switches to the other language, named in that language.
   const other = LANGUAGES.find((l) => l.id !== lang);
   const language = html`<button type="button" class="lang-btn" id="lang-btn" lang="${other.id}" title="${other.name}">${icon('globe')}<span>${other.name}</span></button>`;
-  mount(document.getElementById('nav-right'), html`${language}${settings}${state.user
+  const friendsButton = state.user
+    ? html`<button type="button" class="friends-btn" id="friends-btn" aria-controls="friends-drawer" aria-expanded="false" aria-label="${t('Friends & Activity')}" title="${t('Friends & Activity')}">${icon('users')}<span class="friends-count" hidden></span></button>`
+    : '';
+  mount(document.getElementById('nav-right'), html`${language}${settings}${friendsButton}${state.user
     ? html`
       <div class="menu">
         <button class="menu-button" type="button" id="menu-button" aria-haspopup="true" aria-expanded="false" aria-label="${t('Account menu')}">
           ${avatar(state.user)}
         </button>
         <div class="menu-list" id="menu-list" hidden>
-          <div class="menu-user">${avatar(state.user)}<div><strong>${bdi(state.user.displayName)}</strong><div class="muted small">${bdi(`@${state.user.username}`)}</div></div></div>
+          <div class="menu-user">${avatar(state.user)}<div><strong>${bdi(state.user.displayName)} ${flagBadge(state.user.nationality)}</strong><div class="muted small">${bdi(`@${state.user.username}`)}</div></div></div>
           <a href="${profileHref(state.user.username)}">${t('My profile')}</a>
           <a href="#/customize">${t('Edit profile')}</a>
+          <a href="#/settings/security">${t('Security')}${state.user.guard ? '' : html`<span class="menu-dot" title="${t('GameShelf Guard is off')}"></span>`}</a>
           <a href="#/import">${t('Import from Steam')}</a>
+          <a href="#/support">${t('Support')}</a>
           <div class="menu-sep"></div>
           <button type="button" id="logout">${t('Log out')}</button>
         </div>
       </div>`
     : html`<a class="nav-login" href="#/login">${t('Log in')}</a><a class="pill-btn pill-light" href="#/register">${t('Join free')}</a>`}`);
   document.getElementById('lang-btn').addEventListener('click', () => setLang(other.id));
+  wireFriendsButton();
 
   const button = document.getElementById('menu-button');
   const list = document.getElementById('menu-list');
@@ -105,9 +115,11 @@ function renderAccount() {
     button.setAttribute('aria-expanded', String(!list.hidden));
   });
   document.getElementById('logout')?.addEventListener('click', async () => {
+    await api('/presence/heartbeat', { method: 'POST', body: { status: 'offline' } }).catch(() => {});
     await api('/auth/logout', { method: 'POST' });
     state.user = null;
     state.library = [];
+    initFriends();
     location.hash = '#/';
     renderChrome();
   });
@@ -134,6 +146,7 @@ function renderSidebar() {
       ${link('#/community', 'Community', 'solid-users', 'community')}
       ${link('#/arabic', 'Arabic requests', 'star', 'arabic')}
       ${state.user ? link('#/import', 'Steam import', 'solid-import', 'import', html`<span class="tag tag-new">${t('NEW')}</span>`) : ''}
+      ${state.user ? link('#/support', 'Support', 'info', 'support') : ''}
       ${state.user?.role === 'admin' ? link('#/admin', 'Admin Panel', 'shield', 'admin') : ''}
     </nav>
     ${state.user
@@ -185,7 +198,7 @@ async function route() {
   const parts = (path || '/').split('/').filter(Boolean).map(decodeURIComponent);
   const isMe = parts[0] === 'u' && state.user && parts[1]?.toLowerCase() === state.user.username.toLowerCase();
   current = {
-    section: { undefined: 'home', browse: 'browse', library: 'library', community: 'community', import: 'import', admin: 'admin', arabic: 'arabic', u: isMe ? 'library' : 'community' }[parts[0]] || '',
+    section: { undefined: 'home', browse: 'browse', library: 'library', community: 'community', import: 'import', admin: 'admin', arabic: 'arabic', support: 'support', settings: 'settings', u: isMe ? 'library' : 'community' }[parts[0]] || '',
     gameId: parts[0] === 'game' ? parts[1] : null,
   };
 
@@ -216,8 +229,13 @@ async function route() {
         await appSettingsView(app, params);
         break;
       case 'community': await communityView(app, params); break;
-      case 'login': await authView(app, 'login'); break;
-      case 'register': await authView(app, 'register'); break;
+      case 'login': await authView(app, 'login', params); break;
+      case 'register': await authView(app, 'register', params); break;
+      case 'settings':
+        if (parts[1] !== 'security') throw Object.assign(new Error(''), { status: 404 });
+        await securityView(app, params);
+        break;
+      case 'support': await supportView(app, parts[1]); break;
       default:
         mount(app, html`<div class="page">${emptyState(t('Page not found'), '', html`<a class="pill-btn pill-light" href="#/">${t('Go home')}</a>`)}</div>`);
     }
@@ -239,6 +257,7 @@ async function pcGamesOnSignIn() {
 window.addEventListener('hashchange', route);
 document.addEventListener('user-changed', async () => {
   await refreshLibrary();
+  initFriends();
   renderChrome();
   pcGamesOnSignIn();
 });
@@ -254,6 +273,7 @@ document.addEventListener('library-changed', renderSidebar);
   } catch {
     state.user = null;
   }
+  initFriends();
   renderChrome();
   pcGamesOnSignIn();
   api('/info').then(({ source }) => {

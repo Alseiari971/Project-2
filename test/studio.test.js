@@ -96,7 +96,7 @@ test('build in the Studio, publish to the catalog, and a player gets it', { skip
   t.after(() => server.close());
   const base = `http://127.0.0.1:${server.address().port}`;
   const signUp = async (username) => {
-    const res = await globalThis.fetch(`${base}/api/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password: 'correct horse' }) });
+    const res = await globalThis.fetch(`${base}/api/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password: 'correct horse', email: `${username}@test.example`, nationality: 'AE' }) });
     return /gs_session=([^;]+)/.exec(res.headers.get('set-cookie'))[1];
   };
 

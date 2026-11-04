@@ -336,7 +336,7 @@ test('request, the adapter\'s table from the game\'s own data, lines seen in pla
     await new Promise((resolve) => server.once('listening', resolve));
     t.after(() => server.close());
     const base = `http://127.0.0.1:${server.address().port}`;
-    const res = await fetch(`${base}/api/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'alice', password: 'correct horse' }) });
+    const res = await fetch(`${base}/api/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'alice', password: 'correct horse', email: 'alice@test.example', nationality: 'AE' }) });
     const cloud = createCloudClient({ server: () => base, session: async () => /gs_session=([^;]+)/.exec(res.headers.get('set-cookie'))[1] });
     assert.deepEqual(await (await fetch(`${base}/api/steam/4242/features`)).json(), { features: ['Single-player', 'Steam Achievements'] });
 

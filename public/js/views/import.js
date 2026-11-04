@@ -1,4 +1,4 @@
-// Import a Steam library: paste a profile link, review the matches, import.
+// Import a Steam library: the account linked with Steam's sign-in, review the matches, import.
 import { html, bdi, th, api, mount, state, toast, STATUS_LABELS, profileHref } from '../lib.js';
 import { formatHours } from '../components.js';
 import { t, tn, locale } from '../i18n.js';
@@ -21,42 +21,52 @@ export async function importView(app) {
     location.hash = '#/login';
     return;
   }
-  const info = await api('/info');
+  const [info, steam] = await Promise.all([api('/info'), api('/me/steam')]);
 
+  // Only the Steam account linked with Steam's own sign-in is read; there's
+  // no typing in someone else's profile.
   mount(app, html`
     <div class="page import">
       <div class="import-intro">
         <h1>${t('Import from Steam')}</h1>
         <p class="muted">${t("Bring in every game you own, with your hours played. You choose what gets added, and nothing you've already rated or sorted gets changed.")}</p>
       </div>
-      ${info.steamImport ? html`
-        <form class="import-form" id="import-form">
-          <input class="input" name="profile" required placeholder="steamcommunity.com/id/yourname" aria-label="${t('Steam profile link')}" autocomplete="off" dir="ltr">
-          <button class="btn btn-light" type="submit">${t('Load my games')}</button>
-        </form>
+      ${!info.steamImport ? setupHelp() : steam.linked ? html`
+        <div class="panel import-linked">
+          <div>
+            <strong>${t('Your linked Steam account')}</strong>
+            <p class="muted small">${steam.name ? bdi(steam.name) : ''} <span dir="ltr">${steam.steamId}</span></p>
+          </div>
+          <button class="btn btn-light" type="button" id="import-load">${t('Load my games')}</button>
+        </div>
         <p class="muted small">${th("Your Steam profile's {details} must be set to Public (Steam → Edit Profile → Privacy Settings).", { details: html`<strong>${t('Game details')}</strong>` })}</p>
-        <div id="import-results"></div>` : setupHelp()}
+        <div id="import-results"></div>` : html`
+        <div class="panel import-linked">
+          <div>
+            <strong>${t('Link your Steam account first')}</strong>
+            <p class="muted small">${t('Sign in through Steam once, on the Security page. Steam confirms the account is yours, then your library can be imported.')}</p>
+          </div>
+          <a class="btn btn-steam" href="#/settings/security?section=steam">${t('Link Steam')}</a>
+        </div>`}
     </div>
   `);
 
-  const form = document.getElementById('import-form');
-  if (!form) return;
+  const load = document.getElementById('import-load');
+  if (!load) return;
 
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const button = form.querySelector('button');
+  load.addEventListener('click', async () => {
     const results = document.getElementById('import-results');
-    button.disabled = true;
-    button.textContent = t('Loading…');
+    load.disabled = true;
+    load.textContent = t('Loading…');
     mount(results, html`<p class="muted">${t('Reading your library and matching games. Big libraries can take up to a minute.')}</p>`);
     try {
-      const preview = await api('/me/import/steam/preview', { method: 'POST', body: { profile: new FormData(form).get('profile') } });
+      const preview = await api('/me/import/steam/preview', { method: 'POST' });
       renderPreview(results, preview);
     } catch (err) {
       mount(results, html`<p class="form-error">${err.message}</p>`);
     } finally {
-      button.disabled = false;
-      button.textContent = t('Load my games');
+      load.disabled = false;
+      load.textContent = t('Load my games');
     }
   });
 }

@@ -88,7 +88,7 @@ async function startServer(t) {
 
 /** Registers an account and returns its sign-in cookie's value. */
 async function signUp(base, username) {
-  const res = await fetch(`${base}/api/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password: 'correct horse' }) });
+  const res = await fetch(`${base}/api/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password: 'correct horse', email: `${username}@test.example`, nationality: 'AE' }) });
   assert.equal(res.status, 201);
   return /gs_session=([^;]+)/.exec(res.headers.get('set-cookie'))[1];
 }
@@ -237,7 +237,7 @@ test('the app\'s pass-through: its own pages, the server\'s /api, and a sign-in 
   assert.match(await page.text(), /<html/i);
   assert.match(page.headers.get('content-security-policy'), /script-src 'self'/);
 
-  const reg = await fetch(`${app}/api/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: app }, body: JSON.stringify({ username: 'alice', password: 'correct horse' }) });
+  const reg = await fetch(`${app}/api/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: app }, body: JSON.stringify({ username: 'alice', password: 'correct horse', email: 'alice@test.example', nationality: 'AE' }) });
   assert.equal(reg.status, 201);
   const cookie = reg.headers.get('set-cookie');
   assert.match(cookie, /gs_session=/);

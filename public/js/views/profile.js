@@ -1,6 +1,8 @@
 import { html, bdi, th, api, mount, state, STATUS_LABELS, timeAgo, parseDbTime, gameHref, profileHref, toast } from '../lib.js';
 import { avatar, libraryTile, levelBadge, statusBadge, emptyState, titleArt, stars, starValue, formatHours } from '../components.js';
 import { t, locale } from '../i18n.js';
+import { flagBadge } from '../country-picker.js';
+import { icon } from '../icons.js';
 
 const SHOWCASE_TITLES = {
   favorite: t('Favorite game'),
@@ -128,11 +130,12 @@ export async function profileView(app, username, params) {
         <header class="profile-header">
           ${avatar(user, 'xl')}
           <div class="profile-id">
-            <h1>${bdi(user.displayName)}</h1>
+            <h1>${bdi(user.displayName)} ${flagBadge(user.nationality)}</h1>
             ${user.headline ? html`<div class="headline">${bdi(user.headline)}</div>` : ''}
             <div class="profile-sub">
               <span>${bdi(`@${user.username}`)}</span>
               ${user.country ? html`<span>${user.country}</span>` : ''}
+              ${user.steamVerified ? html`<span class="steam-verified" title="${t('Linked with Steam\'s own sign-in')}">${icon('check')} ${t('Steam verified')}</span>` : ''}
               <span>${t('Joined {date}', { date: joined })}</span>
             </div>
             ${user.bio ? html`<p class="bio" dir="auto">${user.bio}</p>` : ''}

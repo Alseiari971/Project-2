@@ -54,7 +54,7 @@ test('game page has outbound store links only', async () => {
 
 test('register, add games to a list and view the public profile', async () => {
   const alice = client();
-  const reg = await alice('/api/auth/register', { method: 'POST', body: { username: 'alice', password: 'correct horse' } });
+  const reg = await alice('/api/auth/register', { method: 'POST', body: { username: 'alice', password: 'correct horse', email: 'alice@test.example', nationality: 'AE' } });
   assert.equal(reg.status, 201);
 
   assert.equal((await alice('/api/me/library/hades', { method: 'PUT', body: { status: 'completed', rating: 9 } })).status, 200);
@@ -87,10 +87,10 @@ test('validates input and requires login', async () => {
   assert.equal((await anon('/api/me/library/hades', { method: 'PUT', body: { status: 'played' } })).status, 401);
 
   const bob = client();
-  assert.equal((await bob('/api/auth/register', { method: 'POST', body: { username: 'b', password: 'longenough' } })).status, 400);
-  assert.equal((await bob('/api/auth/register', { method: 'POST', body: { username: 'bob', password: 'short' } })).status, 400);
-  assert.equal((await bob('/api/auth/register', { method: 'POST', body: { username: 'bob', password: 'longenough' } })).status, 201);
-  assert.equal((await client()('/api/auth/register', { method: 'POST', body: { username: 'BOB', password: 'longenough' } })).status, 409);
+  assert.equal((await bob('/api/auth/register', { method: 'POST', body: { username: 'b', password: 'longenough', email: 'b@test.example', nationality: 'AE' } })).status, 400);
+  assert.equal((await bob('/api/auth/register', { method: 'POST', body: { username: 'bob', password: 'short', email: 'bob@test.example', nationality: 'AE' } })).status, 400);
+  assert.equal((await bob('/api/auth/register', { method: 'POST', body: { username: 'bob', password: 'longenough', email: 'bob@test.example', nationality: 'AE' } })).status, 201);
+  assert.equal((await client()('/api/auth/register', { method: 'POST', body: { username: 'BOB', password: 'longenough', email: 'bob@test.example', nationality: 'AE' } })).status, 409);
 
   assert.equal((await bob('/api/me/library/hades', { method: 'PUT', body: { status: 'owned' } })).status, 400);
   assert.equal((await bob('/api/me/library/hades', { method: 'PUT', body: { status: 'played', rating: 11 } })).status, 400);
@@ -99,12 +99,12 @@ test('validates input and requires login', async () => {
 
 test('login and logout', async () => {
   const carol = client();
-  await carol('/api/auth/register', { method: 'POST', body: { username: 'carol', password: 'password123' } });
+  await carol('/api/auth/register', { method: 'POST', body: { username: 'carol', password: 'shelf-pass-42', email: 'carol@test.example', nationality: 'AE' } });
   await carol('/api/auth/logout', { method: 'POST' });
   assert.equal((await carol('/api/me')).body.user, null);
 
   assert.equal((await carol('/api/auth/login', { method: 'POST', body: { username: 'carol', password: 'wrong-password' } })).status, 401);
-  const ok = await carol('/api/auth/login', { method: 'POST', body: { username: 'carol', password: 'password123' } });
+  const ok = await carol('/api/auth/login', { method: 'POST', body: { username: 'carol', password: 'shelf-pass-42' } });
   assert.equal(ok.status, 200);
   assert.equal((await carol('/api/me')).body.user.username, 'carol');
 });
@@ -158,7 +158,7 @@ test('home screen has a spotlight and rows', async () => {
 
 test('customize a profile with showcases, background, frame and accent', async () => {
   const dana = client();
-  await dana('/api/auth/register', { method: 'POST', body: { username: 'dana', password: 'password123' } });
+  await dana('/api/auth/register', { method: 'POST', body: { username: 'dana', password: 'shelf-pass-42', email: 'dana@test.example', nationality: 'AE' } });
   await dana('/api/me/library/elden-ring', { method: 'PUT', body: { status: 'completed', rating: 10 } });
   await dana('/api/me/library/celeste', { method: 'PUT', body: { status: 'played', rating: 8 } });
 
@@ -202,7 +202,7 @@ test('customize a profile with showcases, background, frame and accent', async (
 
 test('avatar upload checks the image bytes', async () => {
   const erin = client();
-  await erin('/api/auth/register', { method: 'POST', body: { username: 'erin', password: 'password123' } });
+  await erin('/api/auth/register', { method: 'POST', body: { username: 'erin', password: 'shelf-pass-42', email: 'erin@test.example', nationality: 'AE' } });
   // Smallest valid PNG: 1×1 transparent pixel.
   const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
   const ok = await erin('/api/me/avatar', { method: 'PUT', body: { image: `data:image/png;base64,${png}` } });
@@ -219,8 +219,8 @@ test('avatar upload checks the image bytes', async () => {
 test('profile comments can be deleted by the author or the profile owner', async () => {
   const frank = client();
   const gina = client();
-  await frank('/api/auth/register', { method: 'POST', body: { username: 'frank', password: 'password123' } });
-  await gina('/api/auth/register', { method: 'POST', body: { username: 'gina', password: 'password123' } });
+  await frank('/api/auth/register', { method: 'POST', body: { username: 'frank', password: 'shelf-pass-42', email: 'frank@test.example', nationality: 'AE' } });
+  await gina('/api/auth/register', { method: 'POST', body: { username: 'gina', password: 'shelf-pass-42', email: 'gina@test.example', nationality: 'AE' } });
 
   const posted = await gina('/api/users/frank/comments', { method: 'POST', body: { body: 'Nice list!' } });
   assert.equal(posted.status, 201);
@@ -232,7 +232,7 @@ test('profile comments can be deleted by the author or the profile owner', async
   assert.equal(profile.body.comments[0].id, second.body.comment.id);
 
   const stranger = client();
-  await stranger('/api/auth/register', { method: 'POST', body: { username: 'harry', password: 'password123' } });
+  await stranger('/api/auth/register', { method: 'POST', body: { username: 'harry', password: 'shelf-pass-42', email: 'harry@test.example', nationality: 'AE' } });
   assert.equal((await stranger(`/api/comments/${posted.body.comment.id}`, { method: 'DELETE' })).status, 403);
   assert.equal((await frank(`/api/comments/${posted.body.comment.id}`, { method: 'DELETE' })).status, 200);
   assert.equal((await gina(`/api/comments/${second.body.comment.id}`, { method: 'DELETE' })).status, 200);
@@ -328,15 +328,15 @@ test('console-only games get no PC prices', async () => {
 
 test('deleting an account removes the user, their list and their comments', async () => {
   const del = client();
-  await del('/api/auth/register', { method: 'POST', body: { username: 'leaving', password: 'password123' } });
+  await del('/api/auth/register', { method: 'POST', body: { username: 'leaving', password: 'shelf-pass-42', email: 'leaving@test.example', nationality: 'AE' } });
   const before = (await client()('/api/games/hades')).body.community.count;
   await del('/api/me/library/hades', { method: 'PUT', body: { status: 'played' } });
   const other = client();
-  await other('/api/auth/register', { method: 'POST', body: { username: 'staying', password: 'password123' } });
+  await other('/api/auth/register', { method: 'POST', body: { username: 'staying', password: 'shelf-pass-42', email: 'staying@test.example', nationality: 'AE' } });
   await del('/api/users/staying/comments', { method: 'POST', body: { body: 'bye!' } });
 
   assert.equal((await del('/api/me', { method: 'DELETE', body: { password: 'wrong-password' } })).status, 401);
-  assert.equal((await del('/api/me', { method: 'DELETE', body: { password: 'password123' } })).status, 200);
+  assert.equal((await del('/api/me', { method: 'DELETE', body: { password: 'shelf-pass-42' } })).status, 200);
 
   assert.equal((await client()('/api/users/leaving')).status, 404);
   assert.equal((await client()('/api/users/staying')).body.comments.length, 0);
@@ -411,7 +411,7 @@ test('moods and the discovery queue', async () => {
     assert.equal(queue.body.games.length, 10);
     assert.ok(queue.body.games.every((g) => g.backdrop));
     // Games on your list and games you skipped stay out of the queue.
-    await call('/api/auth/register', { method: 'POST', body: { username: 'queue', password: 'password123' } });
+    await call('/api/auth/register', { method: 'POST', body: { username: 'queue', password: 'shelf-pass-42', email: 'queue@test.example', nationality: 'AE' } });
     await call('/api/me/library/elden-ring', { method: 'PUT', body: { status: 'want' } });
     for (let i = 0; i < 5; i++) {
       const ids = (await call('/api/discover?skip=hades,celeste')).body.games.map((g) => g.id);

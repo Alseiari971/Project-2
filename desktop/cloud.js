@@ -72,9 +72,9 @@ function createPassThrough({ target, publicDir }) {
  * Requests to GameShelf's server with the signed-in player's session.
  * `server()` is the server's address; `session()` the sign-in cookie's value, or null.
  */
-function createCloudClient({ server, session, fetch = globalThis.fetch, timeoutMs = 30000 }) {
+function createCloudClient({ server, session, fetch = globalThis.fetch, timeoutMs = 30000, userAgent = null }) {
   async function request(route, { method = 'GET', body, raw, type, timeout = timeoutMs, auth = true } = {}) {
-    const headers = {};
+    const headers = userAgent ? { 'User-Agent': userAgent } : {};
     const value = auth ? await session() : null;
     if (value) headers.Cookie = `${SESSION_COOKIE}=${value}`;
     if (body !== undefined) headers['Content-Type'] = 'application/json';

@@ -69,7 +69,7 @@ test('request, consent, local build, pending review, admin sign & publish, secon
   t.after(() => server.close());
   const base = `http://127.0.0.1:${server.address().port}`;
   const signUp = async (username) => {
-    const res = await globalThis.fetch(`${base}/api/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password: 'correct horse' }) });
+    const res = await globalThis.fetch(`${base}/api/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password: 'correct horse', email: `${username}@test.example`, nationality: 'AE' }) });
     return /gs_session=([^;]+)/.exec(res.headers.get('set-cookie'))[1];
   };
 
@@ -186,7 +186,7 @@ test('a game the player\'s PC can\'t read goes to the admins as a request, with 
   t.after(() => server.close());
   const base = `http://127.0.0.1:${server.address().port}`;
   const signUp = async (username) => {
-    const res = await globalThis.fetch(`${base}/api/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password: 'correct horse' }) });
+    const res = await globalThis.fetch(`${base}/api/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password: 'correct horse', email: `${username}@test.example`, nationality: 'AE' }) });
     return /gs_session=([^;]+)/.exec(res.headers.get('set-cookie'))[1];
   };
   // A game in an engine GameShelf can't patch.
@@ -222,7 +222,7 @@ test('a game whose files can\'t change (signed Unreal paks) gets Arabic as the o
   await new Promise((resolve) => server.once('listening', resolve));
   t.after(() => server.close());
   const base = `http://127.0.0.1:${server.address().port}`;
-  const res = await globalThis.fetch(`${base}/api/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'alice', password: 'correct horse' }) });
+  const res = await globalThis.fetch(`${base}/api/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'alice', password: 'correct horse', email: 'alice@test.example', nationality: 'AE' }) });
   const cloud = cloudAs(base, /gs_session=([^;]+)/.exec(res.headers.get('set-cookie'))[1]);
 
   // An Unreal game that only loads signed paks (a .sig beside its pak), and a stand-in for repak that reads its "pak".

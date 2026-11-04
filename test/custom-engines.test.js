@@ -244,7 +244,7 @@ async function startServer(t, tmp, { memory = (db) => createTranslationMemory({ 
   t.after(() => server.close());
   const base = `http://127.0.0.1:${server.address().port}`;
   const signUp = async (username) => {
-    const res = await fetch(`${base}/api/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password: 'correct horse' }) });
+    const res = await fetch(`${base}/api/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password: 'correct horse', email: `${username}@test.example`, nationality: 'AE' }) });
     return createCloudClient({ server: () => base, session: async () => /gs_session=([^;]+)/.exec(res.headers.get('set-cookie'))[1] });
   };
   return { base, db, signUp };

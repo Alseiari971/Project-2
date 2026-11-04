@@ -56,7 +56,7 @@ async function signedUp(base, username) {
     if (set) cookie = set.split(';')[0];
     return { status: res.status, body: await res.json().catch(() => null) };
   };
-  if (username) await call('/api/auth/register', { method: 'POST', body: { username, password: 'correct horse' } });
+  if (username) await call('/api/auth/register', { method: 'POST', body: { username, password: 'correct horse', email: `${username}@test.example`, nationality: 'AE' } });
   return call;
 }
 

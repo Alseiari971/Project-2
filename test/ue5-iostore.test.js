@@ -170,7 +170,7 @@ test('Request Arabic on an encrypted UE5 IoStore game: the admins are asked, the
     await new Promise((resolve) => server.once('listening', resolve));
     t.after(() => server.close());
     const base = `http://127.0.0.1:${server.address().port}`;
-    const res = await fetch(`${base}/api/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'alice', password: 'correct horse' }) });
+    const res = await fetch(`${base}/api/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'alice', password: 'correct horse', email: 'alice@test.example', nationality: 'AE' }) });
     const cloud = createCloudClient({ server: () => base, session: async () => /gs_session=([^;]+)/.exec(res.headers.get('set-cookie'))[1] });
 
     const online = createArabicOnline({ cloud, cacheDir: path.join(tmp, 'dl'), publicKeys: [PUBLIC] });

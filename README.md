@@ -5,7 +5,10 @@ Look up any game in the world, see where to buy it, and keep a public list of th
 - **Every game:** search and browse games on every platform, PC, PlayStation, Xbox, Nintendo and mobile, through [IGDB](https://www.igdb.com), the free game database run by Twitch.
 - **We don't sell anything:** each game page has "Where to buy" links to the real stores (Steam, Epic, GOG, PlayStation Store, Xbox, Nintendo eShop, itch.io, App Store, Google Play).
 - **Live prices:** the best current PC price, every store's price and the all-time low, from [CheapShark](https://www.cheapshark.com) (free, no key needed, US dollars).
-- **Steam import:** paste your Steam profile link to bring in your games and hours played.
+- **Accounts with GameShelf Guard:** sign up with a username, email, password and nationality (shown as a flag on your profile). Guard asks for a 6-digit code from an authenticator app or by email whenever you sign in on a new browser or PC, with 8 one-time recovery codes. Security settings list everywhere you're signed in. See [Accounts, Guard, friends and support](#accounts-guard-friends-and-support).
+- **Steam, verified:** link your Steam account with Steam's own sign-in, then import your games and hours played. Nobody can import or claim someone else's Steam account.
+- **Friends & Activity:** add friends by friend code or @username, and see who's online and what they're playing, including a «يلعب بالعربية» badge when the game runs with GameShelf's Arabic.
+- **Support tickets:** players open tickets (account, Steam linking, an Arabic patch, a game request); admins answer them in the Admin Panel.
 - **Game launcher look:** a sidebar with your games, a search pop-up (Ctrl+K or `/`), a Top 10 poster row, a Library page with grid and list views, and a bottom tab bar on phones.
 - **A home page that changes with the seasons:** a full-width spotlight plays each game's silent 6-second Steam preview loop behind its logo, rotating through six games. The season sets the colors, a moving decoration and its own sections:
   - *Fright Night* (Halloween, Oct 17 to Nov 2): embers, survival horror, co-op horror, new horror
@@ -103,10 +106,35 @@ Keep the Client Secret private: don't share it or commit it. `.env` is excluded 
 
 | Setting | What it unlocks | Where to get it (free) |
 | --- | --- | --- |
-| `STEAM_API_KEY` | "Import from Steam" | https://steamcommunity.com/dev/apikey (any domain works, e.g. `localhost`) |
+| `STEAM_API_KEY` | "Import from Steam", and Steam names on linked accounts | https://steamcommunity.com/dev/apikey (any domain works, e.g. `localhost`) |
+| `PUBLIC_URL` | The site's own address (`https://gameshelf.example`), used for Steam's sign-in to come back to. Set it on a VPS behind a proxy | Your domain |
+| `SMTP_URL` | Email for GameShelf Guard codes and email checks: `smtps://user:password@smtp.example.com:465`, or `smtp://…:587` (STARTTLS is required) | Your mail provider |
+| `MAIL_FROM` | The sender address of those emails, e.g. `GameShelf <no-reply@gameshelf.example>` | |
+| `MAIL_DEV_LOG` | `1` prints emails to the server log instead of sending them. For development only | |
 | `RAWG_API_KEY` | Older alternative game database, used only when IGDB isn't set up | https://rawg.io/apidocs |
 
-Steam import only works for profiles whose **Game details** are set to Public in Steam's privacy settings. With IGDB, Steam games are matched exactly by their Steam ID.
+Steam import reads only the Steam account linked to the GameShelf account (Security → Steam account), and only when its **Game details** are set to Public in Steam's privacy settings. With IGDB, Steam games are matched exactly by their Steam ID.
+
+## Accounts, Guard, friends and support
+
+**Signing up** takes a username (3 to 24 lowercase letters, numbers or underscores, checked as you type), an email address, a password (with a strength meter; common passwords and ones containing the username are refused) and a nationality, picked from a searchable list with Arab countries first and stored as its two-letter code. Profiles show it as a flag (drawn with the Twemoji Country Flags font, since Windows has no flag emoji). Accounts made before this have no email address until their owner adds one in Security settings.
+
+**GameShelf Guard** (Settings → Security) is two-step sign-in. Pick one:
+
+- **Authenticator app** (TOTP, RFC 6238): scan the QR code or type the key into Google Authenticator, Microsoft Authenticator, 1Password or any authenticator app. Works without email.
+- **Email codes:** a 6-digit code emailed at each new sign-in. Needs a confirmed email address and `SMTP_URL`.
+
+Turning Guard on gives 8 recovery codes, each good once. With Guard on, a browser or PC the account hasn't remembered gets a 6-digit prompt after the password, before any session starts (5 tries, 10 minutes). "Remember this device" skips it there for 180 days. Codes, recovery codes, sign-in attempts and remembered devices are stored only as hashes, and an authenticator code can't be used twice. Security settings also list every active session (browser or desktop app, when, from where), with sign-out for each; changing the password signs out everywhere else.
+
+Without `SMTP_URL`, sign-up still works, email addresses can't be confirmed, and Email Guard isn't offered; the authenticator app still is.
+
+**Linking Steam** uses Steam's own sign-in (OpenID 2.0). "Sign in through Steam" sends the player to `steamcommunity.com/openid/login`; Steam sends them back to `/api/auth/steam/return`, and GameShelf checks the answer (its return address, Steam's endpoint, the signed fields, its age) and then asks Valve's server directly whether it's genuine before linking that SteamID64. Each attempt works once. One Steam account can be linked to only one GameShelf account, and the other way round. There's no way to type in a Steam ID or profile link.
+
+In the desktop app, Steam's sign-in opens in the normal web browser, which isn't signed in to GameShelf, so the browser shows "Link this Steam account to @you?" first; the app notices the link by itself. The app also reads which Steam account is signed in on the PC (Steam's `config/loginusers.vdf`) and shows it next to the button, but only as a hint: a file on a PC proves nothing, so linking always goes through Steam's sign-in.
+
+**Friends & Activity** is the people button in the top bar. Everyone has a friend code (`GS-XXXX-XXXX`); find people by their code or exact `@username`, send, accept or decline requests, remove friends and block people (blocked players can't add or find you). Presence: the desktop app tells the server every 45 seconds (and at once when a game starts or stops) whether you're online or which game is running and whether its Arabic is on; the website says online while a tab is open. Presence expires 2 minutes after the last heartbeat, and only friends see it.
+
+**Support** (`#/support`): players open tickets by category (Account & 2FA, Steam linking, Broken Arabic patch, Game request, Other), optionally about a game from the catalog, and follow the conversation, which updates by itself. Admins get **Support** in the Admin Panel: the queue filtered by status and category, each sender's nationality, Steam link, Guard and email status and their other tickets, replies, and resolved or closed.
 
 ### Checking search results
 
@@ -360,6 +388,15 @@ src/prices.js        live prices from CheapShark
 src/steam-store.js   About, requirements, Metacritic, achievements and preview loops from Steam store pages
 src/seasons.js       which games each season's home page sections show
 src/auth.js          passwords, login sessions
+src/account-api.js   sign-up, sign-in with GameShelf Guard, Security settings (email, Guard, recovery codes, password, sessions)
+src/guard.js         Guard's codes: emailed codes, sign-in challenges, recovery codes, remembered devices
+src/totp.js          authenticator app codes (RFC 6238)
+src/mailer.js        sending email over SMTP (SMTP_URL), no extra packages
+src/steam-openid.js  linking Steam with Steam's own sign-in, checked with Valve
+src/friends.js       friend codes, requests, blocks and presence
+src/support.js       support tickets
+src/social-api.js    routes for Steam linking, friends, presence and support
+src/countries.js     the nationality list (public/js/countries.js is the browser's copy)
 src/db.js            SQLite database built into Node (saved to data/gameshelf.db, upgraded automatically)
 src/engine-recipes.js signed engine recipes, per game, for games whose text is packed
 src/games/igdb.js    the IGDB game database (every game, every platform)
@@ -373,14 +410,15 @@ desktop/overlay/     the overlay's two windows: the Arabic subtitles, and the hi
 localization/runtime/ the native runtime adapter (C): the string table (gs_core), the Windows hooks (gs_hook) and the stand-in library (gs_proxy), with its prebuilt version.dll and dinput8.dll
 localization/        the Arabic compiler (Python) for engines that can't shape Arabic, the overlay's fingerprints, the pack generator (.locres files, Ren'Py, Godot and RE Engine text, Bethesda string tables and archives, the loose-file scanner, engine recipes, translation), the engines and tools recipes may use (custom_engines.json) and the bundled Arabic font (assets/fonts)
 public/css/          the stylesheet
-public/fonts/        the Manrope and Alexandria fonts (SIL Open Font License)
+public/fonts/        the Manrope and Alexandria fonts (SIL Open Font License) and Twemoji Country Flags (MIT; flag art CC-BY 4.0)
+public/js/friends.js the Friends & Activity drawer; country-picker.js the nationality picker and flags
 public/js/i18n.js    English and Arabic: t() for phrases, tn() for counts; lang/ar.js has the Arabic
 public/js/boot.js    sets the page's language and direction before it's drawn
 public/js/main.js    navigation and page routing
 public/js/palette.js the search pop-up
 public/js/preview.js hover previews; discover.js the discovery queue; art-color.js the page tint
 public/js/seasons.js when each season runs, and its look (season-fx.js draws its decoration)
-public/js/views/     one file per page (home, browse, game, library, profile, edit profile, import, community, log in, about & legal, app settings)
+public/js/views/     one file per page (home, browse, game, library, profile, edit profile, import, community, log in and sign up, security, support, about & legal, app settings)
 scripts/             developer tools (search-debug, localization-pack, build-arabic-pack, build-runtime-hook, bundle-arabic-builder, fake-ocr-helper)
 test/                automated tests: npm test
 ```
@@ -393,7 +431,9 @@ GameShelf credits each source where its data appears and on the About & legal pa
 - **CheapShark**: prices. Buy buttons use CheapShark's own redirect links, as its terms ask.
 - **Steam store pages**: "About this game", system requirements, achievements, features and Metacritic scores, credited and linked back to the store page.
 - **YouTube**: trailers play in YouTube's official embedded player (privacy-enhanced mode), only after the visitor presses play.
-- **Fonts**: Manrope and Alexandria are under the SIL Open Font License (license files in `public/fonts/`). Thmanyah Sans isn't included; see [Arabic](#arabic).
+- **Fonts**: Manrope and Alexandria are under the SIL Open Font License (license files in `public/fonts/`). Thmanyah Sans isn't included; see [Arabic](#arabic). Flags use Twemoji Country Flags (MIT), whose flag art is Twitter's Twemoji under CC-BY 4.0, credited on the About & legal page.
+- **QR codes**: drawn in the browser with qrcode-generator (MIT, `public/js/vendor/qrcode.mjs`).
+- **Steam sign-in**: linking uses Steam's public OpenID sign-in. GameShelf isn't affiliated with Valve.
 
 Users can delete their account and all their data from Edit profile. This isn't legal advice; check each service's current terms before launching publicly.
 
@@ -410,16 +450,36 @@ The website talks to the server only through this JSON API, so a phone app can r
 | GET | `/api/games?search=&genre=&sort=&page=` | Search or browse games (`sort`: popular, new, top) |
 | GET | `/api/games/:id` | Game details, store links, who's played it |
 | GET | `/api/games/:id/prices` | Current PC deals (cheapest first) and the all-time low |
-| POST | `/api/auth/register` | `{ username, password }` |
-| POST | `/api/auth/login` | `{ username, password }` |
+| GET | `/api/auth/username?name=` | `{ username, available, reason }`, for checking a username while typing |
+| POST | `/api/auth/register` | `{ username, email, password, confirmPassword, nationality }` (nationality is an ISO code such as `AE`) → `{ user, emailSent }` |
+| POST | `/api/auth/login` | `{ username, password }` (username or email) → `{ user }`, or `{ guard: { challenge, method, email } }` when Guard needs a code |
+| POST | `/api/auth/guard` | `{ challenge, code, remember }` the 6-digit or recovery code → `{ user, via, backupCodesLeft }` |
+| POST | `/api/auth/guard/resend` | `{ challenge }` another emailed code |
 | POST | `/api/auth/logout` | |
+| GET | `/api/me/security` | Email, Guard, Steam link and active sessions |
+| POST | `/api/me/email` · `/api/me/email/send` · `/api/me/email/verify` | Change the address (`{ email, password }`), send a code, confirm it (`{ code }`) |
+| POST | `/api/me/2fa/totp/start` · `/confirm` | `{ password }` → `{ secret, uri }`; then `{ code }` → `{ backupCodes }` |
+| POST | `/api/me/2fa/email/start` · `/confirm` | `{ password }` emails a code; then `{ code }` → `{ backupCodes }` |
+| POST | `/api/me/2fa/disable` · `/api/me/2fa/backup-codes` · `/api/me/2fa/code` | `{ password, code }` turn Guard off or make new recovery codes; email a code (Email Guard) |
+| POST | `/api/me/password` | `{ current, next }`; signs out every other session |
+| GET · DELETE | `/api/me/sessions` · `/api/me/sessions/:id` | Active sessions; sign one out. `POST /api/me/sessions/revoke-others`, `DELETE /api/me/devices` |
+| GET | `/api/auth/steam/link` | Redirects to Steam's sign-in (`POST` returns `{ url }`, for the desktop app) |
+| GET | `/api/auth/steam/return` | Where Steam sends the player back; links after Valve confirms it |
+| GET · DELETE | `/api/me/steam` | The linked Steam account; unlink it |
+| GET | `/api/friends` | `{ code, friends (with presence), incoming, outgoing, blocked, online }` |
+| GET | `/api/friends/find?q=` | A player by friend code or `@username` |
+| POST | `/api/friends/request` · `accept` · `decline` · `remove` · `block` · `unblock` | `{ username }` or `{ code }` |
+| POST | `/api/presence/heartbeat` | `{ status: online \| in_game \| offline, gameId, gameTitle, steamAppId, arabicEnabled }`; expires after 2 minutes |
+| GET · POST | `/api/support/tickets` | My tickets; `{ category, subject, gameId?, message }` opens one |
+| GET | `/api/support/tickets/:id` | A ticket and its messages (`POST …/messages { body }` replies, `POST …/close`) |
+| GET | `/api/admin/support?status=&category=` | Admins: the ticket queue (`GET /api/admin/support/:id`, `POST …/messages { body, status? }`, `PATCH { status }`) |
 | GET | `/api/me` | The logged-in user (or `null`) |
 | PATCH | `/api/me` | `{ displayName, headline, bio, country, avatarFrame, background, accent, showcases }` |
 | PUT | `/api/me/avatar` | `{ image }` as a JPEG/PNG/WebP data URL |
 | DELETE | `/api/me/avatar` | Removes your avatar |
 | PUT | `/api/me/library/:gameId` | `{ status, rating }` adds or updates a game on your list (rating 1 to 10, shown as half stars) |
 | DELETE | `/api/me/library/:gameId` | Removes a game from your list |
-| POST | `/api/me/import/steam/preview` | `{ profile }` reads a Steam library and matches the games |
+| POST | `/api/me/import/steam/preview` | Reads the linked Steam account's library and matches the games (403 `link_required` without a linked account) |
 | POST | `/api/me/import/steam/commit` | `{ previewId, items: [{ appid, status }] }` adds the chosen games |
 | GET | `/api/users?search=` | Find people |
 | GET | `/api/users/:username` | A profile: game list, showcases, level, badges, comments |

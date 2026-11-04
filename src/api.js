@@ -5,15 +5,21 @@ const fs = require('node:fs');
 const path = require('node:path');
 const express = require('express');
 const {
-  hashPassword,
   verifyPassword,
-  createSession,
   destroySession,
   requireUser,
   requireAdmin,
   rateLimit,
   createApiToken,
 } = require('./auth');
+const { mountAccountRoutes } = require('./account-api');
+const { mountSocialRoutes } = require('./social-api');
+const { createGuard } = require('./guard');
+const { createMailer } = require('./mailer');
+const { createSteamOpenId } = require('./steam-openid');
+const { createFriends } = require('./friends');
+const { createSupport } = require('./support');
+const { normalizeCountry } = require('./countries');
 const { ROLES, adminNames, bootstrapAdmins } = require('./roles');
 const { readBody, RegistryError, MAX_PACK_BYTES } = require('./pack-registry');
 const { SubmissionError } = require('./submissions');
@@ -29,7 +35,6 @@ const { steamArt } = require('./games/steam-art');
 const { SEASON_IDS, seasonPlan, MOODS, findMood } = require('./seasons');
 
 const STATUSES = ['playing', 'completed', 'played', 'want', 'dropped'];
-const USERNAME_RE = /^[a-zA-Z0-9_]{3,20}$/;
 const GAME_ID_RE = /^[a-z0-9][a-z0-9-]{0,149}$/;
 const SORTS = ['popular', 'new', 'top'];
 // New profiles start in GameShelf's own lime.
@@ -53,6 +58,10 @@ const publicUser = (u) => ({
   headline: u.headline,
   bio: u.bio,
   country: u.country,
+  // ISO-2 nationality ('AE'), shown as a flag badge; null when not given.
+  nationality: u.nationality || null,
+  // A Steam account proved with Steam's own sign-in (the ID itself isn't public).
+  steamVerified: Boolean(u.steam_id),
   avatarUrl: u.avatar_version ? `/api/users/${encodeURIComponent(u.username)}/avatar?v=${u.avatar_version}` : null,
   avatarFrame: u.avatar_frame,
   accent: u.accent,
@@ -60,8 +69,16 @@ const publicUser = (u) => ({
   joinedAt: u.created_at,
 });
 
-// The logged-in user about themselves: their public profile and their role.
-const selfUser = (u) => ({ ...publicUser(u), role: ROLES.includes(u.role) ? u.role : 'user' });
+// The logged-in user about themselves: their public profile, role and sign-in settings.
+const selfUser = (u) => ({
+  ...publicUser(u),
+  role: ROLES.includes(u.role) ? u.role : 'user',
+  email: u.email || null,
+  emailVerified: Boolean(u.email_verified),
+  guard: u.twofa_method || null,
+  friendCode: u.friend_code || null,
+  steamLinked: Boolean(u.steam_id),
+});
 
 const libraryEntry = (row) => ({
   gameId: row.game_id,
@@ -92,7 +109,14 @@ function pitchFrom(text) {
   return pitch.trim();
 }
 
-function createApi({ db, games, prices, steam, steamStore, translations, arabicGames, packs, submissions, recipes = null, community = null, downloadsDir }) {
+function createApi({
+  db, games, prices, steam, steamStore, translations, arabicGames, packs, submissions, recipes = null, community = null, downloadsDir,
+  mailer = createMailer(), fetchImpl = fetch, now = () => Date.now(),
+  guard = createGuard({ db, mailer, now }),
+  steamOpenId = createSteamOpenId({ db, fetchImpl, steam, now }),
+  friends = createFriends({ db, now }),
+  support = createSupport({ db, games }),
+}) {
   bootstrapAdmins(db);
   const api = express.Router();
   const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30 });
@@ -107,7 +131,7 @@ function createApi({ db, games, prices, steam, steamStore, translations, arabicG
     deleteUser: db.prepare('DELETE FROM users WHERE id = ?'),
     insertUser: db.prepare('INSERT INTO users (username, display_name, password_hash, accent) VALUES (?, ?, ?, ?)'),
     updateProfile: db.prepare(`
-      UPDATE users SET display_name = @displayName, headline = @headline, bio = @bio, country = @country,
+      UPDATE users SET display_name = @displayName, headline = @headline, bio = @bio, country = @country, nationality = @nationality,
         avatar_frame = @avatarFrame, background = @background, accent = @accent, showcases = @showcases
       WHERE id = @id
     `),
@@ -385,39 +409,10 @@ function createApi({ db, games, prices, steam, steamStore, translations, arabicG
 
   // ---- Accounts --------------------------------------------------------------
 
-  api.post('/auth/register', authLimiter, (req, res) => {
-    const username = String(req.body?.username || '').trim();
-    const password = String(req.body?.password || '');
-    if (!USERNAME_RE.test(username)) {
-      return res.status(400).json({ error: 'Usernames need 3 to 20 letters, numbers or underscores.' });
-    }
-    if (password.length < 8 || password.length > 200) {
-      return res.status(400).json({ error: 'Password must be at least 8 characters.' });
-    }
-    if (q.userByName.get(username)) {
-      return res.status(409).json({ error: 'That username is taken.' });
-    }
-    const { lastInsertRowid } = q.insertUser.run(username, username, hashPassword(password), DEFAULT_ACCENT);
-    if (adminNames().includes(username.toLowerCase())) db.prepare("UPDATE users SET role = 'admin' WHERE id = ?").run(lastInsertRowid);
-    createSession(db, res, lastInsertRowid);
-    res.status(201).json({ user: selfUser(q.userByName.get(username)) });
-  });
-
-  api.post('/auth/login', authLimiter, (req, res) => {
-    const username = String(req.body?.username || '').trim();
-    const password = String(req.body?.password || '');
-    const user = q.userByName.get(username);
-    if (!user || !verifyPassword(password, user.password_hash)) {
-      return res.status(401).json({ error: 'Wrong username or password.' });
-    }
-    createSession(db, res, user.id);
-    res.json({ user: selfUser(user) });
-  });
-
-  api.post('/auth/logout', (req, res) => {
-    destroySession(db, req, res);
-    res.json({ ok: true });
-  });
+  // Sign-up, sign-in with GameShelf Guard, and Security settings (src/account-api.js).
+  mountAccountRoutes(api, { db, guard, selfUser, accentFor: () => DEFAULT_ACCENT, adminNames, steamOpenId });
+  // Steam linking, friends and presence, customer support (src/social-api.js).
+  mountSocialRoutes(api, { steamOpenId, friends, support });
 
   // The logged-in user, including the settings the profile editor needs.
   api.get('/me', (req, res) => {
@@ -460,6 +455,7 @@ function createApi({ db, games, prices, steam, steamStore, translations, arabicG
       headline: pick('headline', 'headline'),
       bio: pick('bio', 'bio'),
       country: pick('country', 'country'),
+      nationality: body.nationality === undefined ? current.nationality : (normalizeCountry(body.nationality) || ''),
       avatarFrame: pick('avatarFrame', 'avatar_frame'),
       background: pick('background', 'background'),
       accent: pick('accent', 'accent').toLowerCase(),
@@ -472,6 +468,7 @@ function createApi({ db, games, prices, steam, steamStore, translations, arabicG
     if (update.headline.length > 60) return res.status(400).json({ error: 'Headline must be 60 characters or less.' });
     if (update.bio.length > 600) return res.status(400).json({ error: 'Bio must be 600 characters or less.' });
     if (update.country.length > 40) return res.status(400).json({ error: 'Location must be 40 characters or less.' });
+    if (body.nationality !== undefined && body.nationality !== '' && !update.nationality) return res.status(400).json({ error: 'Pick your nationality.' });
     if (!profile.FRAMES.includes(update.avatarFrame)) return res.status(400).json({ error: 'Unknown avatar frame.' });
     if (!profile.ACCENTS.includes(update.accent)) return res.status(400).json({ error: 'Pick one of the theme colors.' });
     if (!profile.isValidBackground(update.background)) return res.status(400).json({ error: 'Unknown background.' });
@@ -483,7 +480,7 @@ function createApi({ db, games, prices, steam, steamStore, translations, arabicG
 
     q.updateProfile.run(update);
     const user = q.userById.get(current.id);
-    res.json({ user: publicUser(user), showcases: JSON.parse(user.showcases) });
+    res.json({ user: selfUser(user), showcases: JSON.parse(user.showcases) });
   });
 
   // Avatars are resized in the browser and sent as a data URL.
@@ -529,10 +526,13 @@ function createApi({ db, games, prices, steam, steamStore, translations, arabicG
 
   // ---- Steam import ----------------------------------------------------------
 
+  // Only the Steam account linked with Steam's own sign-in: no Steam ID or profile link can be typed in.
   api.post('/me/import/steam/preview', requireUser, importLimiter, asyncRoute(async (req, res) => {
+    const linked = q.userById.get(req.user.id).steam_id;
+    if (!linked) return res.status(403).json({ error: 'Link your Steam account in Security settings first.', code: 'link_required' });
     let owned;
     try {
-      owned = await steam.ownedGames(req.body?.profile);
+      owned = await steam.ownedGames(linked);
     } catch (err) {
       if (err instanceof SteamError) return res.status(err.code === 'unavailable' ? 502 : 400).json({ error: err.message, code: err.code });
       throw err;
