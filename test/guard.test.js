@@ -75,7 +75,7 @@ test('sign-up: a lowercase handle, a real email, a strong confirmed password and
   await bad({ email: 'not-an-email' }, /valid email/);
   await bad({ password: 'short' }, /at least 8/);
   await bad({ password: 'password123' }, /too easy/);
-  await bad({ password: 'nadia2024!' }, /too easy/);
+  await bad({ password: 'nadia2024!' }, /can't contain your username/);
   await bad({ confirmPassword: 'something else' }, /don't match/);
   await bad({ nationality: '' }, /nationality/);
   await bad({ nationality: 'XX' }, /nationality/);

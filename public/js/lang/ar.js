@@ -1175,6 +1175,8 @@ export const AR = {
   'Unknown option.': 'خيار غير معروف.',
 
   // ---- Accounts, GameShelf Guard and security ----
+  'Contains your username': 'تحتوي على اسم المستخدم',
+  "The password can't contain your username.": 'لا يمكن أن تحتوي كلمة المرور على اسم المستخدم.',
   'This request came from another site.': 'جاء هذا الطلب من موقع آخر.',
   'Something went wrong. Please try again.': 'حدث خطأ ما. حاول مرة أخرى.',
   'That request is too big.': 'هذا الطلب كبير جدًا.',

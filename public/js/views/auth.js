@@ -15,7 +15,8 @@ export function passwordStrength(password, username = '') {
   if (!password) return { score: 0, label: '' };
   const lower = password.toLowerCase();
   if (password.length < 8) return { score: 0, label: t('Too short') };
-  if (['password', '12345678', 'qwerty', 'gameshelf', 'letmein', 'iloveyou'].some((w) => lower.includes(w)) || (username && lower.includes(username))) {
+  if (username && lower.includes(username)) return { score: 0, label: t('Contains your username') };
+  if (['password', '12345678', 'qwerty', 'gameshelf', 'letmein', 'iloveyou'].some((w) => lower.includes(w))) {
     return { score: 0, label: t('Too easy to guess') };
   }
   let score = password.length >= 12 ? 2 : 1;

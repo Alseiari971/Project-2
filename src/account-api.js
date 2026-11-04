@@ -24,9 +24,9 @@ function usernameProblem(username) {
 
 function passwordProblem(password, username = '') {
   if (password.length < MIN_PASSWORD || password.length > 200) return 'Password must be at least 8 characters.';
-  if (COMMON_PASSWORDS.has(password.toLowerCase()) || (username && password.toLowerCase().includes(username))) {
-    return 'That password is too easy to guess. Try a longer phrase.';
-  }
+  // Each rule says itself, so nobody is left guessing why a password was refused.
+  if (username && password.toLowerCase().includes(username.toLowerCase())) return 'The password can\'t contain your username.';
+  if (COMMON_PASSWORDS.has(password.toLowerCase())) return 'That password is too easy to guess. Try a longer phrase.';
   return null;
 }
 
