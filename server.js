@@ -26,16 +26,50 @@ const { createMailer } = require('./src/mailer');
 const defaultDataDir = () => process.env.DATA_DIR || path.dirname(path.resolve(process.env.DB_FILE || path.join(__dirname, 'data', 'gameshelf.db')));
 
 // Every response: no sniffing, no outside scripts or styles, no framing.
-function securityHeaders(_req, res, next) {
+// The same headers Helmet sets, written out: no inline scripts or plugins,
+// no framing, no MIME sniffing, HTTPS remembered, powerful browser features off.
+function securityHeaders(req, res, next) {
   res.set({
     'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
     'Referrer-Policy': 'strict-origin-when-cross-origin',
+    'Cross-Origin-Opener-Policy': 'same-origin',
+    'Origin-Agent-Cluster': '?1',
+    'X-DNS-Prefetch-Control': 'off',
+    'X-Permitted-Cross-Domain-Policies': 'none',
+    'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()',
     'Content-Security-Policy':
-      "default-src 'self'; img-src 'self' https: data:; style-src 'self'; script-src 'self'; frame-ancestors 'none'; " +
+      "default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; " +
+      "img-src 'self' https: data:; style-src 'self'; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; " +
       // Trailers play in YouTube's privacy-friendly player; Steam's short clips stream from its servers.
       "frame-src https://www.youtube-nocookie.com; media-src https://*.steamstatic.com",
   });
+  // HTTPS only from now on, once the site was reached over HTTPS (behind Caddy, req.secure follows X-Forwarded-Proto).
+  if (req.secure) res.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   next();
+}
+
+/**
+ * Requests that change something must come from GameShelf's own pages: a
+ * browser names the page's origin in Origin, and another site's origin is
+ * refused (with SameSite=Lax cookies and JSON bodies, this closes CSRF).
+ * Tools without a browser send no Origin and are let through; they still
+ * need a session or token.
+ */
+function sameOriginWrites(allowed = () => []) {
+  return (req, res, next) => {
+    if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+    const origin = req.headers.origin;
+    if (!origin) return next();
+    let host;
+    try {
+      host = new URL(origin).host;
+    } catch {
+      return res.status(403).json({ error: 'This request came from another site.' });
+    }
+    if (host === req.headers.host || allowed().includes(origin)) return next();
+    res.status(403).json({ error: 'This request came from another site.' });
+  };
 }
 
 function createApp({
@@ -62,6 +96,7 @@ function createApp({
   app.set('trust proxy', 'loopback');
 
   app.use(securityHeaders);
+  app.use('/api', sameOriginWrites(() => [process.env.PUBLIC_URL].filter(Boolean).map((u) => new URL(u).origin)));
 
   // Large enough for a resized avatar image.
   app.use(express.json({ limit: '500kb' }));
@@ -77,13 +112,14 @@ function createApp({
   });
   app.use(express.static(path.join(__dirname, 'public')));
 
+  // Errors never show their stack or file paths: those go to the server log only.
   app.use((err, _req, res, _next) => {
-    // Client mistakes such as malformed JSON carry a 4xx status from Express.
+    // Client mistakes such as malformed JSON or a too-big body carry a 4xx status from Express.
     if (err.status >= 400 && err.status < 500) {
-      return res.status(err.status).json({ error: 'Invalid request.' });
+      return res.status(err.status).json({ error: err.status === 413 ? 'That request is too big.' : 'Invalid request.' });
     }
     console.error(err);
-    res.status(502).json({ error: 'Something went wrong talking to the game database. Please try again.' });
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
   });
 
   return app;
@@ -114,4 +150,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { createApp, securityHeaders };
+module.exports = { createApp, securityHeaders, sameOriginWrites };

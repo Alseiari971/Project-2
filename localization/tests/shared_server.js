@@ -22,7 +22,7 @@ const fetch = async (_url, init) => {
   const server = createApp({ db, games: createLocalProvider(), translations }).listen(0, '127.0.0.1');
   await new Promise((resolve) => server.once('listening', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
-  const reg = await globalThis.fetch(`${base}/api/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'builder', password: 'correct horse' }) });
+  const reg = await globalThis.fetch(`${base}/api/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'builder', password: 'correct horse', email: 'builder@test.example', nationality: 'AE' }) });
   const cookie = reg.headers.get('set-cookie').split(';')[0];
   const made = await (await globalThis.fetch(`${base}/api/me/tokens`, { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: cookie }, body: JSON.stringify({ name: 'test' }) })).json();
   console.log(JSON.stringify({ base, token: made.token }));

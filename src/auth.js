@@ -3,19 +3,44 @@ const crypto = require('node:crypto');
 const SESSION_COOKIE = 'gs_session';
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
-function hashPassword(password) {
+// Passwords: scrypt with a random salt per password. New hashes use N=2^15
+// (about 32 MB of memory per guess); older ones (N=2^14, "scrypt$salt$hash")
+// still verify and are upgraded at the next sign-in (needsRehash).
+const SCRYPT = { N: 2 ** 15, r: 8, p: 1, maxmem: 96 * 1024 * 1024 };
+
+function hashPassword(password, { N = SCRYPT.N, r = SCRYPT.r, p = SCRYPT.p } = {}) {
   const salt = crypto.randomBytes(16);
-  const hash = crypto.scryptSync(password, salt, 64);
-  return `scrypt$${salt.toString('hex')}$${hash.toString('hex')}`;
+  const hash = crypto.scryptSync(String(password), salt, 64, { N, r, p, maxmem: SCRYPT.maxmem });
+  return `scrypt2$${N}$${r}$${p}$${salt.toString('hex')}$${hash.toString('hex')}`;
 }
 
+function parseHash(stored) {
+  const parts = String(stored || '').split('$');
+  if (parts[0] === 'scrypt' && parts.length === 3) return { N: 2 ** 14, r: 8, p: 1, salt: parts[1], hash: parts[2] };
+  if (parts[0] === 'scrypt2' && parts.length === 6) return { N: Number(parts[1]), r: Number(parts[2]), p: Number(parts[3]), salt: parts[4], hash: parts[5] };
+  return null;
+}
+
+/** Compares in constant time; a malformed stored hash is simply "no". */
 function verifyPassword(password, stored) {
-  const [scheme, saltHex, hashHex] = stored.split('$');
-  if (scheme !== 'scrypt') return false;
-  const expected = Buffer.from(hashHex, 'hex');
-  const actual = crypto.scryptSync(password, Buffer.from(saltHex, 'hex'), expected.length);
+  const h = parseHash(stored);
+  if (!h || !(h.N >= 2 ** 14 && h.N <= 2 ** 20) || !(h.r >= 1 && h.r <= 32) || !(h.p >= 1 && h.p <= 4)) return false;
+  const expected = Buffer.from(h.hash, 'hex');
+  if (expected.length < 32) return false;
+  const actual = crypto.scryptSync(String(password), Buffer.from(h.salt, 'hex'), expected.length, { N: h.N, r: h.r, p: h.p, maxmem: SCRYPT.maxmem });
   return crypto.timingSafeEqual(actual, expected);
 }
+
+/** True when a stored hash is weaker than what hashPassword makes now. */
+const needsRehash = (stored) => {
+  const h = parseHash(stored);
+  return !h || h.N < SCRYPT.N || h.r < SCRYPT.r;
+};
+
+// Checked against when a username doesn't exist, so a wrong username takes as
+// long as a wrong password and the timing doesn't tell which accounts exist.
+let dummyHash = null;
+const burnPasswordCheck = (password) => verifyPassword(password, (dummyHash ??= hashPassword('not a real password')));
 
 // Only a hash of the session token is stored, so a leaked database can't be
 // used to hijack sessions.
@@ -149,18 +174,38 @@ function createCounter({ windowMs, max, now = () => Date.now() }) {
 }
 
 // Small in-memory limiter for login/register to slow down password guessing.
-function rateLimit({ windowMs, max }) {
+function rateLimit({ windowMs, max, by = 'ip' }) {
   const counter = createCounter({ windowMs, max });
   return (req, res, next) => {
-    if (!counter.hit(req.ip)) {
+    // by: 'user' counts per signed-in account (whatever address), falling back to the address.
+    const key = by === 'user' && req.user ? `u:${req.user.id}` : `ip:${req.ip}`;
+    if (!counter.hit(key)) {
       return res.status(429).json({ error: 'Too many attempts. Please wait a few minutes and try again.' });
     }
     next();
   };
 }
 
+/**
+ * The message of an error caught around user input, if it's one of ours (a
+ * plain sentence); a JavaScript slip ("Cannot read properties of...") or
+ * anything with a file path gives a generic message instead.
+ */
+function clientMessage(err) {
+  const text = String(err?.message || '');
+  const internal = !text || text.length > 300 || /\b(Cannot read|is not a function|is not defined|undefined|null|ENOENT|EACCES|EPERM|SQLITE)\b|[\/\\][\w.-]+\.(js|py|db)\b|\n\s+at /.test(text);
+  if (internal) {
+    console.error(err);
+    return 'Invalid request.';
+  }
+  return text;
+}
+
 module.exports = {
+  clientMessage,
   createCounter,
+  needsRehash,
+  burnPasswordCheck,
   SESSION_COOKIE,
   hashToken,
   parseCookies,

@@ -20,8 +20,10 @@ function page(res, status, { title, titleAr, body, bodyAr, extra = '' }) {
 
 function mountSocialRoutes(api, { steamOpenId, friends, support, guard = null, db = null }) {
   const friendLimiter = rateLimit({ windowMs: 60 * 1000, max: 30 });
-  const beatLimiter = rateLimit({ windowMs: 60 * 1000, max: 20 });
+  const friendUserLimiter = rateLimit({ windowMs: 60 * 1000, max: 30, by: 'user' });
+  const beatLimiter = rateLimit({ windowMs: 60 * 1000, max: 20, by: 'user' });
   const ticketLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 20 });
+  const ticketUserLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 20, by: 'user' });
   const steamLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20 });
   const json = (ErrorClass) => (fn) => (req, res, next) => Promise.resolve().then(() => fn(req, res)).then((out) => {
     if (out !== undefined && !res.headersSent) res.json(out);
@@ -86,10 +88,10 @@ function mountSocialRoutes(api, { steamOpenId, friends, support, guard = null, d
   // ---- Friends and presence ----
 
   api.get('/friends', requireUser, friendRoute((req) => friends.list(req.user)));
-  api.get('/friends/find', requireUser, friendLimiter, friendRoute((req) => friends.lookup(req.user, req.query.q)));
+  api.get('/friends/find', requireUser, friendLimiter, friendUserLimiter, friendRoute((req) => friends.lookup(req.user, req.query.q)));
   const target = (req) => (req.body?.username ? { username: String(req.body.username) } : req.body?.target ?? req.body?.code);
   for (const action of ['request', 'accept', 'decline', 'remove', 'block', 'unblock']) {
-    api.post(`/friends/${action}`, requireUser, friendLimiter, friendRoute((req) => ({ ...friends[action](req.user, target(req)), ...friends.list(req.user) })));
+    api.post(`/friends/${action}`, requireUser, friendLimiter, friendUserLimiter, friendRoute((req) => ({ ...friends[action](req.user, target(req)), ...friends.list(req.user) })));
   }
   api.post('/presence/heartbeat', requireUser, beatLimiter, friendRoute((req) => ({
     presence: friends.heartbeat(req.user, req.body || {}, /\bElectron\//.test(req.headers['user-agent'] || '') ? 'desktop' : 'web'),
@@ -98,13 +100,13 @@ function mountSocialRoutes(api, { steamOpenId, friends, support, guard = null, d
   // ---- Support ----
 
   api.get('/support/tickets', requireUser, supportRoute((req) => support.mine(req.user)));
-  api.post('/support/tickets', requireUser, ticketLimiter, supportRoute(async (req, res) => {
+  api.post('/support/tickets', requireUser, ticketLimiter, ticketUserLimiter, supportRoute(async (req, res) => {
     const made = await support.create(req.user, req.body || {});
     res.status(201);
     return made;
   }));
   api.get('/support/tickets/:id', requireUser, supportRoute((req) => support.get(req.user, req.params.id)));
-  api.post('/support/tickets/:id/messages', requireUser, ticketLimiter, supportRoute((req) => support.reply(req.user, req.params.id, req.body?.body)));
+  api.post('/support/tickets/:id/messages', requireUser, ticketLimiter, ticketUserLimiter, supportRoute((req) => support.reply(req.user, req.params.id, req.body?.body)));
   api.post('/support/tickets/:id/close', requireUser, supportRoute((req) => support.close(req.user, req.params.id)));
 
   api.get('/admin/support', requireAdmin, supportRoute((req) => support.queue({ status: String(req.query.status || ''), category: String(req.query.category || '') })));

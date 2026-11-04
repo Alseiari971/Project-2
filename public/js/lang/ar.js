@@ -1175,6 +1175,9 @@ export const AR = {
   'Unknown option.': 'خيار غير معروف.',
 
   // ---- Accounts, GameShelf Guard and security ----
+  'This request came from another site.': 'جاء هذا الطلب من موقع آخر.',
+  'Something went wrong. Please try again.': 'حدث خطأ ما. حاول مرة أخرى.',
+  'That request is too big.': 'هذا الطلب كبير جدًا.',
   'Guard code or recovery code': 'رمز الحارس أو رمز الاسترداد',
   'Enter a Guard code (or a recovery code) to delete the account.': 'أدخل رمز الحارس (أو رمز استرداد) لحذف الحساب.',
   'Too many wrong tries for this account. Wait 15 minutes, or reset your password.': 'محاولات خاطئة كثيرة لهذا الحساب. انتظر 15 دقيقة، أو أعد تعيين كلمة المرور.',

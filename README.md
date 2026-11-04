@@ -383,6 +383,18 @@ Admins build packs without a command prompt: pick the game's folder (or a file w
 
 Packs hold game files where the engine needs them (an RE Engine patch carries the game's message files with the Arabic added, for example), so publishing them shares that game data; the in-app build ("Request Arabic subtitles") makes those patches on each player's PC instead, from their own copy.
 
+## Security
+
+What protects players, and where it's tested (`test/security.test.js`, `localization/tests/test_security.py`):
+
+- **Desktop app:** every window is sandboxed (`contextIsolation`, `sandbox`, no Node, `webSecurity`, no insecure content, no `<webview>`). IPC answers only GameShelf's own page in the top frame, never an embedded trailer or another site. Windows can't navigate away or open pop-ups. Only `https://` pages and a short list of launcher links (`steam://rungameid/<number>` and the like) open outside the app. Pages get no camera, microphone or location; only the subtitle capture window may record the screen. Files the Pack Studio uses must be ones the admin chose in the app's own file picker. See `desktop/safety.js`.
+- **No shell, ever:** every tool (repak, retoc, QuickBMS, REMSG, Python) runs from an argument list. Python goes through `arabic_compiler/safe_exec.py`, which also refuses `.bat`/`.cmd` tools on Windows (cmd.exe would read `&`, `|` and `%VAR%` in their arguments). Game paths and AES keys reach tools exactly as written.
+- **Paths:** zips, pack manifests and recipes can't name a file outside their folder (`..`, absolute paths, drive letters, either slash). The stager, the loose-file scanner and the pack builder resolve real paths and don't follow links. Packs can't put programs into a game.
+- **Signatures:** packs and recipes must be signed with GameShelf's Ed25519 key. The server holds only the public key and refuses to start if `PACK_PUBLIC_KEY` is a private key; `pack-signing.key` stays offline with the admin's Pack Studio.
+- **Accounts:** passwords use scrypt (N=2^15, upgraded at sign-in from older hashes) with timing-safe comparison, and a wrong username takes as long as a wrong password. Session tokens, Guard codes, recovery codes and remembered devices are stored only as SHA-256 hashes. Cookies are `HttpOnly`, `SameSite=Lax` and `Secure` in production (`NODE_ENV=production`). Steam linking is checked with Valve itself (see above).
+- **Limits:** per address and per account on sign-in, Guard codes, password resets, translation, friends and support; translation also has daily and monthly caps.
+- **Web:** a strict Content-Security-Policy (`script-src 'self'`, `object-src 'none'`, `base-uri 'self'`, no framing), `X-Frame-Options: DENY`, `nosniff`, HSTS over HTTPS, and no CORS. Requests that change something are refused when a browser says they came from another site. JSON bodies are capped at 500 KB. Errors never show stacks or file paths. Everything players write is shown as text, never as HTML.
+
 ## Project layout
 
 ```

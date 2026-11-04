@@ -36,6 +36,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
 from .repak import GamePak, PakError, path_hashes
+from . import safe_exec
 
 LANGUAGE_IDS = {'English': 1, 'Arabic': 21}
 MSG_FILE = re.compile(r'\.msg\.\d+$', re.I)
@@ -257,7 +258,7 @@ def _tool_command(tool: str) -> list[str]:
 
 
 def _run_tool(tool: str, args: list[str], expect: Path, what: str):
-    result = subprocess.run(_tool_command(tool) + args, capture_output=True, text=True)
+    result = safe_exec.run(_tool_command(tool) + args, capture_output=True, text=True)
     # REMSG_Converter reports a failed file in its output and still exits 0, so look for the file.
     if result.returncode != 0 or not expect.is_file():
         raise MsgError(f'REMSG_Converter couldn\'t {what}: {(result.stdout + result.stderr).strip()[-400:]}')

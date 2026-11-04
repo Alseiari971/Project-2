@@ -17,6 +17,7 @@
 // captured and the game's part of it is used.
 const os = require('node:os');
 const path = require('node:path');
+const { SAFE_PREFERENCES } = require('../safety');
 const { createSubtitleSession } = require('./subtitle-session');
 
 const OVERLAY_HTML = path.join(__dirname, '..', 'overlay', 'overlay.html');
@@ -166,7 +167,7 @@ function createOverlayManager({ BrowserWindow, desktopCapturer, screen, ipcMain,
       hasShadow: false,
       backgroundColor: '#00000000',
       title: 'GameShelf Arabic subtitles',
-      webPreferences: { preload: path.join(__dirname, '..', 'overlay', 'overlay-preload.js'), sandbox: true, contextIsolation: true, nodeIntegration: false },
+      webPreferences: { ...SAFE_PREFERENCES, preload: path.join(__dirname, '..', 'overlay', 'overlay-preload.js') },
     });
     overlay.setIgnoreMouseEvents(true, { forward: true });
     overlay.setAlwaysOnTop(true, 'screen-saver');
@@ -181,6 +182,7 @@ function createOverlayManager({ BrowserWindow, desktopCapturer, screen, ipcMain,
       width: 320,
       height: 200,
       webPreferences: {
+        ...SAFE_PREFERENCES,
         preload: path.join(__dirname, '..', 'overlay', 'capture-preload.js'),
         partition: 'gameshelf-capture',
         backgroundThrottling: false,

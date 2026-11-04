@@ -35,6 +35,7 @@ import struct
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from . import safe_exec
 
 TOC_MAGIC = b'-==--==--==--==-'
 # EIoContainerFlags
@@ -105,7 +106,7 @@ def find_tool(given: str | None = None) -> str | None:
 
 def _run(tool: str, *args, binary=False, timeout=900, keyed=True):
     try:
-        result = subprocess.run([tool, *(key_args() if keyed else []), *args], capture_output=True, text=not binary, timeout=timeout)
+        result = safe_exec.run([tool, *(key_args() if keyed else []), *args], capture_output=True, text=not binary, timeout=timeout)
     except (OSError, subprocess.TimeoutExpired) as err:
         raise RetocError(redact(f'retoc couldn\'t run: {err}')) from None
     if not binary:

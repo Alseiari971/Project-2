@@ -98,6 +98,8 @@ function createSteamOpenId({ db, fetchImpl = fetch, steam = null, now = () => Da
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({ ...params, 'openid.mode': 'check_authentication' }).toString(),
+        // Straight to Valve: a redirect to anywhere else is a failure, not something to follow.
+        redirect: 'error',
         signal: AbortSignal.timeout(10000),
       });
       reply = res.ok ? await res.text() : '';

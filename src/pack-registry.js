@@ -33,7 +33,13 @@ function packKeys(env = process.env) {
     if (config.localizationPackKey) keys.push(config.localizationPackKey);
   } catch {}
   const extra = env.PACK_PUBLIC_KEY;
+  if (extra && /PRIVATE KEY/.test(extra)) throw new Error('PACK_PUBLIC_KEY holds a private key. The server needs only the public key; keep pack-signing.key offline.');
   if (extra) keys.push(extra.includes('BEGIN PUBLIC KEY') ? extra.replace(/\\n/g, '\n') : fs.readFileSync(extra, 'utf8'));
+  // The server only checks signatures. The private half (pack-signing.key)
+  // stays offline with the admin's Pack Studio; refuse to run with it here.
+  for (const key of keys) {
+    if (/PRIVATE KEY/.test(key)) throw new Error('PACK_PUBLIC_KEY holds a private key. The server needs only the public key; keep pack-signing.key offline.');
+  }
   return keys;
 }
 

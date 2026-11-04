@@ -16,6 +16,8 @@ const { createCustomGames, suggestName } = require('./custom-games');
 const { getGpuPreference, setGpuPreference, pickMainProgram, createProgramStore, gogUninstaller } = require('./game-options');
 const { createDiscordPresence } = require('./discord');
 const { createPresenceLoop } = require('./presence');
+const { externalUrl, createPickedPaths, trustedSender, lockContents, permissionPolicy, SAFE_PREFERENCES } = require('./safety');
+const { pathToFileURL } = require('node:url');
 const { localSteamAccount } = require('./steam-account');
 const { createArabicService } = require('./localization/service');
 const { createOcrHelper, defaultSpawn } = require('./localization/ocr');
@@ -170,8 +172,12 @@ function saveWindowState() {
   } catch {}
 }
 
+// Only https:// pages and the known launcher links leave the app (see safety.js).
 const openExternal = (url) => {
-  if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+  const safe = externalUrl(url);
+  if (safe) return shell.openExternal(safe);
+  console.warn('Not opening an address outside the allowed list:', String(url).slice(0, 200));
+  return Promise.resolve();
 };
 
 function createWindow(startPath) {
@@ -193,10 +199,8 @@ function createWindow(startPath) {
     titleBarStyle: 'hidden',
     ...(process.platform === 'darwin' ? { trafficLightPosition: { x: 18, y: 24 } } : {}),
     webPreferences: {
+      ...SAFE_PREFERENCES,
       preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      sandbox: true,
-      nodeIntegration: false,
       spellcheck: false,
     },
   });
@@ -211,16 +215,7 @@ function createWindow(startPath) {
 
   const contents = win.webContents;
   // Store pages, trailers on YouTube and every other outside link open in the
-  // normal web browser; the window only ever shows GameShelf.
-  contents.setWindowOpenHandler(({ url }) => {
-    openExternal(url);
-    return { action: 'deny' };
-  });
-  contents.on('will-navigate', (event, url) => {
-    if (new URL(url).origin === origin) return;
-    event.preventDefault();
-    openExternal(url);
-  });
+  // normal web browser; the window only ever shows GameShelf (see lockDownApp).
 
   // Mouse back/forward buttons, and the usual keyboard shortcuts.
   const nav = contents.navigationHistory;
@@ -449,7 +444,7 @@ const describe = (g) => ({ key: g.key, launcher: LAUNCHER_NAMES[g.launcher] });
 function launch(game) {
   // Launcher links (steam://, com.epicgames.launcher://) go through the launcher.
   // GOG games and games added by hand start from their own program file.
-  if (game.url) return shell.openExternal(game.url);
+  if (game.url) return openExternal(game.url);
   const child = spawn(game.exe, [], { cwd: game.cwd, detached: true, stdio: 'ignore', windowsHide: false });
   child.on('error', (err) => console.error(`Could not start ${game.name}:`, err.message));
   child.unref();
@@ -643,11 +638,31 @@ const arabicProgress = (key) => (progress) => {
   if (win && !win.isDestroyed()) win.webContents.send('arabic:progress', { key, ...progress });
 };
 
-function fromApp(event) {
-  try {
-    return new URL(event.senderFrame.url).origin === origin;
-  } catch {
-    return false;
+// IPC is answered only for GameShelf's own pages, from the top frame (never an
+// embedded trailer or another site).
+const fromApp = (event) => trustedSender(event, origin);
+
+// Every window and frame the app makes: kept on GameShelf's pages (or the
+// overlay's own files), no pop-ups, no <webview>, and almost no permissions.
+const OVERLAY_DIR_URL = pathToFileURL(path.join(__dirname, 'overlay') + path.sep).href;
+function lockDownApp() {
+  app.on('web-contents-created', (_event, contents) => {
+    lockContents(contents, {
+      allowed: (url) => {
+        try {
+          return new URL(url).origin === origin || String(url).startsWith(OVERLAY_DIR_URL);
+        } catch {
+          return false;
+        }
+      },
+      openOutside: openExternal,
+    });
+  });
+  const allow = permissionPolicy({ origin, captureUrl: pathToFileURL(path.join(__dirname, 'overlay', 'capture.html')).href });
+  // The main window's session, and the subtitle capture window's own.
+  for (const ses of [session.defaultSession, session.fromPartition('gameshelf-capture')]) {
+    ses.setPermissionRequestHandler((_contents, permission, done, details) => done(allow(permission, details?.requestingUrl)));
+    ses.setPermissionCheckHandler((_contents, permission, requestingOrigin, details) => allow(permission, details?.requestingUrl || requestingOrigin));
   }
 }
 
@@ -793,7 +808,7 @@ function registerIpc() {
         return setGpuPreference(program, Number(value));
       }
       case 'graphics-settings':
-        return shell.openExternal('ms-settings:display-advancedgraphics');
+        return openExternal('ms-settings:display-advancedgraphics');
       case 'open-folder': {
         const problem = game.dir ? await shell.openPath(game.dir) : 'This game has no folder.';
         if (problem) throw new Error(problem);
@@ -801,13 +816,13 @@ function registerIpc() {
       }
       case 'steam-properties':
         steamOnly();
-        return shell.openExternal(`steam://gameproperties/${game.steamAppId}`);
+        return openExternal(`steam://gameproperties/${Number(game.steamAppId)}`);
       case 'verify':
         steamOnly();
-        return shell.openExternal(`steam://validate/${game.steamAppId}`);
+        return openExternal(`steam://validate/${Number(game.steamAppId)}`);
       case 'uninstall': {
         // The launcher's own uninstaller asks for confirmation.
-        if (game.launcher === 'steam') return shell.openExternal(`steam://uninstall/${game.steamAppId}`);
+        if (game.launcher === 'steam') return openExternal(`steam://uninstall/${Number(game.steamAppId)}`);
         const uninstaller = game.launcher === 'gog' && gogUninstaller(game.dir);
         if (!uninstaller) throw new Error('GameShelf can’t uninstall this game.');
         spawn(uninstaller, [], { cwd: game.dir, detached: true, stdio: 'ignore' }).unref();
@@ -853,7 +868,7 @@ function registerIpc() {
   handle('steam:open-link', async () => {
     const { url } = await cloud.json('/api/auth/steam/link', { method: 'POST' });
     if (!String(url).startsWith('https://steamcommunity.com/openid/login?')) throw new Error('GameShelf\'s server sent an unexpected address.');
-    shell.openExternal(url);
+    await openExternal(url);
     return { opened: true };
   });
   // Signing in or out in the window: tell friends now.
@@ -974,19 +989,34 @@ function registerIpc() {
   const studioSend = (channel) => (payload) => {
     if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
   };
-  // Only folders the Studio built in can be published, added or opened from the page.
+  // Only folders the Studio built in can be published, added or opened from
+  // the page: resolved through any links, inside the Studio's output, and
+  // folders only (opening a file could start a program).
   const inStudio = (target) => {
-    const resolved = path.resolve(String(target || ''));
-    if (!resolved.startsWith(path.resolve(studio.outDir) + path.sep)) throw new Error('Not allowed.');
-    return resolved;
+    let real;
+    try {
+      real = fs.realpathSync(path.resolve(String(target || '')));
+    } catch {
+      throw new Error('Not allowed.');
+    }
+    const root = fs.realpathSync(path.resolve(studio.outDir));
+    if (!real.startsWith(root + path.sep) || !fs.statSync(real).isDirectory()) throw new Error('Not allowed.');
+    return real;
   };
+  // Files and folders the page names must be ones the admin chose in the app's own dialog.
+  const picked = createPickedPaths();
+  try {
+    picked.allow(studio.settings().keyFile);
+  } catch {}
   handle('studio:settings', async () => {
     await requireAdmin();
     return studio.settings();
   });
   handle('studio:save-settings', async (input) => {
     await requireAdmin();
-    return studio.saveSettings(input || {});
+    const values = { ...(input || {}) };
+    if (values.keyFile) values.keyFile = picked.check(values.keyFile, 'That signing key');
+    return studio.saveSettings(values);
   });
   handle('studio:pick', async (kind) => {
     await requireAdmin();
@@ -1000,15 +1030,19 @@ function registerIpc() {
     }[kind];
     if (!choices) throw new Error('Not allowed.');
     const result = await dialog.showOpenDialog(win, choices);
-    return result.canceled ? null : result.filePaths[0] || null;
+    return result.canceled ? null : picked.remember(result.filePaths[0] || null);
   });
   handle('studio:make-keys', async (folder) => {
     await requireAdmin();
-    return studio.makeKeys(String(folder));
+    const made = await studio.makeKeys(picked.check(String(folder), 'That folder'));
+    picked.allow(made?.keyFile);
+    return made;
   });
   handle('studio:build', async (options) => {
     await requireAdmin();
-    return studio.build(options || {}, { onLog: studioSend('studio:log'), onProgress: studioSend('studio:progress') });
+    const o = { ...(options || {}) };
+    for (const key of ['source', 'pakList', 'reviewed']) if (o[key]) o[key] = picked.check(o[key]);
+    return studio.build(o, { onLog: studioSend('studio:log'), onProgress: studioSend('studio:progress') });
   });
   handle('studio:cancel', async () => studio.cancel());
   handle('studio:publish', async (packDir) => {
@@ -1064,6 +1098,7 @@ async function start() {
   for (const [key, value] of Object.entries(readSettings(settingsFile))) {
     if (value) process.env[key] = value;
   }
+  lockDownApp();
   buildApp();
   scannedGames();
   await startServer();

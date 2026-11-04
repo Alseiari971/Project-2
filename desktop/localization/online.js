@@ -118,7 +118,8 @@ function createArabicOnline({ cloud, cacheDir, publicKeys = [] }) {
         try {
           if (got.sha256 !== entry.sha256) throw new CloudError('The Arabic pack didn\'t download correctly. Please try again.');
           for (const { name: file, data } of packFiles(readZip(await fs.readFile(zip)))) {
-            const to = path.join(dir, ...file.split('/'));
+            const to = path.resolve(dir, ...file.split('/'));
+            if (!to.startsWith(path.resolve(dir) + path.sep)) throw new CloudError('The Arabic pack has a file outside its folder.');
             await fs.mkdir(path.dirname(to), { recursive: true });
             await fs.writeFile(to, data);
           }

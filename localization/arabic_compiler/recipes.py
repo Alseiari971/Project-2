@@ -49,6 +49,7 @@ import subprocess
 from pathlib import Path, PurePosixPath
 
 from . import bethesda, loose
+from . import safe_exec
 
 REPO = Path(__file__).resolve().parents[2]
 REGISTRY = Path(os.environ.get('GAMESHELF_ENGINES') or REPO / 'localization' / 'custom_engines.json')
@@ -246,7 +247,7 @@ class RecipeRun:
             args = [self.path(arg, phase) for arg in step]
             self.log(f'Recipe {phase} step {number}: {self.tool.name} {" ".join(args)}')
             try:
-                result = subprocess.run([str(self.tool), *args], cwd=self.work, env=env, stdin=subprocess.DEVNULL,
+                result = safe_exec.run([str(self.tool), *args], cwd=self.work, env=env, stdin=subprocess.DEVNULL,
                                         capture_output=True, text=True, errors='replace', timeout=STEP_TIMEOUT, shell=False)
             except (OSError, subprocess.TimeoutExpired) as err:
                 raise RecipeError(f'{self.tool.name} couldn\'t run: {err}') from None

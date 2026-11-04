@@ -41,6 +41,7 @@ from pathlib import Path
 from . import bethesda, godotpck, loose, renpyc, retoc
 from . import locres as locres_format
 from . import remsg
+from . import safe_exec
 
 
 class SourceError(ValueError):
@@ -147,7 +148,7 @@ def _repak(tool: str, *args, binary=False):
         keys = retoc.key_args()
     except retoc.RetocError as err:
         raise SourceError(str(err)) from None
-    result = subprocess.run([tool, *keys, *args], capture_output=True, text=not binary, timeout=600)
+    result = safe_exec.run([tool, *keys, *args], capture_output=True, text=not binary, timeout=600)
     if not binary:
         result.stderr = retoc.redact(result.stderr)
     return result

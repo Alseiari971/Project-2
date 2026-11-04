@@ -1,6 +1,6 @@
 // Accounts: sign-up, sign-in with GameShelf Guard (src/guard.js), and Security
 // settings (email, Guard, recovery codes, password, active sessions).
-const { hashPassword, verifyPassword, createSession, destroySession, requireUser, rateLimit, deviceOf, createCounter } = require('./auth');
+const { hashPassword, verifyPassword, createSession, destroySession, requireUser, rateLimit, deviceOf, createCounter, needsRehash, burnPasswordCheck } = require('./auth');
 const { GuardError, maskEmail } = require('./guard');
 const { newSecret, verifyTotp, otpauthUri } = require('./totp');
 const { normalizeCountry } = require('./countries');
@@ -118,9 +118,11 @@ function mountAccountRoutes(api, { db, guard, selfUser, accentFor, adminNames, s
     if (user && badPasswords.blocked(user.id)) return res.status(429).json({ error: LOCKED });
     if (!user || !verifyPassword(password, user.password_hash)) {
       if (user) badPasswords.hit(user.id);
+      else burnPasswordCheck(password);
       return res.status(401).json({ error: 'Wrong username or password.' });
     }
     badPasswords.clear(user.id);
+    if (needsRehash(user.password_hash)) q.setPassword.run(hashPassword(password), user.id);
     if (!user.twofa_method || guard.isRemembered(req, user.id)) {
       createSession(db, res, user.id, req);
       return res.json({ user: selfUser(user) });

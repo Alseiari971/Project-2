@@ -11,6 +11,7 @@ const {
   requireAdmin,
   rateLimit,
   createApiToken,
+  clientMessage,
 } = require('./auth');
 const { mountAccountRoutes } = require('./account-api');
 const { mountSocialRoutes } = require('./social-api');
@@ -699,6 +700,8 @@ function createApi({
   // ---- Shared Arabic translations (see src/translation-memory.js) ----------
 
   const translateLimiter = rateLimit({ windowMs: 60 * 1000, max: 60 });
+  // Per account too, so many addresses can't drain the translation budget (it also has daily and monthly caps).
+  const translateUserLimiter = rateLimit({ windowMs: 60 * 1000, max: 40, by: 'user' });
 
   api.post('/translations/lookup', requireUser, translateLimiter, (req, res) => {
     const { game, hashes } = req.body || {};
@@ -707,13 +710,13 @@ function createApi({
     try {
       res.json({ arabic: translations.lookup(String(game), hashes.map(String)) });
     } catch (err) {
-      res.status(400).json({ error: err.message });
+      res.status(400).json({ error: clientMessage(err) });
     }
   });
 
   // Before a game's lines are translated: its glossary (names, terms, how it speaks to the player), made from
   // the builder's candidates when there's none yet: { game, terms: [English], samples: [lines], context }.
-  api.post('/translations/glossary', requireUser, translateLimiter, asyncRoute(async (req, res) => {
+  api.post('/translations/glossary', requireUser, translateLimiter, translateUserLimiter, asyncRoute(async (req, res) => {
     if (!translations) return res.status(503).json({ error: 'Shared translation isn\'t set up on this server.' });
     const { game, terms, samples, context } = req.body || {};
     try {
@@ -721,12 +724,12 @@ function createApi({
       res.json({ terms: found.terms, player: { gender: found.player.gender, name: found.player.name || '' } });
     } catch (err) {
       if (err instanceof TranslationLimit) return res.status(503).json({ error: err.message });
-      if (err instanceof TypeError) return res.status(400).json({ error: err.message });
+      if (err instanceof TypeError) return res.status(400).json({ error: clientMessage(err) });
       console.error('Glossary:', err.message);
       res.status(502).json({ error: 'The translation service didn\'t answer. Please try again later.' });
     }
   }));
-  api.post('/translations/translate', requireUser, translateLimiter, asyncRoute(async (req, res) => {
+  api.post('/translations/translate', requireUser, translateLimiter, translateUserLimiter, asyncRoute(async (req, res) => {
     const { game, lines, context } = req.body || {};
     if (!translations) return res.status(503).json({ error: 'Shared translation isn\'t set up on this server.' });
     if (!Array.isArray(lines) || !lines.length || lines.length > 200) return res.status(400).json({ error: 'Send 1 to 200 lines at a time.' });
@@ -735,7 +738,7 @@ function createApi({
       res.json(await translations.translate(req.user, String(game), wanted, { context: String(context || '') }));
     } catch (err) {
       if (err instanceof TranslationLimit) return res.status(503).json({ error: err.message });
-      if (err instanceof TypeError) return res.status(400).json({ error: err.message });
+      if (err instanceof TypeError) return res.status(400).json({ error: clientMessage(err) });
       console.error('Shared translation:', err.message);
       res.status(502).json({ error: 'The translation service didn\'t answer. Please try again later.' });
     }
@@ -749,7 +752,7 @@ function createApi({
     try {
       res.json(fn(req.body || {}, req));
     } catch (err) {
-      if (err instanceof TypeError) return res.status(400).json({ error: err.message });
+      if (err instanceof TypeError) return res.status(400).json({ error: clientMessage(err) });
       throw err;
     }
   };
@@ -930,7 +933,7 @@ function createApi({
     try {
       list = installedList(req.body);
     } catch (err) {
-      return res.status(400).json({ error: err.message });
+      return res.status(400).json({ error: clientMessage(err) });
     }
     res.json({ matches: await matchGames(list) });
   }));
@@ -941,7 +944,7 @@ function createApi({
     try {
       list = installedList(req.body);
     } catch (err) {
-      return res.status(400).json({ error: err.message });
+      return res.status(400).json({ error: clientMessage(err) });
     }
     const statusOf = (req.body.games || []).map((g) => (STATUSES.includes(g?.status) ? g.status : 'want'));
     const found = await matchGames(list);
@@ -1023,7 +1026,7 @@ function createApi({
     try {
       res.json({ glossary: translations.glossary(String(req.params.game)) });
     } catch (err) {
-      res.status(400).json({ error: err.message });
+      res.status(400).json({ error: clientMessage(err) });
     }
   });
   api.put('/admin/glossaries/:game', requireAdmin, (req, res) => {
@@ -1031,7 +1034,7 @@ function createApi({
     try {
       res.json({ glossary: translations.setGlossary(String(req.params.game), req.body || {}) });
     } catch (err) {
-      res.status(400).json({ error: err.message });
+      res.status(400).json({ error: clientMessage(err) });
     }
   });
   // The Arabic font for a game's packs: { fontStyle: 'plex' | 'cairo' | 'naskh' | null }.

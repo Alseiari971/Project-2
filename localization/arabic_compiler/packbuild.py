@@ -74,6 +74,7 @@ from .sources import Row, Source, SourceError, msg_dump_source, read_source
 from .shared import SharedError, SharedMemory, credentials, game_key, line_hash
 from .translate import _LETTERS, _TOKENS, Cache, Provider, TranslationError, Translator, problem_with
 from .xunity import write_translations
+from . import safe_exec
 
 REPO = Path(__file__).resolve().parents[2]
 # The desktop app runs this builder itself, and sets these to its own Node (Electron) and signer.
@@ -434,10 +435,12 @@ def _copy_tree(source: Path, payload: Path, log):
             files = [(i.filename, archive.read(i.filename)) for i in archive.infolist() if not i.is_dir()]
     else:
         raise BuildError(f'{source} isn\'t a zip or a folder.')
+    root = os.path.realpath(payload)
     for name, data in files:
-        rel = PurePosixPath(name)
-        parts = [part for part in rel.parts if part not in ('', '.')]
-        if not parts or '..' in parts or rel.is_absolute():
+        # Both slashes separate folders on Windows, so "BepInEx/..\\..\\x.dll" is split
+        # too; drive letters, "..", absolute paths and NULs leave the file out.
+        parts = [part for part in re.split(r'[\\/]', name) if part not in ('', '.')]
+        if not parts or '..' in parts or name.startswith(('/', '\\')) or re.match(r'^[A-Za-z]:', name) or any(':' in p or '\0' in p for p in parts):
             continue
         lower = [part.lower() for part in parts]
         if '/'.join(lower) == 'bepinex/config/autotranslatorconfig.ini':
@@ -446,6 +449,8 @@ def _copy_tree(source: Path, payload: Path, log):
             log(f'Left out {name} (packs can\'t put it in the game folder).')
             continue
         target = payload.joinpath(*parts)
+        if not os.path.realpath(target).startswith(root.rstrip(os.sep) + os.sep):
+            raise BuildError(f'{name} in {source.name} would land outside the pack.')
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
 
@@ -527,7 +532,7 @@ def build_tmp_bundle(args, compiled_dir: Path, log) -> Path:
                '-executeMethod', 'GameShelfArabicFont.Build', '-logFile', str(compiled_dir / 'unity-font.log'),
                '-gameshelfOut', str(out), '-gameshelfCharset', str(compiled_dir / 'charset.txt')]
     log('Building the TextMeshPro font bundle: ' + ' '.join(command))
-    result = subprocess.run(command, capture_output=True, text=True)
+    result = safe_exec.run(command, capture_output=True, text=True)
     bundle = out / UNITY_FONT_BUNDLE
     if result.returncode != 0 or not bundle.exists():
         raise BuildError(f'The Unity Editor couldn\'t build the font bundle; see {compiled_dir / "unity-font.log"}.')
@@ -1111,7 +1116,7 @@ def build_unreal(source, translations: dict, args, payload: Path, stage_root: Pa
     else:
         command = [exe, 'pack', '--version', args.pak_version, '--mount-point', args.mount_point, str(stage), str(out_pak)]
     log('Packing: ' + ' '.join(command))
-    result = subprocess.run(command, capture_output=True, text=True)
+    result = safe_exec.run(command, capture_output=True, text=True)
     if result.returncode != 0 or not out_pak.exists():
         raise BuildError(f'{kind} failed: {(result.stderr or result.stdout).strip()[-500:]}')
     iostore = source.extra.get('iostore') or {}
@@ -1202,7 +1207,7 @@ def sign(pack_dir: Path, args, kind: str):
                 command += [flag, value]
     if kind == 'godot':
         command += ['--godot', str(args.godot)]
-    result = subprocess.run(command, capture_output=True, text=True)
+    result = safe_exec.run(command, capture_output=True, text=True)
     if result.returncode != 0:
         raise BuildError(f'Signing failed: {(result.stderr or result.stdout).strip()}')
     return result.stdout.strip()
