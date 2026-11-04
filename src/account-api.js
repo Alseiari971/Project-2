@@ -1,6 +1,6 @@
 // Accounts: sign-up, sign-in with GameShelf Guard (src/guard.js), and Security
 // settings (email, Guard, recovery codes, password, active sessions).
-const { hashPassword, verifyPassword, createSession, destroySession, requireUser, rateLimit, deviceOf } = require('./auth');
+const { hashPassword, verifyPassword, createSession, destroySession, requireUser, rateLimit, deviceOf, createCounter } = require('./auth');
 const { GuardError, maskEmail } = require('./guard');
 const { newSecret, verifyTotp, otpauthUri } = require('./totp');
 const { normalizeCountry } = require('./countries');
@@ -35,6 +35,13 @@ function mountAccountRoutes(api, { db, guard, selfUser, accentFor, adminNames, s
   const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30 });
   const guardLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 40 });
   const lookLimiter = rateLimit({ windowMs: 60 * 1000, max: 60 });
+  // Per account, whatever address the attempts come from: wrong passwords,
+  // wrong Guard codes, and password-reset emails.
+  const LOCK_MS = 15 * 60 * 1000;
+  const badPasswords = createCounter({ windowMs: LOCK_MS, max: 10 });
+  const badCodes = createCounter({ windowMs: LOCK_MS, max: 10 });
+  const resetMails = createCounter({ windowMs: 60 * 60 * 1000, max: 5 });
+  const LOCKED = 'Too many wrong tries for this account. Wait 15 minutes, or reset your password.';
   const q = {
     byName: db.prepare('SELECT * FROM users WHERE username = ?'),
     byEmail: db.prepare('SELECT * FROM users WHERE email = ? COLLATE NOCASE'),
@@ -108,9 +115,12 @@ function mountAccountRoutes(api, { db, guard, selfUser, accentFor, adminNames, s
     const login = String(req.body?.username || '').trim();
     const password = String(req.body?.password || '');
     const user = login.includes('@') ? q.byEmail.get(cleanEmail(login)) : q.byName.get(login.toLowerCase());
+    if (user && badPasswords.blocked(user.id)) return res.status(429).json({ error: LOCKED });
     if (!user || !verifyPassword(password, user.password_hash)) {
+      if (user) badPasswords.hit(user.id);
       return res.status(401).json({ error: 'Wrong username or password.' });
     }
+    badPasswords.clear(user.id);
     if (!user.twofa_method || guard.isRemembered(req, user.id)) {
       createSession(db, res, user.id, req);
       return res.json({ user: selfUser(user) });
@@ -125,8 +135,13 @@ function mountAccountRoutes(api, { db, guard, selfUser, accentFor, adminNames, s
     const challenge = guard.openChallenge(req.body?.challenge);
     const user = q.byId.get(challenge.user_id);
     if (!user?.twofa_method) throw new GuardError('That sign-in expired. Enter your password again.', 410);
+    if (badCodes.blocked(user.id)) return res.status(429).json({ error: LOCKED });
     const via = guard.verifyCode(user, req.body?.code);
-    if (!via) return res.status(401).json({ error: 'That code isn\'t right. Check it and try again.' });
+    if (!via) {
+      badCodes.hit(user.id);
+      return res.status(401).json({ error: 'That code isn\'t right. Check it and try again.' });
+    }
+    badCodes.clear(user.id);
     guard.closeChallenge(req.body.challenge);
     createSession(db, res, user.id, req);
     if (req.body?.remember) guard.rememberDevice(res, user.id);
@@ -140,6 +155,52 @@ function mountAccountRoutes(api, { db, guard, selfUser, accentFor, adminNames, s
     if (user?.twofa_method !== 'email') throw new GuardError('This sign-in uses an authenticator app.');
     await guard.sendCode(user.id, 'login', user.email);
     res.json({ sent: true, email: maskEmail(user.email) });
+  }));
+
+  // ---- Forgot password ----
+  //
+  // A six-digit code is emailed to the account's address; the code and a new
+  // password set it. The answer is the same whether or not an account exists,
+  // so the form can't be used to find out who has one. Resetting signs out
+  // everywhere and forgets remembered devices. GameShelf Guard stays on: with
+  // an authenticator app, signing in afterwards still needs its code.
+
+  const findLogin = (login) => {
+    const text = String(login || '').trim();
+    if (!text) return null;
+    return text.includes('@') ? q.byEmail.get(cleanEmail(text)) : q.byName.get(text.toLowerCase());
+  };
+
+  api.post('/auth/forgot', authLimiter, guardRoute(async (req, res) => {
+    const login = String(req.body?.username || req.body?.email || '').trim();
+    if (!login) return res.status(400).json({ error: 'Enter your username or email address.' });
+    if (!guard.mailEnabled()) return res.status(503).json({ error: 'This server can\'t send email, so passwords can\'t be reset by email. Ask GameShelf\'s team through Support.' });
+    const user = findLogin(login);
+    // Sent in the background, so the answer takes as long whether or not the
+    // account exists. A code sent in the last 30 seconds, or a mail error,
+    // gets the same answer too (mail errors go to the server log).
+    if (user?.email && resetMails.hit(user.id)) guard.sendCode(user.id, 'reset', user.email).catch(() => {});
+    res.json({ sent: true });
+  }));
+
+  api.post('/auth/reset', authLimiter, guardRoute(async (req, res) => {
+    const user = findLogin(req.body?.username || req.body?.email);
+    const password = String(req.body?.password || '');
+    // The new password is checked first, so a weak one doesn't spend the code.
+    const weak = passwordProblem(password, user?.username || '');
+    if (weak) return res.status(400).json({ error: weak });
+    if (!user || !guard.checkCode(user.id, 'reset', req.body?.code)) {
+      return res.status(400).json({ error: 'That code isn\'t right or has expired. Ask for a new one.' });
+    }
+    q.setPassword.run(hashPassword(password), user.id);
+    // The code came to this address, so it's confirmed now.
+    if (!user.email_verified) q.verifyEmail.run(user.id);
+    db.prepare('DELETE FROM sessions WHERE user_id = ?').run(user.id);
+    guard.forgetDevices(user.id);
+    guard.notify(user.email, 'password', { username: user.username });
+    if (user.twofa_method) return res.json({ reset: true, signIn: true });
+    createSession(db, res, user.id, req);
+    res.json({ reset: true, user: selfUser(q.byId.get(user.id)) });
   }));
 
   api.post('/auth/logout', (req, res) => {
@@ -182,6 +243,8 @@ function mountAccountRoutes(api, { db, guard, selfUser, accentFor, adminNames, s
     const other = q.byEmail.get(email);
     if (other && other.id !== user.id) return res.status(409).json({ error: 'An account already uses that email address.' });
     q.setEmail.run(email, user.id);
+    // The old address hears about it, in case someone else made the change.
+    if (user.email && user.email !== email) guard.notify(user.email, 'email-changed', { username: user.username, email });
     let emailSent = false;
     if (guard.mailEnabled()) emailSent = await guard.sendCode(user.id, 'verify', email).then(() => true, () => false);
     res.json({ ...security(req), emailSent });
@@ -257,6 +320,7 @@ function mountAccountRoutes(api, { db, guard, selfUser, accentFor, adminNames, s
     q.disable.run(user.id);
     db.prepare('DELETE FROM backup_codes WHERE user_id = ?').run(user.id);
     guard.forgetDevices(user.id);
+    guard.notify(user.email, 'guard-off', { username: user.username });
     res.json(security(req));
   }));
 
@@ -278,6 +342,7 @@ function mountAccountRoutes(api, { db, guard, selfUser, accentFor, adminNames, s
     // Everywhere else is signed out; this browser stays signed in.
     q.dropOthers.run(user.id, req.user.session_id || -1);
     guard.forgetDevices(user.id);
+    guard.notify(user.email, 'password', { username: user.username });
     res.json(security(req));
   }));
 

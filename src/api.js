@@ -412,7 +412,7 @@ function createApi({
   // Sign-up, sign-in with GameShelf Guard, and Security settings (src/account-api.js).
   mountAccountRoutes(api, { db, guard, selfUser, accentFor: () => DEFAULT_ACCENT, adminNames, steamOpenId });
   // Steam linking, friends and presence, customer support (src/social-api.js).
-  mountSocialRoutes(api, { steamOpenId, friends, support });
+  mountSocialRoutes(api, { steamOpenId, friends, support, guard, db });
 
   // The logged-in user, including the settings the profile editor needs.
   api.get('/me', (req, res) => {
@@ -438,6 +438,10 @@ function createApi({
     const user = q.userById.get(req.user.id);
     if (!verifyPassword(String(req.body?.password || ''), user.password_hash)) {
       return res.status(401).json({ error: 'That password is not right.' });
+    }
+    // With GameShelf Guard on, a password alone can't delete the account.
+    if (user.twofa_method && !guard.verifyCode(user, req.body?.code)) {
+      return res.status(401).json({ error: 'Enter a Guard code (or a recovery code) to delete the account.' });
     }
     q.deleteUser.run(user.id);
     destroySession(db, req, res);

@@ -18,7 +18,7 @@ function page(res, status, { title, titleAr, body, bodyAr, extra = '' }) {
 </main></body></html>`);
 }
 
-function mountSocialRoutes(api, { steamOpenId, friends, support }) {
+function mountSocialRoutes(api, { steamOpenId, friends, support, guard = null, db = null }) {
   const friendLimiter = rateLimit({ windowMs: 60 * 1000, max: 30 });
   const beatLimiter = rateLimit({ windowMs: 60 * 1000, max: 20 });
   const ticketLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 20 });
@@ -109,7 +109,16 @@ function mountSocialRoutes(api, { steamOpenId, friends, support }) {
 
   api.get('/admin/support', requireAdmin, supportRoute((req) => support.queue({ status: String(req.query.status || ''), category: String(req.query.category || '') })));
   api.get('/admin/support/:id', requireAdmin, supportRoute((req) => support.adminGet(req.params.id)));
-  api.post('/admin/support/:id/messages', requireAdmin, supportRoute((req) => support.adminReply(req.user, req.params.id, req.body?.body, req.body?.status || null)));
+  // The player gets the answer by email too, at a confirmed address.
+  const owner = db?.prepare('SELECT u.username, u.email, u.email_verified FROM support_tickets t JOIN users u ON u.id = t.user_id WHERE t.id = ?');
+  api.post('/admin/support/:id/messages', requireAdmin, supportRoute((req) => {
+    const done = support.adminReply(req.user, req.params.id, req.body?.body, req.body?.status || null);
+    const to = owner?.get(done.ticket.id);
+    if (to?.email && to.email_verified) {
+      guard?.notify(to.email, 'support-reply', { username: to.username, subject: done.ticket.subject, message: String(req.body?.body || '').trim().slice(0, 2000), ticket: done.ticket.id });
+    }
+    return done;
+  }));
   api.patch('/admin/support/:id', requireAdmin, supportRoute((req) => support.adminStatus(req.params.id, String(req.body?.status || ''))));
 }
 

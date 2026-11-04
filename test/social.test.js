@@ -13,6 +13,7 @@ let base;
 let db;
 let clock;
 let valveCalls;
+let mailer;
 
 /** Valve's check_authentication: "genuine" only for answers signed "good-sig". */
 async function fakeValve(url, init) {
@@ -28,7 +29,8 @@ async function startApp(env = {}) {
   db = openDatabase(':memory:');
   clock = Date.now();
   valveCalls = [];
-  server = createApp({ db, games: createLocalProvider(), mailer: createMemoryMailer(), fetchImpl: fakeValve, now: () => clock }).listen(0, '127.0.0.1');
+  mailer = createMemoryMailer();
+  server = createApp({ db, games: createLocalProvider(), mailer, fetchImpl: fakeValve, now: () => clock }).listen(0, '127.0.0.1');
   await new Promise((resolve) => server.once('listening', resolve));
   base = `http://127.0.0.1:${server.address().port}`;
   server.restoreEnv = () => {
@@ -301,8 +303,16 @@ test('support: tickets with a thread, the admin queue with who sent them, replie
 
   const answered = await admin(`/api/admin/support/${id}/messages`, { method: 'POST', body: { body: 'Turn the Arabic switch off and on to rebuild it.' } });
   assert.equal(answered.body.ticket.status, 'replied');
+  // Layla's address isn't confirmed, so no email; once it is, replies arrive by email too.
+  assert.equal(mailer.sent.filter((m) => /Support replied/.test(m.subject)).length, 0);
+  db.prepare("UPDATE users SET email_verified = 1 WHERE username = 'layla'").run();
+  await admin(`/api/admin/support/${id}/messages`, { method: 'POST', body: { body: 'One more tip: restart the game after.' } });
+  await new Promise((r) => setTimeout(r, 50));
+  const mail = mailer.sent.find((m) => /Support replied/.test(m.subject));
+  assert.equal(mail.to, 'layla@mail.example');
+  assert.match(mail.text, /restart the game after/);
   const mine = (await layla(`/api/support/tickets/${id}`)).body;
-  assert.deepEqual(mine.messages.map((m) => [m.fromAdmin, m.author]), [[false, 'layla'], [true, 'GameShelf']]);
+  assert.deepEqual(mine.messages.map((m) => [m.fromAdmin, m.author]), [[false, 'layla'], [true, 'GameShelf'], [true, 'GameShelf']]);
   assert.equal((await layla('/api/support/tickets')).body.tickets.find((t) => t.id === id).status, 'replied');
 
   assert.equal((await layla(`/api/support/tickets/${id}/messages`, { method: 'POST', body: { body: 'Still reversed after that.' } })).body.ticket.status, 'open');

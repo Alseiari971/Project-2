@@ -1942,6 +1942,7 @@ h1 .flag-badge { font-size: 0.6em; }
 .code-box { width: 48px; height: 56px; text-align: center; font: 800 24px/1 var(--font); border-radius: 10px; border: 1px solid var(--border-strong); background: #0b0f15; color: var(--text); caret-color: var(--steam-blue); }
 .code-box:focus { outline: none; border-color: var(--steam-blue); box-shadow: 0 0 0 3px rgba(26, 159, 255, 0.25); }
 label[hidden], .label-like[hidden] { display: none; }
+.forgot-link { justify-self: end; margin-top: -8px; font-size: 13px; }
 .guard-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; }
 .guard-links .link-btn { font-size: 13px; }
 

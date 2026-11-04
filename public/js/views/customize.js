@@ -232,6 +232,8 @@ export async function customizeView(app) {
             <p class="muted">${t("This permanently removes your account, game list, profile and every comment you've written. It can't be undone.")}</p>
             <form class="delete-form" id="delete-form">
               <input class="input" type="password" name="password" placeholder="${t('Your password')}" autocomplete="current-password" required aria-label="${t('Your password')}">
+              ${state.user.guard ? html`<input class="input" name="code" placeholder="${t('Guard code or recovery code')}" autocomplete="one-time-code" dir="ltr" required aria-label="${t('Guard code or recovery code')}">` : ''}
+              ${state.user.guard === 'email' ? html`<button class="pill-btn" type="button" id="delete-code">${t('Email me a code')}</button>` : ''}
               <button class="pill-btn pill-danger" type="submit">${t('Delete my account')}</button>
             </form>
           </section>
@@ -368,11 +370,20 @@ export async function customizeView(app) {
     }
   });
 
+  document.getElementById('delete-code')?.addEventListener('click', async () => {
+    try {
+      const sent = await api('/me/2fa/code', { method: 'POST' });
+      toast(t('We emailed a code to {email}.', { email: sent.email }));
+    } catch (err) {
+      toast(err.message, { error: true });
+    }
+  });
   $('delete-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     if (!window.confirm(t('Delete your GameShelf account and everything in it? This can’t be undone.'))) return;
     try {
-      await api('/me', { method: 'DELETE', body: { password: new FormData(e.target).get('password') } });
+      const fd = new FormData(e.target);
+      await api('/me', { method: 'DELETE', body: { password: fd.get('password'), code: fd.get('code') || undefined } });
       saved = JSON.stringify(draft); // nothing left to warn about
       location.hash = '#/';
       location.reload();

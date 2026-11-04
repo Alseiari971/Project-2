@@ -231,6 +231,7 @@ async function route() {
       case 'community': await communityView(app, params); break;
       case 'login': await authView(app, 'login', params); break;
       case 'register': await authView(app, 'register', params); break;
+      case 'forgot': await authView(app, 'forgot', params); break;
       case 'settings':
         if (parts[1] !== 'security') throw Object.assign(new Error(''), { status: 404 });
         await securityView(app, params);

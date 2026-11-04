@@ -58,6 +58,7 @@ function loginCard() {
       <label>${t('Password')}
         <input class="input" name="password" type="password" required autocomplete="current-password">
       </label>
+      <a class="link-btn forgot-link" href="#/forgot">${t('Forgot your password?')}</a>
       <p class="form-error" id="auth-error" role="alert"></p>
       <button class="btn btn-steam btn-lg btn-block" type="submit">${t('Sign in')}</button>
       <p class="muted small center">${t('New here?')} <a href="#/register">${t('Create an account')}</a></p>
@@ -330,12 +331,124 @@ function showVerify(stack, email) {
   });
 }
 
+// ---- Forgot password ----
+
+function forgotCard() {
+  return html`
+    <form class="auth-card" id="forgot-form" novalidate>
+      <div class="guard-shield">${icon('shield')}</div>
+      <h1>${t('Reset your password')}</h1>
+      <p class="muted">${t('Enter your username or email address. If it belongs to an account, we\'ll email a 6-digit code to its address.')}</p>
+      <label>${t('Username or email')}
+        <input class="input" name="login" required autocomplete="username" autofocus dir="ltr" spellcheck="false" autocapitalize="none">
+      </label>
+      <p class="form-error" id="forgot-error" role="alert"></p>
+      <button class="btn btn-steam btn-lg btn-block" type="submit">${t('Send code')}</button>
+      <div class="guard-links"><a class="link-btn" href="#/login">${t('Back to sign in')}</a></div>
+    </form>`;
+}
+
+function resetCard(login) {
+  return html`
+    <form class="auth-card" id="reset-form" novalidate>
+      <div class="guard-shield">${icon('shield')}</div>
+      <h1>${t('Check your email')}</h1>
+      <p class="muted">${th('If {login} has a GameShelf account, a code is on its way to the account\'s email address. It works for 10 minutes.', { login: html`<b dir="ltr">${login}</b>` })}</p>
+      <div class="code-boxes" id="code-boxes" dir="ltr" role="group" aria-label="${t('6-digit code')}">
+        ${Array.from({ length: 6 }, (_, i) => html`<input class="code-box" inputmode="numeric" maxlength="1" autocomplete="${i === 0 ? 'one-time-code' : 'off'}" aria-label="${t('Digit {n}', { n: i + 1 })}" ${i === 0 ? html`autofocus` : ''}>`)}
+      </div>
+      <label>${t('New password')}
+        <input class="input" name="password" type="password" required minlength="8" autocomplete="new-password">
+      </label>
+      <label>${t('Confirm password')}
+        <input class="input" name="confirmPassword" type="password" required autocomplete="new-password">
+      </label>
+      <div class="strength" id="strength" data-score="0" aria-live="polite">
+        <div class="strength-bar"><span></span><span></span><span></span><span></span></div>
+        <span class="field-note" id="strength-label">${t('At least 8 characters. A short phrase is easiest to remember.')}</span>
+      </div>
+      <p class="form-error" id="reset-error" role="alert"></p>
+      <button class="btn btn-steam btn-lg btn-block" type="submit">${t('Set new password')}</button>
+      <div class="guard-links">
+        <button type="button" class="link-btn" id="reset-resend">${t('Send another code')}</button>
+        <a class="link-btn" href="#/login">${t('Back to sign in')}</a>
+      </div>
+    </form>`;
+}
+
+async function forgotView(app) {
+  const stack = await shell(app, forgotCard());
+  const form = stack.querySelector('#forgot-form');
+  const ask = (login) => api('/auth/forgot', { method: 'POST', body: { username: login } });
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const login = form.login.value.trim();
+    const error = stack.querySelector('#forgot-error');
+    if (!login) return void (error.textContent = t('Enter your username or email address.'));
+    const button = form.querySelector('button[type="submit"]');
+    button.disabled = true;
+    try {
+      await ask(login);
+      showReset(stack, login, ask);
+    } catch (err) {
+      error.textContent = err.message;
+      button.disabled = false;
+    }
+  });
+}
+
+function showReset(stack, login, ask) {
+  mount(stack, resetCard(login));
+  const form = stack.querySelector('#reset-form');
+  const error = stack.querySelector('#reset-error');
+  const strength = stack.querySelector('#strength');
+  const codes = wireCodeBoxes(stack.querySelector('#code-boxes'), () => form.password.focus());
+  form.password.addEventListener('input', () => {
+    const s = passwordStrength(form.password.value);
+    strength.dataset.score = String(form.password.value ? s.score : 0);
+    strength.querySelector('#strength-label').textContent = form.password.value
+      ? t('Password strength: {label}', { label: s.label })
+      : t('At least 8 characters. A short phrase is easiest to remember.');
+  });
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    error.textContent = '';
+    if (codes.value().length !== 6) return void (error.textContent = t('Enter all 6 digits.'));
+    if (form.password.value !== form.confirmPassword.value) return void (error.textContent = t('The two passwords don\'t match.'));
+    const button = form.querySelector('button[type="submit"]');
+    button.disabled = true;
+    try {
+      const done = await api('/auth/reset', { method: 'POST', body: { username: login, code: codes.value(), password: form.password.value } });
+      toast(t('Password changed.'));
+      if (done.user) await signedIn();
+      else {
+        // GameShelf Guard is on: sign in with the new password and a Guard code.
+        location.hash = '#/login';
+      }
+    } catch (err) {
+      error.textContent = err.message;
+      button.disabled = false;
+    }
+  });
+  stack.querySelector('#reset-resend').addEventListener('click', async (e) => {
+    const button = e.currentTarget;
+    button.disabled = true;
+    await ask(login).catch(() => {});
+    toast(t('We sent another code.'));
+    setTimeout(() => { button.disabled = false; }, 30000);
+  });
+}
+
 export async function authView(app, mode, params = new URLSearchParams()) {
   if (state.user) {
     location.hash = profileHref(state.user.username);
     return;
   }
   const goTo = params.get('next') && params.get('next').startsWith('#/') ? params.get('next') : null;
+  if (mode === 'forgot') {
+    await forgotView(app);
+    return;
+  }
   if (mode === 'register') {
     wireRegister(await shell(app, registerCard()));
     return;

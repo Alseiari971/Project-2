@@ -218,3 +218,74 @@ test('active sessions: listed by device, revocable, and a new password signs out
   // Someone else's session ids do nothing.
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sessions WHERE user_id = (SELECT id FROM users WHERE username = ?)').get('yusuf').n, 1);
 });
+
+test('forgot password: an emailed code and a new password; the same answer for unknown accounts', async () => {
+  await startApp();
+  const b = browser();
+  await register(b, 'reem');
+  const phone = browser();
+  await phone('/api/auth/login', { method: 'POST', body: { username: 'reem', password: 'a long passphrase' } });
+  const before = mailer.sent.length;
+
+  // Unknown accounts get the same answer, and no email goes out.
+  assert.deepEqual((await browser()('/api/auth/forgot', { method: 'POST', body: { username: 'nobody_here' } })).body, { sent: true });
+  assert.equal(mailer.sent.length, before);
+  assert.equal((await browser()('/api/auth/forgot', { method: 'POST', body: {} })).status, 400);
+
+  const lost = browser();
+  assert.deepEqual((await lost('/api/auth/forgot', { method: 'POST', body: { username: 'REEM@mail.example' } })).body, { sent: true });
+  await new Promise((r) => setTimeout(r, 50));
+  assert.match(mailer.sent.at(-1).subject, /Reset your GameShelf password/);
+  const code = lastCode('reem@mail.example');
+
+  const reset = (body) => lost('/api/auth/reset', { method: 'POST', body: { username: 'reem', ...body } });
+  assert.equal((await reset({ code: '000000', password: 'brand new phrase' })).status, 400);
+  assert.match((await reset({ code, password: 'short' })).body.error, /at least 8/);
+  // A weak password doesn't spend the code; the right one still works.
+  const done = await reset({ code, password: 'brand new phrase' });
+  assert.equal(done.status, 200, JSON.stringify(done.body));
+  assert.equal(done.body.user.username, 'reem', 'signed in (no Guard)');
+  assert.equal(done.body.user.emailVerified, true, 'the address is confirmed by the code');
+  assert.equal((await reset({ code, password: 'another new phrase' })).status, 400, 'a code works once');
+
+  // Everywhere else is signed out; the old password no longer works.
+  assert.equal((await phone('/api/me')).body.user, null);
+  assert.equal((await browser()('/api/auth/login', { method: 'POST', body: { username: 'reem', password: 'a long passphrase' } })).status, 401);
+  assert.equal((await browser()('/api/auth/login', { method: 'POST', body: { username: 'reem', password: 'brand new phrase' } })).body.user.username, 'reem');
+});
+
+test('an account locks after 10 wrong passwords, from any address; alerts go out for changes', async () => {
+  await startApp();
+  const b = browser();
+  await register(b, 'salem');
+  await b('/api/me/email/verify', { method: 'POST', body: { code: lastCode('salem@mail.example') } });
+  for (let i = 0; i < 10; i++) {
+    assert.equal((await browser()('/api/auth/login', { method: 'POST', body: { username: 'salem', password: `wrong guess ${i}` } })).status, 401);
+  }
+  const locked = await browser()('/api/auth/login', { method: 'POST', body: { username: 'salem', password: 'a long passphrase' } });
+  assert.equal(locked.status, 429, 'even the right password waits');
+  assert.match(locked.body.error, /Too many wrong tries for this account/);
+
+  // Security alerts, to the account's address.
+  const sent = mailer.sent.length;
+  await b('/api/me/password', { method: 'POST', body: { current: 'a long passphrase', next: 'a fresh long phrase' } });
+  await b('/api/me/email', { method: 'POST', body: { password: 'a fresh long phrase', email: 'salem.new@mail.example' } });
+  await new Promise((r) => setTimeout(r, 50));
+  const alerts = mailer.sent.slice(sent).map((m) => [m.to, m.subject]);
+  assert.deepEqual(alerts.filter(([, s]) => !/code/i.test(s)), [
+    ['salem@mail.example', 'Your GameShelf password was changed'],
+    ['salem@mail.example', 'Your GameShelf email address was changed'],
+  ]);
+  assert.ok(mailer.sent.at(-2).html.includes('salem.new@mail.example') || mailer.sent.some((m) => m.html?.includes('salem.new@mail.example')));
+});
+
+test('with Guard on, deleting the account needs a Guard code too', async () => {
+  await startApp();
+  const b = browser();
+  await register(b, 'hessa');
+  const { secret } = (await b('/api/me/2fa/totp/start', { method: 'POST', body: { password: 'a long passphrase' } })).body;
+  const { backupCodes } = (await b('/api/me/2fa/totp/confirm', { method: 'POST', body: { code: totp(secret) } })).body;
+  assert.equal((await b('/api/me', { method: 'DELETE', body: { password: 'a long passphrase' } })).status, 401);
+  assert.equal((await b('/api/me', { method: 'DELETE', body: { password: 'a long passphrase', code: backupCodes[0] } })).status, 200);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM users WHERE username = 'hessa'").get().n, 0);
+});

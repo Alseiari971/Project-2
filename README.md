@@ -126,7 +126,13 @@ Steam import reads only the Steam account linked to the GameShelf account (Secur
 
 Turning Guard on gives 8 recovery codes, each good once. With Guard on, a browser or PC the account hasn't remembered gets a 6-digit prompt after the password, before any session starts (5 tries, 10 minutes). "Remember this device" skips it there for 180 days. Codes, recovery codes, sign-in attempts and remembered devices are stored only as hashes, and an authenticator code can't be used twice. Security settings also list every active session (browser or desktop app, when, from where), with sign-out for each; changing the password signs out everywhere else.
 
-Without `SMTP_URL`, sign-up still works, email addresses can't be confirmed, and Email Guard isn't offered; the authenticator app still is.
+**Forgot password** (`#/forgot`, linked from sign-in): a 6-digit code goes to the account's email address, and the code plus a new password reset it. The answer is the same whether or not the account exists, so the form can't be used to find out who has one. A reset signs out everywhere and forgets remembered devices; Guard stays on, so with an authenticator app the next sign-in still needs its code. At most 5 reset emails per account an hour.
+
+**Locking out guessing:** besides the limits per address, each account allows 10 wrong passwords and 10 wrong Guard codes in 15 minutes, whatever addresses they come from; after that it waits 15 minutes (even for the right password) or a password reset. With Guard on, deleting the account also needs a Guard or recovery code.
+
+**Emails:** code emails, security alerts and Support replies share one design (GameShelf's dark look, English then Arabic, with a plain-text copy), built to survive Gmail's dark mode. Security alerts go out when the password is changed or reset, when Guard is turned off, and when the email address changes (to the old address). Players with a confirmed address get admins' Support replies by email. `node scripts/send-test-email.js you@example.com` sends a sample with the server's settings and prints any error; failed emails are logged (`journalctl -u gameshelf`).
+
+Without `SMTP_URL`, sign-up still works, email addresses can't be confirmed, Email Guard and password reset by email aren't offered, and no alerts go out; the authenticator app still works.
 
 **Linking Steam** uses Steam's own sign-in (OpenID 2.0). "Sign in through Steam" sends the player to `steamcommunity.com/openid/login`; Steam sends them back to `/api/auth/steam/return`, and GameShelf checks the answer (its return address, Steam's endpoint, the signed fields, its age) and then asks Valve's server directly whether it's genuine before linking that SteamID64. Each attempt works once. One Steam account can be linked to only one GameShelf account, and the other way round. There's no way to type in a Steam ID or profile link.
 
@@ -455,6 +461,8 @@ The website talks to the server only through this JSON API, so a phone app can r
 | POST | `/api/auth/login` | `{ username, password }` (username or email) → `{ user }`, or `{ guard: { challenge, method, email } }` when Guard needs a code |
 | POST | `/api/auth/guard` | `{ challenge, code, remember }` the 6-digit or recovery code → `{ user, via, backupCodesLeft }` |
 | POST | `/api/auth/guard/resend` | `{ challenge }` another emailed code |
+| POST | `/api/auth/forgot` | `{ username }` (or email): emails a reset code if the account exists; always `{ sent: true }` |
+| POST | `/api/auth/reset` | `{ username, code, password }` sets a new password → `{ reset, user }` (signed in), or `{ reset, signIn: true }` with Guard on |
 | POST | `/api/auth/logout` | |
 | GET | `/api/me/security` | Email, Guard, Steam link and active sessions |
 | POST | `/api/me/email` · `/api/me/email/send` · `/api/me/email/verify` | Change the address (`{ email, password }`), send a code, confirm it (`{ code }`) |

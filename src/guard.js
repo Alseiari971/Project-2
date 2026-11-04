@@ -11,7 +11,7 @@
 // five tries.
 const crypto = require('node:crypto');
 const { verifyTotp } = require('./totp');
-const { codeEmail } = require('./email-templates');
+const { codeEmail, noticeEmail } = require('./email-templates');
 const { hashToken, parseCookies } = require('./auth');
 
 const DEVICE_COOKIE = 'gs_device';
@@ -90,7 +90,7 @@ function createGuard({ db, mailer, now = () => Date.now(), site = process.env.PU
 
   // ---- Codes by email ----
 
-  /** Sends a six-digit code for `purpose` ('verify', 'login' or 'enable') to `email`. */
+  /** Sends a six-digit code for `purpose` ('verify', 'login', 'enable' or 'reset') to `email`. */
   async function sendCode(userId, purpose, email) {
     if (!mailer?.enabled) throw new GuardError('Email isn\'t set up on this server.', 503);
     if (!email) throw new GuardError('Add an email address first.');
@@ -174,9 +174,21 @@ function createGuard({ db, mailer, now = () => Date.now(), site = process.env.PU
 
   const forgetDevices = (userId) => q.forgetDevices.run(userId);
 
+  /**
+   * A security alert or support reply to `email` ('password', 'guard-off',
+   * 'email-changed', 'support-reply'; see email-templates.js). Sent in the
+   * background; a failure only goes to the server log, never to the player.
+   */
+  function notify(email, kind, vars = {}) {
+    if (!mailer?.enabled || !email) return;
+    Promise.resolve()
+      .then(() => mailer.send({ to: email, ...noticeEmail(kind, vars, { site }) }))
+      .catch((err) => console.error(`Email to ${maskEmail(email)} wasn't sent: ${err.message}`));
+  }
+
   return {
     newBackupCodes, useBackupCode, backupsLeft, sendCode, checkCode, startChallenge, openChallenge, closeChallenge,
-    verifyCode, rememberDevice, isRemembered, forgetDevices, mailEnabled: () => Boolean(mailer?.enabled),
+    verifyCode, rememberDevice, isRemembered, forgetDevices, notify, mailEnabled: () => Boolean(mailer?.enabled),
   };
 }
 

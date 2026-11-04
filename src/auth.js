@@ -112,17 +112,47 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+/**
+ * Counts events per key (an address, an account) in a time window, and
+ * forgets keys whose window ended, so memory doesn't grow with every new
+ * address that ever made a request.
+ */
+function createCounter({ windowMs, max, now = () => Date.now() }) {
+  const hits = new Map();
+  let nextSweep = now() + windowMs;
+  const sweep = () => {
+    const t = now();
+    if (t < nextSweep && hits.size < 50000) return;
+    for (const [key, entry] of hits) if (entry.reset < t) hits.delete(key);
+    nextSweep = t + windowMs;
+  };
+  const live = (key) => {
+    const entry = hits.get(key);
+    return entry && entry.reset >= now() ? entry : null;
+  };
+  return {
+    /** Counts one; true while under the limit. */
+    hit(key) {
+      sweep();
+      const entry = live(key);
+      if (!entry) {
+        hits.set(key, { count: 1, reset: now() + windowMs });
+        return true;
+      }
+      return ++entry.count <= max;
+    },
+    /** Whether the key is over the limit, without counting. */
+    blocked: (key) => (live(key)?.count || 0) >= max,
+    clear: (key) => hits.delete(key),
+    size: () => hits.size,
+  };
+}
+
 // Small in-memory limiter for login/register to slow down password guessing.
 function rateLimit({ windowMs, max }) {
-  const hits = new Map();
+  const counter = createCounter({ windowMs, max });
   return (req, res, next) => {
-    const now = Date.now();
-    const entry = hits.get(req.ip);
-    if (!entry || entry.reset < now) {
-      hits.set(req.ip, { count: 1, reset: now + windowMs });
-      return next();
-    }
-    if (++entry.count > max) {
+    if (!counter.hit(req.ip)) {
       return res.status(429).json({ error: 'Too many attempts. Please wait a few minutes and try again.' });
     }
     next();
@@ -130,6 +160,7 @@ function rateLimit({ windowMs, max }) {
 }
 
 module.exports = {
+  createCounter,
   SESSION_COOKIE,
   hashToken,
   parseCookies,
