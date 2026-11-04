@@ -5,7 +5,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { openDatabase } = require('../src/db');
-const { createSteamWikidataProvider, mapEngine, slugify, USER_AGENT } = require('../src/games/steam-wikidata');
+const { createSteamWikidataProvider, mapEngine, slugify, titleScore, USER_AGENT } = require('../src/games/steam-wikidata');
 const { createGameProvider } = require('../src/games');
 
 const searchRow = (appid, name, date, percent, count) => `<a href="https://store.steampowered.com/app/${appid}/x/" data-ds-appid="${appid}" data-ds-tagids="[19,21]" class="search_result_row">
@@ -219,4 +219,48 @@ test('no Twitch or IGDB keys needed: the default catalog is Steam + Wikidata', (
     }
   }
   assert.ok(!fs.existsSync(path.join(__dirname, '..', 'src/games/igdb.js')));
+});
+
+test('old ids match the store name a game actually has, and never its add-ons or bundles', () => {
+  const same = [
+    ["Baldur's Gate 3", 'baldurs gate iii'],
+    ['Until Dawn™', 'until dawn'],
+    ['S.T.A.L.K.E.R. 2: Heart of Chornobyl', 'stalker 2 heart of chornobyl'],
+    ['Warhammer 40,000: Space Marine 2', 'warhammer 40000 space marine ii'],
+    ['METAL GEAR SOLID Δ: SNAKE EATER', 'metal gear solid delta snake eater'],
+    ['ARK: The Survival Of The Fittest', 'ark survival of the fittest'],
+    ['God of War Ragnarök', 'god of war ragnarok'],
+    ['Ratchet & Clank: Rift Apart', 'ratchet and clank rift apart'],
+    ['MOUSE: P.I. For Hire', 'mouse pi for hire'],
+  ];
+  for (const [name, words] of same) assert.equal(titleScore(name, words), 100, name);
+  // An edition of the game, or a brand in front, still is the game; the exact name wins over both.
+  assert.equal(titleScore('Disco Elysium - The Final Cut', 'disco elysium'), 80);
+  assert.equal(titleScore('CONTROL Ultimate Edition', 'control'), 80);
+  assert.equal(titleScore('Just Cause™ 4: Reloaded', 'just cause 4'), 80);
+  assert.equal(titleScore("Tom Clancy's Rainbow Six Siege", 'rainbow six siege'), 60);
+  // Not the game: another game, an add-on, a bundle.
+  for (const [name, words] of [
+    ['CONTROL Resonant', 'control'],
+    ['Mind Control Delete', 'control'],
+    ["Baldur's Gate 3 - Digital Deluxe Edition DLC", 'baldurs gate 3'],
+    ["Marvel's Spider-Man 2 - Digital Deluxe Upgrade", 'marvels spider man 2'],
+    ['Ghost Master: Resurrection | Until Dawn', 'until dawn'],
+    ['Kairos: Until the Dawn Breaks', 'until dawn'],
+    ['Dead Space 2', 'dead space'],
+  ]) assert.equal(titleScore(name, words), 0, name);
+});
+
+test('an old id with a suffix ("hollow-knight--1") becomes another name for the game, kept without asking again', async () => {
+  const web = fakeWeb();
+  const db = openDatabase(':memory:');
+  const p = createSteamWikidataProvider({ db, fetchImpl: web.fetchImpl, sleep: async () => {}, steamGapMs: 0, steamListGapMs: 0, wikidataGapMs: 0 });
+  assert.equal((await p.getGame('hollow-knight')).id, 'hollow-knight');
+  const g = await p.getGame('hollow-knight--1');
+  assert.deepEqual([g.id, g.steamAppId], ['hollow-knight', 367520]);
+  assert.equal(db.prepare('SELECT game_id FROM game_aliases WHERE alias = ?').get('hollow-knight--1').game_id, 'hollow-knight');
+  const searches = () => web.calls.filter((c) => c.path === '/api/storesearch/').length;
+  const before = searches();
+  assert.equal((await p.getGame('hollow-knight--1')).id, 'hollow-knight');
+  assert.equal(searches(), before);
 });

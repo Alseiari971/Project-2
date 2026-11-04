@@ -63,6 +63,49 @@ const htmlText = (s) => String(s || '').replace(/<br\s*\/?>/gi, '\n').replace(/<
   .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#39;/g, "'").replace(/&nbsp;/g, ' ').replace(/[ \t]+/g, ' ').trim();
 const sparqlString = (s) => `"${String(s).replace(/[\\"\n\r]/g, ' ').slice(0, 120)}"`;
 const isArabicText = (s) => /[؀-ۿ]/.test(s);
+// ---- Matching old ids to games ----
+// "baldurs-gate-iii" is Baldur's Gate 3, "disco-elysium" is "Disco Elysium - The
+// Final Cut", "rainbow-six-siege" is "Tom Clancy's Rainbow Six Siege".
+const ROMAN = { ii: '2', iii: '3', iv: '4', v: '5', vi: '6', vii: '7', viii: '8', ix: '9', x: '10', xi: '11', xii: '12', xiii: '13', xiv: '14', xv: '15', xvi: '16' };
+/**
+ * A title as comparable words: no ™ (before NFKD makes it "TM"), accents, apostrophes
+ * or dots; & as "and", Δ as "delta", Roman numerals as digits, and no "the".
+ */
+const titleWords = (name) => String(name).replace(/[™®©]/g, '').replace(/[Δδ]/g, ' delta ').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+  .replace(/['’`]/g, '').replace(/(\d)[,.](\d)/g, '$1$2').replace(/\./g, '').replace(/&/g, ' and ')
+  .split(/[^a-z0-9]+/).filter((w) => w && w !== 'the').map((w) => ROMAN[w] || w);
+// Words an edition adds to a game's name. A name made only of the game's words and these is still that game.
+const EDITION_WORDS = new Set(['edition', 'editions', 'ultimate', 'definitive', 'complete', 'goty', 'game', 'of', 'the', 'year', 'directors',
+  'cut', 'final', 'reloaded', 'enhanced', 'remastered', 'remaster', 'deluxe', 'standard', 'digital', 'anniversary', 'special', 'gold', 'premium', 'hd', 'classic', 'redux']);
+// Store items that sell something for a game rather than the game.
+const ADD_ON = /\b(upgrade|dlc|season pass|expansion pass|toolkit|soundtrack|artbook|art book|demo|playtest|bundle|costume|skin|cosmetic|operators)\b/i;
+const isYear = (w) => /^(19|20)\d\d$/.test(w);
+const extraOk = (w) => EDITION_WORDS.has(w) || isYear(w);
+/**
+ * How surely a store or Wikidata name is the game an old id names (0: it isn't).
+ * 100 the same words; 80 the same plus edition words; 60 a brand in front
+ * ("Tom Clancy's", "Marvel's") of a name of two or more words.
+ */
+function titleScore(candidate, target) {
+  const a = titleWords(candidate);
+  const b = titleWords(target);
+  if (!a.length || !b.length) return 0;
+  if (a.join(' ') === b.join(' ')) return 100;
+  if (ADD_ON.test(candidate)) return 0;
+  const startsWith = (long, short) => short.every((w, i) => long[i] === w);
+  if (a.length > b.length && startsWith(a, b) && a.slice(b.length).every(extraOk)) return 80;
+  if (b.length > a.length && startsWith(b, a) && b.slice(a.length).every(extraOk)) return 75;
+  // A brand only counts when it's possessive ("Tom Clancy's", "Marvel's"), and bundles ("A | B") never do.
+  if (b.length >= 2 && /['’]s\b/i.test(candidate) && !/[|+]/.test(candidate)) {
+    for (let at = 1; at <= Math.min(3, a.length - b.length); at += 1) {
+      if (b.every((w, i) => a[at + i] === w) && a.slice(at + b.length).every(extraOk)) return 60;
+    }
+  }
+  return 0;
+}
+const bestMatch = (items, target, nameOf) => items.map((it) => ({ it, score: titleScore(nameOf(it), target) }))
+  .filter((m) => m.score > 0).sort((x, y) => y.score - x.score)[0]?.it || null;
+
 // Store search also finds soundtracks and art books; those aren't games.
 const NOT_A_GAME = /\b(soundtrack|ost|artbook|art book|wallpapers?)\b/i;
 
@@ -133,6 +176,8 @@ function createSteamWikidataProvider({
     byId: db.prepare('SELECT * FROM games WHERE id = ?'),
     byApp: db.prepare('SELECT * FROM games WHERE steam_appid = ?'),
     byQid: db.prepare('SELECT * FROM games WHERE wikidata_qid = ?'),
+    aliasOf: db.prepare('SELECT g.* FROM game_aliases a JOIN games g ON g.id = a.game_id WHERE a.alias = ?'),
+    addAlias: db.prepare('INSERT OR IGNORE INTO game_aliases (alias, game_id) VALUES (?, ?)'),
     insert: db.prepare(`INSERT INTO games (id, name, steam_appid, wikidata_qid, image, released, review_percent, review_count)
       VALUES (@id, @name, @appid, @qid, @image, @released, @percent, @count)`),
     touchList: db.prepare(`UPDATE games SET name = COALESCE(NULLIF(@name, ''), name), image = COALESCE(@image, image),
@@ -431,38 +476,44 @@ function createSteamWikidataProvider({
 
   /** The row for an id: saved, or (for ids from before, such as old IGDB slugs) found by name once and kept. */
   async function resolve(id) {
-    const saved = q.byId.get(id);
+    const saved = q.byId.get(id) || q.aliasOf.get(id);
     if (saved) return saved;
     if (!/^[a-z0-9][a-z0-9-]{0,99}$/.test(id)) return null;
-    // "red-dead-redemption-2" is the whole name; "hollow-knight-367520" may carry a made-up suffix.
-    const tries = [...new Set([id, id.replace(/-(\d{5,}|q\d+)$/, '')])].map((x) => x.replace(/-/g, ' '));
-    let words = tries[0];
-    let target = normalizeTitle(words);
+    // Old ids may carry a suffix that isn't part of the name: "dead-space--1" (IGDB's
+    // second "Dead Space"), "hollow-knight-367520", "zelda-q12345".
+    const bare = id.replace(/--\d+$/, '').replace(/-(\d{5,}|q\d+)$/, '');
+    const words = bare.replace(/-+/g, ' ').trim();
+    if (!words) return null;
+    const keep = (row) => {
+      if (row && row.id !== id) q.addAlias.run(id, row.id);
+      return row;
+    };
+    // Steam first: the words as they are, then with Roman numerals as digits, then
+    // the first words (Steam's search misses "mouse pi for hire" but finds "mouse").
+    const digits = titleWords(words).join(' ');
+    const firstTwo = words.split(' ').slice(0, 2).join(' ');
+    const firstOne = words.split(' ')[0];
     let match = null;
-    for (const attempt of tries) {
+    for (const attempt of [...new Set([words, digits, firstTwo, firstOne])].filter((a) => a.length >= 4)) {
       try {
-        match = (await storeSearch(attempt)).find((s) => normalizeTitle(s.name) === normalizeTitle(attempt)) || null;
+        match = bestMatch(await storeSearch(attempt), words, (s) => s.name);
       } catch {}
-      if (match) {
-        words = attempt;
-        target = normalizeTitle(attempt);
-        break;
-      }
+      if (match) break;
     }
     if (match) {
       const existing = q.byApp.get(match.appid);
-      // Another id already points at this app: keep both ids working.
-      if (existing) return existing;
+      // Another id already points at this app: this id becomes another name for it.
+      if (existing) return keep(existing);
       q.insert.run({ id, name: match.name, appid: match.appid, qid: null, image: match.image, released: null, percent: null, count: null });
       return q.byId.get(id);
     }
     try {
-      const item = (await wikidataSearch(words)).find((it) => normalizeTitle(it.label || '') === target);
+      const item = bestMatch(await wikidataSearch(words), words, (it) => it.label || '');
       if (item && !item.steam && !q.byQid.get(item.qid)) {
         q.insert.run({ id, name: item.label, appid: null, qid: item.qid, image: item.image, released: item.released, percent: null, count: null });
         return applyWiki(q.byId.get(id), item);
       }
-      if (item) return rowForWikiItem(item);
+      if (item) return keep(rowForWikiItem(item));
     } catch {}
     return null;
   }
@@ -615,4 +666,4 @@ function createSteamWikidataProvider({
   };
 }
 
-module.exports = { createSteamWikidataProvider, mapEngine, slugify, TAGS, MetadataError, USER_AGENT };
+module.exports = { createSteamWikidataProvider, mapEngine, slugify, titleScore, TAGS, MetadataError, USER_AGENT };

@@ -442,6 +442,11 @@ function openDatabase(file = process.env.DB_FILE || path.join(__dirname, '..', '
       id   TEXT PRIMARY KEY,
       name TEXT NOT NULL
     );
+    -- Old ids (IGDB slugs) that turned out to be a game already saved under another id.
+    CREATE TABLE IF NOT EXISTS game_aliases (
+      alias   TEXT PRIMARY KEY,
+      game_id TEXT NOT NULL REFERENCES games(id) ON DELETE CASCADE
+    );
     -- Every response fetched from Steam or Wikidata, reused until it's older than the TTL.
     CREATE TABLE IF NOT EXISTS metadata_cache (
       key        TEXT PRIMARY KEY,
