@@ -1,7 +1,10 @@
 // Fills the `games` table for every game GameShelf already refers to, so pages
 // that existed under IGDB keep their ids and gain Steam + Wikidata details:
 //
-//   cd /opt/gameshelf && node scripts/backfill-games.js
+// On the VPS, as the service's own user with the service's settings:
+//
+//   systemd-run --wait --pipe -p User=gameshelf -p WorkingDirectory=/opt/gameshelf \
+//     -p EnvironmentFile=/etc/gameshelf.env /usr/bin/node scripts/backfill-games.js
 //
 // It reads DB_FILE from the environment or /etc/gameshelf.env, goes slowly
 // (the catalog's own rate limits), and can be run again at any time: games
@@ -9,12 +12,16 @@
 const fs = require('node:fs');
 
 const ENV_FILE = process.env.GAMESHELF_ENV || '/etc/gameshelf.env';
-if (fs.existsSync(ENV_FILE)) {
-  for (const line of fs.readFileSync(ENV_FILE, 'utf8').split('\n')) {
-    const m = /^\s*([A-Z_]+)\s*=\s*(.*?)\s*$/.exec(line);
-    if (m && ['DB_FILE', 'METADATA_TTL_DAYS'].includes(m[1]) && !process.env[m[1]]) process.env[m[1]] = m[2];
-  }
+// The settings file is readable only by root; under systemd-run they're in the environment already.
+let envText = '';
+try {
+  envText = fs.readFileSync(ENV_FILE, 'utf8');
+} catch {}
+for (const line of envText.split('\n')) {
+  const m = /^\s*([A-Z_]+)\s*=\s*(.*?)\s*$/.exec(line);
+  if (m && ['DB_FILE', 'METADATA_TTL_DAYS'].includes(m[1]) && !process.env[m[1]]) process.env[m[1]] = m[2];
 }
+if (!process.env.DB_FILE) console.warn(`No DB_FILE set (and ${ENV_FILE} can't be read): using the default database.`);
 const { openDatabase } = require('../src/db');
 const { createSteamWikidataProvider } = require('../src/games/steam-wikidata');
 

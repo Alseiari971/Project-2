@@ -92,7 +92,12 @@ GameShelf gets its games from two free sources and needs no keys for either:
 
 Everything fetched is kept in the database (`games` and `metadata_cache`) for `METADATA_TTL_DAYS` days (7 by default), so most pages never wait on Steam. Requests go out one at a time per site with a pause between them, and when Steam or Wikidata answers 429/403/5xx GameShelf backs off (30 seconds, doubling up to 30 minutes) and serves what it already has. If Wikidata is down, Steam data still works on its own; Wikidata's queries carry the `User-Agent: GameShelf/1.0 (https://gameshelf.ae)` its policy asks for.
 
-`GAME_DATA=local` uses the built-in 35-game sample instead (handy offline); `GAME_DATA=rawg` with `RAWG_API_KEY` uses RAWG. After upgrading an existing server, `node scripts/backfill-games.js` (with the same `DB_FILE`) fills in Steam and Wikidata details for every game already on players' lists, packs and requests; game IDs, lists, packs and requests are kept as they are.
+`GAME_DATA=local` uses the built-in 35-game sample instead (handy offline); `GAME_DATA=rawg` with `RAWG_API_KEY` uses RAWG. After upgrading an existing server, `scripts/backfill-games.js` fills in Steam and Wikidata details for every game already on players' lists, packs and requests; game IDs, lists, packs and requests are kept as they are. On the VPS, run it as the service's user with the service's settings:
+
+```bash
+systemd-run --wait --pipe -p User=gameshelf -p WorkingDirectory=/opt/gameshelf -p EnvironmentFile=/etc/gameshelf.env /usr/bin/node scripts/backfill-games.js
+```
+
 
 ### Other optional keys
 
