@@ -106,6 +106,11 @@ if (require.main === module) {
     if (!process.env.OPENAI_API_KEY) {
       console.log('Shared Arabic translation is off. Set OPENAI_API_KEY to turn it on (see README).');
     }
+    if (!process.env.SMTP_URL && process.env.MAIL_DEV_LOG !== '1') {
+      console.log('Email is off: no email checks or Email Guard codes. Set SMTP_URL to turn it on (see README).');
+    } else if (process.env.SMTP_URL) {
+      console.log(`Email goes out through ${new URL(process.env.SMTP_URL).host}. Test it with: node scripts/send-test-email.js you@example.com`);
+    }
   });
 }
 

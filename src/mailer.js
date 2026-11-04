@@ -105,8 +105,14 @@ async function sendSmtp(url, { from, to, subject, text }, { timeoutMs = 20000 } 
   }
 }
 
+/** The sender: MAIL_FROM, else the mailbox signed in to (mail services refuse other senders). */
+function senderOf(env, url) {
+  if (env.MAIL_FROM) return env.MAIL_FROM;
+  const login = url ? decodeURIComponent(url.username) : '';
+  return login.includes('@') ? `GameShelf <${login}>` : 'GameShelf <no-reply@gameshelf.local>';
+}
+
 function createMailer(env = process.env) {
-  const from = env.MAIL_FROM || 'GameShelf <no-reply@gameshelf.local>';
   let url = null;
   try {
     url = env.SMTP_URL ? new URL(env.SMTP_URL) : null;
@@ -115,6 +121,7 @@ function createMailer(env = process.env) {
   }
   if (url && !['smtp:', 'smtps:'].includes(url.protocol)) url = null;
   const devLog = env.MAIL_DEV_LOG === '1';
+  const from = senderOf(env, url);
   return {
     enabled: Boolean(url) || devLog,
     async send({ to, subject, text }) {

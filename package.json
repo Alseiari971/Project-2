@@ -11,6 +11,7 @@
     "dist": "npm run dist:win",
     "test": "node --test",
     "search-debug": "node scripts/search-debug.js",
+    "send-test-email": "node scripts/send-test-email.js",
     "dist:win": "node scripts/prepare-dist.js && electron-builder --win nsis"
   },
   "engines": {

@@ -111,6 +111,8 @@ function createGuard({ db, mailer, now = () => Date.now() }) {
       await mailer.send({ to: email, subject: SUBJECTS[purpose], text: BODIES[purpose](code) });
     } catch (err) {
       q.dropCode.run(userId, purpose);
+      // The reason goes to the server log (journalctl -u gameshelf), where whoever runs it can fix it.
+      console.error(`Email to ${maskEmail(email)} wasn't sent: ${err.message}`);
       throw new GuardError(`The email couldn't be sent: ${err.message}`, 502);
     }
   }
