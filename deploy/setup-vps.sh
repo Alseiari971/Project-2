@@ -29,7 +29,7 @@ fi
 IP=$(hostname -I | awk '{print $1}')
 DOMAIN=${1:-}
 if [ -z "$DOMAIN" ] && [ -f /etc/caddy/Caddyfile ] && grep -q '# gameshelf' /etc/caddy/Caddyfile; then
-  DOMAIN=$(awk '/# gameshelf/ {getline; print $1; exit}' /etc/caddy/Caddyfile)
+  DOMAIN=$(awk '/# gameshelf/ {getline; sub(/,$/, "", $1); print $1; exit}' /etc/caddy/Caddyfile)
 fi
 DOMAIN=${DOMAIN:-${IP//./-}.sslip.io}
 
@@ -145,10 +145,16 @@ Persistent=true
 WantedBy=timers.target
 EOF
 
-echo "==> HTTPS for $DOMAIN"
+# The free sslip.io name keeps working beside your own domain, so copies of the
+# desktop app made before the domain was set up still reach the server.
+SSLIP=${IP//./-}.sslip.io
+SITES=$DOMAIN
+[ "$DOMAIN" != "$SSLIP" ] && SITES="$DOMAIN, $SSLIP"
+
+echo "==> HTTPS for $SITES"
 cat > /etc/caddy/Caddyfile <<EOF
 # gameshelf
-$DOMAIN {
+$SITES {
 	encode zstd gzip
 	reverse_proxy 127.0.0.1:3000
 }
