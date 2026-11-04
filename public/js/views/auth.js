@@ -31,7 +31,7 @@ async function shell(app, inner) {
   const art = await api('/games?sort=popular').then((d) => d.results.filter((g) => g.image).slice(0, 12)).catch(() => []);
   mount(app, html`
     <div class="auth auth-steam">
-      <div class="auth-wall" aria-hidden="true">${art.map((g) => html`<div class="auth-tile" data-bg="${g.image}"></div>`)}</div>
+      <div class="auth-wall" aria-hidden="true">${art.map((g) => html`<div class="auth-tile" data-bg="${g.image}" data-bg-fallback="${g.fallbackImage || ''}"></div>`)}</div>
       <div class="auth-shade"></div>
       <div class="auth-stack" id="auth-stack">${inner}</div>
     </div>`);

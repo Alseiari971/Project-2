@@ -56,6 +56,8 @@ export function mount(el, content) {
   return el;
 }
 
+const cssUrl = (url) => `url("${url.replace(/["\\\n]/g, '\\$&')}")`;
+
 // The Content-Security-Policy blocks inline style attributes, so dynamic
 // colors and background images are applied from data attributes instead.
 export function applyStyles(root) {
@@ -65,7 +67,16 @@ export function applyStyles(root) {
   });
   root.querySelectorAll('[data-bg]').forEach((el) => {
     if (!el.dataset.bg) return;
-    el.style.backgroundImage = `url("${el.dataset.bg.replace(/["\\\n]/g, '\\$&')}")`;
+    el.style.backgroundImage = cssUrl(el.dataset.bg);
+    // A background has no error event, so the picture is tried first: when it's
+    // missing (newer Steam games keep their art at other addresses), the
+    // fallback in data-bg-fallback (the game's IGDB picture) takes its place.
+    const fallback = el.dataset.bgFallback;
+    if (!fallback || fallback === el.dataset.bg) return;
+    const probe = new Image();
+    probe.referrerPolicy = 'no-referrer';
+    probe.onerror = () => { el.style.backgroundImage = cssUrl(fallback); };
+    probe.src = el.dataset.bg;
   });
   root.querySelectorAll('[data-accent]').forEach((el) => {
     el.style.setProperty('--accent', el.dataset.accent);

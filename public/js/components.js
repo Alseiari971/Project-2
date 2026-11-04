@@ -146,7 +146,7 @@ export function saveView(view) {
 function composedPoster(game) {
   return html`
     <div class="poster-composed">
-      ${game.image ? html`<span class="poster-blur" data-bg="${game.image}"></span><img class="poster-shot" src="${game.image}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}
+      ${game.image ? html`<span class="poster-blur" data-bg="${game.image}" data-bg-fallback="${game.fallbackImage || ''}"></span><img class="poster-shot" src="${game.image}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}
       <span class="poster-title">${bdi(game.name)}</span>
       ${game.released ? html`<span class="poster-year">${year(game.released)}</span>` : ''}
     </div>`;

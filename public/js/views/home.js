@@ -38,7 +38,7 @@ function spotlight(games, season) {
       <div class="sp-rail" role="tablist" aria-label="${t('Spotlight games')}">
         ${games.map((g, i) => html`
           <button type="button" class="sp-thumb ${i === 0 ? 'active' : ''}" role="tab" aria-selected="${i === 0}" data-index="${i}" title="${g.name}">
-            <span class="sp-thumb-art" data-bg="${g.image || g.backdrop}"></span>
+            <span class="sp-thumb-art" data-bg="${g.image || g.backdrop}" data-bg-fallback="${g.fallbackImage || g.backdrop || ''}"></span>
             <span class="sp-thumb-name">${bdi(g.name)}</span>
             <span class="sp-progress"></span>
           </button>`)}
@@ -186,7 +186,7 @@ function bento(section, season) {
   const [lead, ...rest] = section.games;
   const card = (g, big = false) => html`
     <a class="bento-card ${big ? 'big' : ''}" href="${gameHref(g.id)}" title="${g.name}">
-      <span class="bento-art" data-bg="${g.backdrop || g.image || ''}"></span>
+      <span class="bento-art" data-bg="${g.backdrop || g.image || ''}" data-bg-fallback="${g.fallbackImage || ''}"></span>
       <span class="bento-info">
         <strong>${bdi(g.name)}</strong>
         ${big && g.description ? html`<span class="bento-pitch">${pitchOf(g.description)}</span>` : ''}
@@ -206,7 +206,7 @@ function countdownCard(g) {
   const when = days === 0 ? t('Out today') : days === 1 ? t('Out tomorrow') : t('In {days}', { days: tn(days, 'day') });
   return html`
     <a class="cd-card" href="${gameHref(g.id)}" title="${g.name}">
-      <span class="cd-art" data-bg="${g.backdrop || g.image || ''}"></span>
+      <span class="cd-art" data-bg="${g.backdrop || g.image || ''}" data-bg-fallback="${g.fallbackImage || ''}"></span>
       <span class="cd-date"><strong>${date.getDate()}</strong>${date.toLocaleString(locale, { month: 'short' })}</span>
       <span class="cd-info"><strong>${bdi(g.name)}</strong><span>${when}</span></span>
     </a>`;
@@ -407,7 +407,7 @@ export async function homeView(app) {
         <div class="genre-grid">
           ${home.genres.map((g) => html`
             <a class="genre-card" href="#/browse?genre=${encodeURIComponent(g.name)}">
-              ${g.image ? html`<span class="genre-art" data-bg="${g.image}"></span>` : ''}
+              ${g.image ? html`<span class="genre-art" data-bg="${g.image}" data-bg-fallback="${g.fallbackImage || ''}"></span>` : ''}
               <span class="genre-name">${t(g.name)}</span>
             </a>`)}
         </div>
