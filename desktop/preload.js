@@ -50,7 +50,7 @@ contextBridge.exposeInMainWorld('gameshelfDesktop', {
   arabicOnline: (key) => ipcRenderer.invoke('arabic:online', key),
   getArabic: (key, options) => ipcRenderer.invoke('arabic:get', key, options),
   approveSubmission: (id) => ipcRenderer.invoke('admin:approve', id),
-  attachRecipe: (game, text) => ipcRenderer.invoke('admin:attachRecipe', game, text),
+  attachRecipe: (game, text, meta) => ipcRenderer.invoke('admin:attachRecipe', game, text, meta),
   republishArabic: (game) => ipcRenderer.invoke('admin:republish', game),
   recipeTemplate: (game, family) => ipcRenderer.invoke('admin:recipeTemplate', game, family),
   requestArabic: (key) => ipcRenderer.invoke('arabic:request', key),

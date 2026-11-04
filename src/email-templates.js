@@ -196,6 +196,16 @@ const NOTICES = {
     noteAr: 'إذا لم تكن أنت، سجّل الدخول وغيّر كلمة مرورك فورًا، ثم تواصل مع دعم GameShelf.',
     action: { path: '/#/support', label: 'Contact Support', labelAr: 'تواصل مع الدعم' },
   },
+  'arabic-ready': {
+    subject: 'Arabic for {game} can be made now',
+    title: 'Your Arabic request is ready',
+    lead: 'You asked for Arabic subtitles in {game}. GameShelf\'s team has added what the GameShelf app needed to read its text, so it can make the Arabic on your PC now.',
+    note: 'Open the game in the GameShelf app for Windows and press Get Arabic subtitles. Arabic packs are always free.',
+    titleAr: 'طلب التعريب جاهز',
+    leadAr: 'طلبت ترجمة عربية للعبة {game}. أضاف فريق GameShelf ما يحتاجه التطبيق لقراءة نصوصها، فيمكنه الآن صنع التعريب على حاسوبك.',
+    noteAr: 'افتح اللعبة في تطبيق GameShelf لويندوز واضغط «احصل على الترجمة العربية». حزم التعريب مجانية دائمًا.',
+    action: { path: '/#/{page}', label: 'Open the game', labelAr: 'افتح اللعبة' },
+  },
   'support-reply': {
     subject: 'GameShelf Support replied: {subject}',
     title: 'Support replied to your ticket',

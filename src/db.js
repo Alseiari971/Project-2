@@ -82,6 +82,17 @@ const ADDED_COLUMNS = {
 
 // Columns for tables created further down (games), added the same way.
 const LATE_COLUMNS = {
+  // What the AES Keys & Recipes tab shows about a recipe (not signed; the recipe itself is).
+  engine_recipes: {
+    title: "TEXT NOT NULL DEFAULT ''",
+    // 'iostore' (UE5 .utoc/.ucas) or 'pak' (UE4 .pak), for an Unreal key recipe.
+    container: "TEXT NOT NULL DEFAULT ''",
+  },
+  // A request an admin's recipe or key answered ('key' or 'recipe'), and when.
+  arabic_requests: {
+    ready_kind: "TEXT NOT NULL DEFAULT ''",
+    ready_at: "TEXT NOT NULL DEFAULT ''",
+  },
   games: {
     steam_appid: 'INTEGER',
     wikidata_qid: 'TEXT',

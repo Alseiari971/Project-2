@@ -9,12 +9,13 @@ import { icon } from '../icons.js';
 import { t } from '../i18n.js';
 import { flagBadge } from '../country-picker.js';
 import { CATEGORY_LABELS, TICKET_STATUS, statusChip, threadHtml, when } from './support.js';
+import { keysTab } from './admin-keys.js';
 
 const desktop = window.gameshelfDesktop;
-const TABS = ['overview', 'support', 'approvals', 'requests', 'fixes', 'packs', 'users', 'supporters', 'installer', ...(desktop?.studio ? ['studio'] : [])];
+const TABS = ['overview', 'support', 'approvals', 'requests', 'keys', 'fixes', 'packs', 'users', 'supporters', 'installer', ...(desktop?.studio ? ['studio'] : [])];
 const TAB_LABELS = {
   overview: 'Overview', support: 'Support', approvals: 'Pending approvals', users: 'Users', packs: 'Arabic packs', requests: 'Requests', fixes: 'Translation fixes',
-  supporters: 'Supporters & codes', installer: 'Windows app', studio: 'Pack Studio',
+  keys: 'AES Keys & Recipes', supporters: 'Supporters & codes', installer: 'Windows app', studio: 'Pack Studio',
 };
 const ENGINE_LABELS = {
   auto: 'Detect it', unreal: 'Unreal Engine', unity: 'Unity', reengine: 'Capcom RE Engine', godot: 'Godot', renpy: "Ren'Py",
@@ -92,7 +93,7 @@ export async function adminView(app, params) {
       <div id="admin-body" class="admin-body"></div>
     </div>`);
   const body = document.getElementById('admin-body');
-  await { overview, support, approvals, users, packs, requests, fixes, supporters, installer, studio }[tab](body, params);
+  await { overview, support, approvals, users, packs, requests, keys: keysTab, fixes, supporters, installer, studio }[tab](body, params);
 }
 
 // ---- Overview ------------------------------------------------------------------
@@ -364,8 +365,9 @@ async function requests(body) {
             <div><strong><span class="admin-rank">#${i + 1}</span> ${bdi(r.name || r.game)}</strong> <span class="muted small">${r.game}${r.reason ? html` · ${t(r.reason)}` : ''}</span>
               ${r.fingerprint ? folderPrint(r.fingerprint) : ''}</div>
             <span>${r.requests === 1 ? t('1 vote') : t('{count} votes', { count: r.requests })}${r.boosts ? html` · <span class="boost-badge">${(r.boosts === 1 ? t('Community boosted (1 boost)') : t('Community boosted ({n} boosts)', { n: r.boosts }))}</span>` : ''}</span>
-            <span class="muted small">${r.recipe ? html`<span class="recipe-tag">${t('Engine recipe attached')}</span> ` : ''}${r.pending ? t('Waiting for approval') : t(STATUS[r.status])}${r.total ? ` · ${r.translated}/${r.total}` : ''}</span>
+            <span class="muted small">${r.answered ? html`<span class="ready-tag">${icon('check')} ${t(r.answered === 'key' ? 'Ready · key attached' : 'Ready · recipe attached')}</span> ` : r.recipe ? html`<span class="recipe-tag">${t('Engine recipe attached')}</span> ` : ''}${r.pending ? t('Waiting for approval') : t(STATUS[r.status])}${r.total ? ` · ${r.translated}/${r.total}` : ''}</span>
             <span class="admin-row-actions">
+              ${/encrypt/i.test(r.reason || '') ? html`<a class="btn btn-sm btn-quiet" href="#/admin?tab=keys&game=${encodeURIComponent(r.game)}&title=${encodeURIComponent(r.name || '')}">${icon('shield')} ${r.answered === 'key' ? t('Update AES key…') : t('Add AES key…')}</a>` : ''}
               <button class="btn btn-sm btn-quiet" type="button" data-recipe="${r.game}" data-family="${r.fingerprint?.engine?.id || ''}">${r.recipe ? t('Edit engine recipe…') : t('Attach engine recipe…')}</button>
               <button class="btn btn-sm btn-quiet" type="button" data-font-list="${r.game}">${t('Font list…')}</button>
             </span>

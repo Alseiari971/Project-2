@@ -987,9 +987,9 @@ function registerIpc() {
     return pack;
   });
   // Admin Panel: a game's engine recipe, checked and signed here with the Pack Studio's key, then attached on the server.
-  handle('admin:attachRecipe', async (game, text) => {
+  handle('admin:attachRecipe', async (game, text, meta) => {
     await requireAdmin();
-    return studio.attachRecipe(String(game), String(text));
+    return studio.attachRecipe(String(game), String(text), meta && typeof meta === 'object' ? { title: meta.title, container: meta.container } : {});
   });
   // Admin Panel, Translation fixes: the approved fixes out to every player (a new signed version of the game's Arabic).
   handle('admin:republish', async (game) => {

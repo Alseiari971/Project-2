@@ -26,7 +26,7 @@ const FONT_TARGET_RE = /^natives\/[\w\-./]{1,200}\.oft(?:\.\d{1,3})?(?:\.(?:stm|
 function createArabicGames({ db, translations }) {
   const getGame = db.prepare('SELECT * FROM arabic_games WHERE game = ?');
   const countRequests = db.prepare('SELECT COUNT(*) AS n FROM arabic_requests WHERE game = ?');
-  const askedBy = db.prepare('SELECT 1 FROM arabic_requests WHERE game = ? AND asker = ?');
+  const askedBy = db.prepare('SELECT ready_kind FROM arabic_requests WHERE game = ? AND asker = ?');
   const pendingFor = db.prepare("SELECT 1 FROM arabic_submissions WHERE game = ? AND status = 'pending'");
   const addRequest = db.prepare(`INSERT INTO arabic_requests (game, asker, name, reason, fingerprint) VALUES (?, ?, ?, ?, ?)
     ON CONFLICT (game, asker) DO UPDATE SET reason = CASE WHEN excluded.reason <> '' THEN excluded.reason ELSE reason END,
@@ -56,6 +56,8 @@ function createArabicGames({ db, translations }) {
       translated: Number.isFinite(translated) ? translated : 0,
       requests: countRequests.get(game).n,
       asked: Boolean(asker && askedBy.get(game, asker.key)),
+      // This player's request was answered by an admin's key or recipe ('key' or 'recipe'): their app can make it now.
+      answered: (asker && askedBy.get(game, asker.key)?.ready_kind) || null,
       // A player's Arabic for it is waiting for an admin.
       pending: Boolean(pendingFor.get(game)),
       // An admin attached an engine recipe: players' apps can read its packed text.
@@ -117,10 +119,10 @@ function createArabicGames({ db, translations }) {
   /** The most asked-for games, for admins. */
   function requests(limit = 100) {
     return db.prepare(`SELECT r.game, MAX(r.name) AS name, COUNT(*) AS requests, MIN(r.created_at) AS first, MAX(r.created_at) AS last,
-        MAX(r.reason) AS reason,
+        MAX(r.reason) AS reason, MAX(r.ready_kind) AS answered,
         (SELECT f.fingerprint FROM arabic_requests f WHERE f.game = r.game AND f.fingerprint <> '' ORDER BY f.created_at DESC LIMIT 1) AS fingerprint
       FROM arabic_requests r GROUP BY r.game ORDER BY requests DESC, last DESC LIMIT ?`).all(limit)
-      .map((r) => ({ ...r, fingerprint: r.fingerprint ? JSON.parse(r.fingerprint) : null, ...status(r.game) }));
+      .map((r) => ({ ...r, fingerprint: r.fingerprint ? JSON.parse(r.fingerprint) : null, ...status(r.game), answered: r.answered || null }));
   }
 
   return { status, request, report, requests, setFontList, setFontStyle, isAdmin };

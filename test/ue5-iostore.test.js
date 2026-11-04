@@ -235,3 +235,79 @@ test('Request Arabic on an encrypted UE5 IoStore game: the admins are asked, the
     assert.equal((await arabic.set(game, false)).error, null);
     assert.deepEqual((await fs.readdir(paks)).sort(), ['pakchunk0-Windows.pak', 'pakchunk0-Windows.ucas', 'pakchunk0-Windows.utoc']);
   });
+
+test('a key an admin attached ahead of time (signed in the browser): the first player to ask gets the Arabic made straight away',
+  { skip: !python && 'needs Python with the builder\'s requirements (and a POSIX shell for the stand-in tools)' }, async (t) => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'gs-ue5-prekey-'));
+    t.after(() => fs.rm(tmp, { recursive: true, force: true }));
+    const tools = path.join(tmp, 'tools');
+    await fs.mkdir(tools);
+    const retoc = await tool(tools, 'retoc', FAKE_RETOC);
+    const repak = await tool(tools, 'repak', FAKE_REPAK);
+    const savedAdmins = process.env.ADMIN_USERS;
+    process.env.ADMIN_USERS = 'hamad';
+    t.after(() => { if (savedAdmins === undefined) delete process.env.ADMIN_USERS; else process.env.ADMIN_USERS = savedAdmins; });
+
+    const fetchAi = async (_url, init) => {
+      const user = JSON.parse(init.body).messages[1].content;
+      const lines = JSON.parse(user.slice(user.indexOf('[')));
+      const content = Array.isArray(lines)
+        ? { translations: lines.map(({ id, text }) => ({ id, arabic: `عربي ${text}` })) }
+        : { terms: {}, player: { gender: 'unknown' } };
+      return { ok: true, status: 200, headers: new Map(), json: async () => ({ choices: [{ message: { content: JSON.stringify(content) } }] }) };
+    };
+    const db = openDatabase(':memory:');
+    const translations = createTranslationMemory({ db, env: { OPENAI_API_KEY: 'server-key' }, fetch: fetchAi });
+    const submissions = createSubmissions({ db, translations, publicKeys: [PUBLIC] });
+    const arabicGames = createArabicGames({ db, translations });
+    const server = createApp({ db, games: createLocalProvider(), translations, dataDir: tmp, arabicGames, submissions,
+      recipes: createEngineRecipes({ db, publicKeys: [PUBLIC] }), steamStore: { details: async () => ({ features: ['Single-player'] }) } }).listen(0, '127.0.0.1');
+    await new Promise((resolve) => server.once('listening', resolve));
+    t.after(() => server.close());
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const register = (username) => fetch(`${base}/api/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password: 'violet-harbor-lantern-92', email: `${username}@test.example`, nationality: 'AE' }) });
+
+    // The admin, in the browser: the pack key unlocked in the tab, the key recipe signed there, sent signed.
+    const signerJs = await import(`data:text/javascript,${encodeURIComponent(await fs.readFile(path.join(REPO, 'public', 'js', 'admin-signer.js'), 'utf8'))}`);
+    const signer = await signerJs.createSigner(signerJs.readPrivateKey(keys.privateKey.export({ type: 'pkcs8', format: 'pem' })));
+    const adminCookie = (await register('hamad')).headers.get('set-cookie').split(';')[0];
+    const recipe = signerJs.keyRecipeText('steam:2109880', signerJs.normalizeAesKey(KEY), 'UE5 IoStore (.utoc/.ucas) · Content/Paks/~mods');
+    const attached = await fetch(`${base}/api/admin/recipes`, { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ game: 'steam:2109880', recipe, signature: await signer.sign(recipe), title: 'Phantom Blade Zero', container: 'iostore' }) });
+    assert.equal(attached.status, 201, await attached.clone().text());
+    signer.lock();
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM arabic_requests').get().n, 0);
+
+    // A player, later, in the desktop app: "Request Arabic subtitles" on the encrypted game.
+    const res = await register('alice');
+    const cloud = createCloudClient({ server: () => base, session: async () => /gs_session=([^;]+)/.exec(res.headers.get('set-cookie'))[1] });
+    const online = createArabicOnline({ cloud, cacheDir: path.join(tmp, 'dl'), publicKeys: [PUBLIC] });
+    const localKey = localPackKey(path.join(tmp, 'player'));
+    const paths = findBuilder({ packaged: false, repoDir: REPO, env: { GAMESHELF_PYTHON: python, GAMESHELF_REPAK: repak, GAMESHELF_RETOC: retoc } });
+    const packBuilder = createPackBuilder({ paths: { ...paths, msgTool: null }, outDir: path.join(tmp, 'builds'), keyFile: localKey.keyFile });
+    const arabic = createArabicService({
+      dataDir: path.join(tmp, 'player'), publicKey: [PUBLIC, localKey.publicKey], overlayAvailable: false, catalog: online.catalog,
+      builder: { canBuild: (tier, engine) => packBuilder.canBuild(tier, engine), fromSet: async () => null },
+    });
+    const requests = createArabicRequests({
+      arabic, packBuilder, online, server: () => base, overlayAvailable: false,
+      recipes: createRecipes({ cloud, cacheDir: path.join(tmp, 'recipes'), publicKeys: [PUBLIC] }),
+    });
+    const dir = path.join(tmp, 'Blade');
+    const paks = await ue5Game(dir);
+    const game = { key: 'steam:2109880', dir, steamAppId: 2109880, gameId: null, title: 'Phantom Blade Zero' };
+
+    // First try: no waiting on admins. The signed key goes to retoc and repak, and the Arabic is made.
+    const done = await requests.run(game, { consent: true });
+    assert.equal(done.done, true, JSON.stringify(done.error || done));
+    assert.equal(done.requested, undefined);
+    // No request saying it couldn't be made (sending the English for review counts as interest, with no reason).
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM arabic_requests WHERE reason <> ''").get().n, 0, 'nobody had to ask the admins');
+    assert.equal(done.submitted?.total, 3);
+    const calls = await fs.readFile(path.join(tools, 'calls.log'), 'utf8');
+    assert.match(calls, /retoc list --path .*pakchunk0-Windows\.utoc/);
+    const launch = await arabic.prepareLaunch(game);
+    assert.deepEqual([launch.mode, launch.ok], ['native', true], JSON.stringify(launch.error));
+    assert.ok((await fs.readdir(path.join(paks, '~mods'))).includes('pakchunk99-ArabicLocalization_P.utoc'));
+  });

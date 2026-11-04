@@ -2221,3 +2221,45 @@ h1 .supporter-badge { font-size: 12px; }
 .board-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
 .board-name .boost-badge { justify-self: start; max-width: 100%; }
 @media (max-width: 640px) { .board-actions { grid-column: 2 / -1; justify-content: flex-start; } }
+
+/* ---- Admin Panel → AES Keys & Recipes ---------------------------------------- */
+.ready-tag { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 999px; font-weight: 700; color: #3fcf8e; background: rgba(63, 207, 142, 0.12); }
+.ready-tag .icon { width: 12px; height: 12px; }
+.panel-head-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.panel-head-row h2 { margin: 0; }
+.signer-panel h2 { display: flex; align-items: center; gap: 8px; }
+.signer-state { display: flex; align-items: center; gap: 8px; margin: 4px 0 6px; font-weight: 600; }
+.signer-state.ok { color: #3fcf8e; }
+.signer-form { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.signer-form .input { flex: 1 1 260px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.signer-file { cursor: pointer; }
+.key-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+.key-form label { display: grid; gap: 6px; font-size: 13px; color: var(--dim); align-content: start; }
+.key-form .row-actions { grid-column: 1 / -1; margin-top: 0; }
+.key-game { position: relative; }
+.key-aes { grid-column: span 2; }
+@media (max-width: 640px) { .key-aes { grid-column: auto; } }
+.key-input-row { display: flex; gap: 8px; align-items: center; }
+.key-input-row .input { flex: 1; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.key-valid { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.key-valid.ok { color: #3fcf8e; }
+.key-valid.bad { color: var(--danger); }
+.key-valid .icon { width: 14px; height: 14px; }
+.key-suggest { position: absolute; z-index: 20; inset-inline: 0; top: calc(100% - 18px); margin: 0; padding: 6px; list-style: none; border-radius: 12px; background: var(--panel-raised); border: 1px solid var(--border-strong); box-shadow: 0 20px 40px -16px rgba(0, 0, 0, 0.7); max-height: 320px; overflow: auto; }
+.key-suggest li { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px; cursor: pointer; color: var(--text); }
+.key-suggest li:hover { background: var(--hover); }
+.key-suggest img, .key-suggest-blank { width: 64px; height: 30px; border-radius: 4px; object-fit: cover; background: var(--pill); flex: none; }
+.masked-key { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; color: var(--dim); }
+.sig-state { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 700; }
+.sig-state.ok { color: #3fcf8e; }
+.sig-state.bad { color: var(--danger); }
+.sig-state .icon { width: 13px; height: 13px; }
+.bulk-dialog { max-width: 760px; width: calc(100% - 32px); }
+.bulk-text { width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; resize: vertical; }
+.bulk-rows .admin-row { grid-template-columns: auto minmax(0, 1fr) auto auto; }
+.input-sm { padding: 4px 8px; font-size: 12px; height: auto; }
+.recipe-table .admin-row { grid-template-columns: minmax(0, 1.4fr) auto auto auto auto auto; }
+@media (max-width: 900px) { .recipe-table .admin-row { grid-template-columns: minmax(0, 1fr) auto; } }
+.recipe-table .admin-row { grid-template-columns: minmax(200px, 1.4fr) auto auto auto auto auto; }
+.recipe-table .admin-row > div span[dir="ltr"] { white-space: nowrap; }
+@media (max-width: 900px) { .recipe-table .admin-row { grid-template-columns: minmax(0, 1fr) auto; } }

@@ -279,7 +279,7 @@ function createStudio({ paths, dataDir, cloud, appKeys = [], secure = null, spaw
      * server, which checks the signature again. Every player's app can then build
      * the game's Arabic natively. Resolves to the server's { recipe } summary.
      */
-    async attachRecipe(game, text) {
+    async attachRecipe(game, text, meta = {}) {
       const s = readSettings();
       const keyPublic = s.keyFile ? publicKeyOf(s.keyFile) : null;
       if (!keyPublic) throw new StudioError('Pick GameShelf\'s pack-signing.key in the Pack Studio first.');
@@ -298,7 +298,9 @@ function createStudio({ paths, dataDir, cloud, appKeys = [], secure = null, spaw
       // The exact text that's signed is the text that's kept and sent to players.
       const body = JSON.stringify(recipe);
       const signature = crypto.sign(null, Buffer.from(body, 'utf8'), crypto.createPrivateKey(fs.readFileSync(s.keyFile, 'utf8'))).toString('base64');
-      return cloud.json(`/api/admin/recipes/${encodeURIComponent(game)}`, { method: 'PUT', body: { recipe: body, signature } });
+      const title = typeof meta?.title === 'string' ? meta.title.slice(0, 200) : '';
+      const container = ['iostore', 'pak'].includes(meta?.container) ? meta.container : '';
+      return cloud.json(`/api/admin/recipes/${encodeURIComponent(game)}`, { method: 'PUT', body: { recipe: body, signature, title, container } });
     },
     /**
      * The fixes approved for a game, out to every player: its approved Arabic as

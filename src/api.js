@@ -832,10 +832,53 @@ function createApi({
     }
     return found;
   }));
-  api.get('/admin/recipes', requireAdmin, recipeRoute(() => ({ recipes: recipes.list() })));
+  // Admin Panel → AES Keys & Recipes. The recipe is signed in the admin's own app
+  // or browser; this server only ever checks signatures with GameShelf's public key.
+  api.get('/admin/recipes', requireAdmin, recipeRoute(() => ({ recipes: recipes.list(), publicKeys: recipes.publicKeys() })));
   api.get('/admin/engines', requireAdmin, recipeRoute(() => recipes.registry()));
-  // Attached from the Admin Panel in the desktop app, which checks and signs it: { recipe: "<JSON text>", signature }.
-  api.put('/admin/recipes/:game', requireAdmin, recipeRoute((req) => ({ recipe: recipes.attach(String(req.params.game), req.body || {}, req.user) })));
+  // The players who asked for a game the recipe answers hear it's ready (by email, when theirs is confirmed).
+  const pageFor = (game) => {
+    const [kind, id] = String(game).split(':');
+    if (kind === 'game') return id;
+    return db.prepare('SELECT id FROM games WHERE steam_appid = ?').get(Number(id))?.id || null;
+  };
+  const tellAskers = (game, askers, title) => {
+    const ids = askers.map((a) => /^user:(\d+)$/.exec(a)?.[1]).filter(Boolean).map(Number);
+    const page = pageFor(game);
+    for (const id of ids) {
+      const u = db.prepare('SELECT username, email, email_verified FROM users WHERE id = ?').get(id);
+      if (u?.email && u.email_verified) guard.notify(u.email, 'arabic-ready', { username: u.username, game: title || game, page: page ? `game/${encodeURIComponent(page)}` : 'arabic' });
+    }
+    return ids.length;
+  };
+  const attachOne = (body, user) => {
+    const game = String(body?.game || '');
+    const recipe = recipes.attach(game, body || {}, user);
+    const askers = recipes.answerRequests(game);
+    return { recipe: { ...recipes.one(game) }, answered: tellAskers(game, askers, recipe.title) };
+  };
+  // { game, recipe: "<JSON text>", signature, title?, container? }: checked against GameShelf's key, then kept.
+  api.post('/admin/recipes', requireAdmin, recipeRoute((req, res) => {
+    res.status(201);
+    return attachOne(req.body, req.user);
+  }));
+  // Many at once (Bulk paste): { items: [{ game, recipe, signature, title, container }] }; each is checked on its own.
+  api.post('/admin/recipes/batch', requireAdmin, recipeRoute((req) => {
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+    if (!items.length || items.length > 100) throw new RecipeError('Send 1 to 100 signed recipes at a time.');
+    return {
+      results: items.map((item) => {
+        try {
+          return { game: String(item?.game || ''), ok: true, ...attachOne(item, req.user) };
+        } catch (err) {
+          if (err instanceof RecipeError) return { game: String(item?.game || ''), ok: false, error: err.message };
+          throw err;
+        }
+      }),
+    };
+  }));
+  // The same, from the desktop app's Pack Studio (the game in the path).
+  api.put('/admin/recipes/:game', requireAdmin, recipeRoute((req) => attachOne({ ...(req.body || {}), game: String(req.params.game) }, req.user)));
   api.delete('/admin/recipes/:game', requireAdmin, recipeRoute((req) => ({ removed: recipes.remove(String(req.params.game)) })));
   api.post('/arabic/report', requireUser, translateLimiter, arabicRoute((body, req) => arabicGames.report(askerOf(req), { ...body, game: String(body.game) }, req.user)));
 

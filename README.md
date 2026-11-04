@@ -394,7 +394,21 @@ Some games keep their text in archives only their own tools read (God of War's `
 - **What a recipe can't do:** run any program but the tools in `localization/custom_engines.json` (QuickBMS, WolvenKit.CLI, repak), found in GameShelf's own tools folder, never at a path a recipe gives; go through a shell; name a path outside the game's folder and the build's work folder (every path starts with a placeholder, and plain arguments can't hold a path at all); write into the game's folder (`{game}` is only for reading, in `extract` and `copy`); or put a program, library or script into a game. Tools run without the player's sign-in in their environment. Recipes never hold encryption keys, and GameShelf never looks for any: a game whose archives are encrypted stays request-only. Executables can't be uploaded; a new tool means a new GameShelf release with it in the allowlist.
 - **Presets** in `localization/custom_engines.json`: FromSoftware and Capcom MT Framework games, and Rockstar games with unpacked `.gxt2` tables, need no recipe (their message tables are read natively, above); Rockstar `.rpf`, Ubisoft Anvil/Dunia (`.forge`, `.pck`, Oodle-compressed), REDengine, Decima and the rest need an admin's recipe, with the notes there; an Unreal game's recipe holds only its key (see Unreal, above).
 - The game's own files are never written to while a recipe runs: the tool works on copies, and GameShelf swaps the results in at Play, keeping the originals to put back.
-- API: `GET /api/arabic/recipes/:game` (signed-in players: `{ recipe, signature }`), `GET /api/admin/recipes`, `PUT /api/admin/recipes/:game` `{ recipe, signature }`, `DELETE /api/admin/recipes/:game`, and `GET /api/admin/engines` (the registry). `POST /api/arabic/status` says `recipe: true` for games that have one.
+- API: `GET /api/arabic/recipes/:game` (signed-in players: `{ recipe, signature }`), `GET /api/admin/recipes` (with `maskedKey`, `verified` and the server's pack `publicKeys`), `POST /api/admin/recipes` `{ game, recipe, signature, title?, container? }`, `POST /api/admin/recipes/batch` `{ items }` (up to 100, each checked on its own), `PUT /api/admin/recipes/:game` (the desktop app), `DELETE /api/admin/recipes/:game` (revoke), and `GET /api/admin/engines` (the registry). `POST /api/arabic/status` says `recipe: true` for games that have one, and `answered: 'key'` to a player whose request a key answered.
+
+### AES Keys & Recipes (Admin Panel)
+
+**Admin Panel → AES Keys & Recipes** (إدارة مفاتيح التشفير ووصفات المحرك) lets an admin give an encrypted Unreal game's AES-256 key at any time, before anyone asks for its Arabic. GameShelf never looks for keys: use the key the game's publisher or modding community published.
+
+- **Quick add:** pick the game from the catalog (or type its Steam app id), the engine (Unreal Engine 5 IoStore `.utoc/.ucas` or Unreal Engine 4 `.pak`), the key (`0x` and 64 hex digits, or 44 characters of base64, checked as you type) and an optional note or container path (e.g. `Content/Paks/~mods`). **Sign & save recipe** (توقيع وحفظ المفتاح) signs the key recipe and sends it.
+- **Bulk paste keys:** one `Game name | 0x…` line per game (or a Steam app id / `steam:<id>`). Each name is looked up in the catalog, shown with its match, and only the checked lines are signed and attached together. A game that appears twice is signed once.
+- **Signed recipes:** every game with a recipe, its engine, the key masked (`0x4BC8…E01D`), whether its signature verifies against the server's pack key today, the date, and **Update** / **Revoke**.
+- **Requests:** a request a player's app made because the game was encrypted gets an **Add AES key…** button (the game filled in). Once a key is attached, those requests show **Ready · key attached**, and the players who asked are emailed (when their address is confirmed). Their app then reads the game with `retoc`/`repak` the next time they press the button; a key attached before anyone asked works on the very first press. Revoking a key puts the requests back to waiting.
+
+**Signing never happens on the server.** It only checks each recipe against GameShelf's public pack key (`localizationPackKey` in `desktop/config.json` or `PACK_PUBLIC_KEY`) and refuses unsigned, altered or wrongly signed recipes, and key recipes with anything but the key.
+
+- **In the desktop app,** the Pack Studio signs with `pack-signing.key` on that PC (the same as Approve, Sign & Publish).
+- **In a browser,** **Unlock admin signer (in-browser only)** takes `pack-signing.key` (pick the file or paste it: PEM/PKCS#8, or the raw Ed25519 key as hex or base64). It's checked against the server's public key and kept only in that tab's memory, as a non-extractable WebCrypto Ed25519 key. Browsers without WebCrypto Ed25519 use the pure-JS RFC 8032 code in `public/js/admin-signer.js` instead. The key is never sent, saved or remembered; Lock, leaving the tab or closing the page forgets it. Use it only on your own computer, over HTTPS, without browser extensions you don't trust: anything running in that page could use the key while it's unlocked.
 
 ### Shared translation memory
 
@@ -462,7 +476,7 @@ src/billing.js       Stripe and LemonSqueezy webhooks (signed, handled once)
 src/plans-api.js     routes for plans, codes, boosts and webhooks
 src/affiliate.js     partner tags on store links
 src/db.js            SQLite database built into Node (saved to data/gameshelf.db, upgraded automatically)
-src/engine-recipes.js signed engine recipes, per game, for games whose text is packed
+src/engine-recipes.js signed engine recipes and Unreal AES key recipes, per game, for games whose text is packed or encrypted
 src/games/steam-wikidata.js the game data: Steam store search and details, Wikidata (Arabic titles, engines, Epic/GOG links), cached, rate-limited
 src/games/rawg.js    the RAWG game database (older alternative)
 src/games/local.js   built-in sample catalog (data/games.json)
@@ -479,6 +493,7 @@ public/js/friends.js the Friends & Activity drawer; country-picker.js the nation
 public/js/i18n.js    English and Arabic: t() for phrases, tn() for counts; lang/ar.js has the Arabic
 public/js/boot.js    sets the page's language and direction before it's drawn
 public/js/main.js    navigation and page routing
+public/js/admin-signer.js the Admin Panel's in-browser Ed25519 signer (WebCrypto, with an RFC 8032 fallback) and key recipes
 public/js/palette.js the search pop-up
 public/js/preview.js hover previews; discover.js the discovery queue; art-color.js the page tint
 public/js/seasons.js when each season runs, and its look (season-fx.js draws its decoration)
