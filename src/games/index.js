@@ -1,16 +1,17 @@
 const { createLocalProvider } = require('./local');
 const { createRawgProvider } = require('./rawg');
-const { createIgdbProvider } = require('./igdb');
+const { createSteamWikidataProvider } = require('./steam-wikidata');
 const { steamIdStore } = require('../db');
 
 /**
- * Picks the game database: IGDB when its Twitch codes are set, otherwise RAWG
- * when its key is set, otherwise the built-in sample catalog.
+ * Picks the game data: Steam's store and Wikidata (no keys needed) by default.
+ * GAME_DATA=local uses the built-in sample catalog (offline, for development),
+ * GAME_DATA=rawg the older RAWG database (with RAWG_API_KEY).
  */
-function createGameProvider(env = process.env, { db } = {}) {
-  if (env.IGDB_CLIENT_ID && env.IGDB_CLIENT_SECRET) return createIgdbProvider(env.IGDB_CLIENT_ID, env.IGDB_CLIENT_SECRET);
-  if (env.RAWG_API_KEY) return createRawgProvider(env.RAWG_API_KEY, { steamIds: db ? steamIdStore(db) : undefined });
-  return createLocalProvider();
+function createGameProvider(env = process.env, { db, fetchImpl } = {}) {
+  if (env.GAME_DATA === 'local' || !db) return createLocalProvider();
+  if (env.GAME_DATA === 'rawg' && env.RAWG_API_KEY) return createRawgProvider(env.RAWG_API_KEY, { steamIds: steamIdStore(db) });
+  return createSteamWikidataProvider({ db, env, ...(fetchImpl ? { fetchImpl } : {}) });
 }
 
 module.exports = { createGameProvider };

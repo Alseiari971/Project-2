@@ -6,6 +6,9 @@ import { COUNTRIES, ARAB_COUNTRIES, flagEmoji, countryName } from './countries.j
 
 const name = (code) => countryName(code, lang);
 
+/** The «داعم» badge of a GameShelf Supporter. */
+export const supporterBadge = (user) => (user?.supporter ? html`<span class="supporter-badge" title="${t('GameShelf Supporter')}">${t('Supporter')}</span>` : '');
+
 /** A small flag with the country's name on hover (and for screen readers). */
 export function flagBadge(code, { withName = false } = {}) {
   if (!code) return '';

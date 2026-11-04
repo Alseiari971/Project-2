@@ -43,7 +43,7 @@ test('added games are saved, linked to a GameShelf game, and removable', () => {
   const entry = store.add({
     exe,
     name: 'hollow knight',
-    game: { id: 'hollow-knight', name: 'Hollow Knight', image: 'https://images.igdb.com/a.jpg', poster: 'file:///C:/x.png', genres: ['Indie'], extra: 'dropped' },
+    game: { id: 'hollow-knight', name: 'Hollow Knight', image: 'https://shared.akamai.steamstatic.com/a.jpg', poster: 'file:///C:/x.png', genres: ['Indie'], extra: 'dropped' },
   });
   assert.match(entry.key, /^custom:/);
   assert.strictEqual(entry.name, 'Hollow Knight');

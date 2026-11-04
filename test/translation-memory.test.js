@@ -7,6 +7,7 @@ const { openDatabase } = require('../src/db');
 const { createLocalProvider } = require('../src/games/local');
 const { createTranslationMemory, sha256, problemWith } = require('../src/translation-memory');
 const { createArabicGames } = require('../src/arabic-games');
+const { createPlans } = require('../src/plans');
 
 // A stand-in for the OpenAI API: "عربي " before each line, or a broken answer when asked.
 function fakeOpenAI({ breakOnce = new Set() } = {}) {
@@ -32,7 +33,9 @@ async function start(env = {}, openai = fakeOpenAI()) {
   const db = openDatabase(':memory:');
   const translations = createTranslationMemory({ db, env: { OPENAI_API_KEY: 'server-key', ...env }, fetch: openai.fetch });
   const arabicGames = createArabicGames({ db, translations, env });
-  const server = createApp({ db, games: createLocalProvider(), translations, arabicGames }).listen(0);
+  // The plans read the same settings as the translation memory, as they do from process.env on a real server.
+  const plans = createPlans({ db, env });
+  const server = createApp({ db, games: createLocalProvider(), translations, arabicGames, plans }).listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
   return { db, server, base, openai };

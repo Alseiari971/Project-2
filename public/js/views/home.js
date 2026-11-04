@@ -414,8 +414,8 @@ export async function homeView(app) {
       </section>
       ${home.source === 'local' ? html`
         <p class="catalog-note">${season
-          ? t('This is a 35-game sample catalog. Connect IGDB (free, see the README) to search every game on every platform and see this season’s collections.')
-          : t('This is a 35-game sample catalog. Connect IGDB (free, see the README) to search every game on every platform.')}</p>` : ''}
+          ? t('This is a 35-game sample catalog (GAME_DATA=local). Without it, GameShelf searches every game on Steam and Wikidata and shows this season’s collections.')
+          : t('This is a 35-game sample catalog (GAME_DATA=local). Without it, GameShelf searches every game on Steam and Wikidata.')}</p>` : ''}
       ${seasonPicker(season)}
     </div>
   `);

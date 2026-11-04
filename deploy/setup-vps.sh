@@ -72,9 +72,9 @@ NODE_ENV=production
 PORT=3000
 DB_FILE=$DATA/gameshelf.db
 
-# Every game (from https://dev.twitch.tv/console/apps, see the README):
-IGDB_CLIENT_ID=
-IGDB_CLIENT_SECRET=
+# Game data comes from Steam and Wikidata: no keys needed.
+# Every other option is explained in $ENV_FILE.example.
+PUBLIC_URL=
 # "Import from Steam" (https://steamcommunity.com/dev/apikey):
 STEAM_API_KEY=
 # Shared Arabic translation (https://platform.openai.com/api-keys):
@@ -91,6 +91,9 @@ EOF
 fi
 chown root:root "$ENV_FILE"
 chmod 600 "$ENV_FILE"
+# Every setting, explained (kept up to date on each run; your own settings stay in $ENV_FILE).
+cp "$APP/deploy/gameshelf.env.example" "$ENV_FILE.example"
+chmod 644 "$ENV_FILE.example"
 
 echo "==> Setting up the gameshelf service"
 cat > /etc/systemd/system/gameshelf.service <<EOF

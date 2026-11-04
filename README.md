@@ -2,8 +2,9 @@
 
 Look up any game in the world, see where to buy it, and keep a public list of the games you've played.
 
-- **Every game:** search and browse games on every platform, PC, PlayStation, Xbox, Nintendo and mobile, through [IGDB](https://www.igdb.com), the free game database run by Twitch.
-- **We don't sell anything:** each game page has "Where to buy" links to the real stores (Steam, Epic, GOG, PlayStation Store, Xbox, Nintendo eShop, itch.io, App Store, Google Play).
+- **Every game:** search and browse every game on Steam, plus games elsewhere from [Wikidata](https://www.wikidata.org), with Arabic titles and each game's engine. No keys needed.
+- **Arabic packs are always free:** every finished pack is free for everyone. An optional [GameShelf Supporter](#gameshelf-supporter-memberships) membership pays for the cloud AI that makes new ones.
+- **Where to buy:** each game page has "Where to buy" links to the real stores (Steam, Epic, GOG, PlayStation Store, Xbox, Nintendo eShop, itch.io, App Store, Google Play).
 - **Live prices:** the best current PC price, every store's price and the all-time low, from [CheapShark](https://www.cheapshark.com) (free, no key needed, US dollars).
 - **Accounts with GameShelf Guard:** sign up with a username, email, password and nationality (shown as a flag on your profile). Guard asks for a 6-digit code from an authenticator app or by email whenever you sign in on a new browser or PC, with 8 one-time recovery codes. Security settings list everywhere you're signed in. See [Accounts, Guard, friends and support](#accounts-guard-friends-and-support).
 - **Steam, verified:** link your Steam account with Steam's own sign-in, then import your games and hours played. Nobody can import or claim someone else's Steam account.
@@ -20,9 +21,9 @@ Look up any game in the world, see where to buy it, and keep a public list of th
 
   The page itself takes on the colors of the game in the spotlight, shifting with each one.
 - **Hover previews:** rest the mouse on any game card on the home page and it opens a bigger card playing the game's preview loop, with View game, Want to play and (in the Windows app) Play.
-- **Moods:** "What are you in the mood for?" chips (Scary, Chill, With friends, A great story, Competitive, Quick fun, Brain teasers, Open world) each fill a row instantly. Needs IGDB.
+- **Moods:** "What are you in the mood for?" chips (Scary, Chill, With friends, A great story, Competitive, Quick fun, Brain teasers, Open world) each fill a row instantly, from Steam's tags.
 - **Discovery queue:** ten well-liked games, full screen, one at a time with their preview loop. Decide with a click, a key (W to want, → to skip) or a swipe on touch screens. Skipped games stay out of later queues on that device.
-  Ramadan, Eid and Lunar New Year follow the Islamic (Umm al-Qura) and Chinese calendars built into the browser, so their dates are always right. Every season also has a release countdown for upcoming games. The "Seasonal look" menu at the bottom of the home page can turn seasons off or preview any of them. The spotlight pauses on hover and has a pause button; with "reduce motion" turned on it holds still and plays no video. Seasonal sections need IGDB; the sample catalog shows the spotlight only.
+  Ramadan, Eid and Lunar New Year follow the Islamic (Umm al-Qura) and Chinese calendars built into the browser, so their dates are always right. Every season also has a release countdown for upcoming games. The "Seasonal look" menu at the bottom of the home page can turn seasons off or preview any of them. The spotlight pauses on hover and has a pause button; with "reduce motion" turned on it holds still and plays no video. The sample catalog shows the spotlight only.
 - **Steam-style profiles:** add games to your list as *Playing*, *Completed*, *Played*, *Want to play* or *Dropped* with a half-star rating, then customize your profile:
   - an avatar (upload your own) with an animated frame
   - a background, either a preset scene or art from any game on your list
@@ -43,7 +44,7 @@ npm start
 
 Then open http://localhost:3000.
 
-Out of the box the site uses a small built-in catalog of about 35 popular games, so you can try it right away.
+Game data comes from Steam and Wikidata, with nothing to set up (see [Game data](#game-data-steam-and-wikidata-no-keys)). `GAME_DATA=local` uses a built-in catalog of 35 popular games instead, for working offline.
 
 ## Hosting the website on a VPS
 
@@ -55,7 +56,7 @@ curl -fsSL https://raw.githubusercontent.com/Alseiari971/Project-2/claude/clever
 
 It installs Node.js 22 and [Caddy](https://caddyserver.com) (which gets the HTTPS certificate), runs GameShelf as a `gameshelf` service under its own user, keeps the database in `/var/lib/gameshelf` with a daily backup in `/var/backups/gameshelf` (two weeks kept; copy them off the server now and then too), and lets only SSH, HTTP and HTTPS through the firewall. Without a domain the site gets `<ip-with-dashes>.sslip.io`, a free name that points at the server; once your own domain's A record points at the server, run `bash setup-vps.sh your-domain.com`. Running the script again also updates GameShelf.
 
-Keys go in `/etc/gameshelf.env` (readable only by root; see Settings below), then `systemctl restart gameshelf`. The log: `journalctl -u gameshelf -n 50`.
+Keys go in `/etc/gameshelf.env` (readable only by root; every setting is listed in `/etc/gameshelf.env.example`, from `deploy/gameshelf.env.example`), then `systemctl restart gameshelf`. The log: `journalctl -u gameshelf -n 50`.
 
 **Admins and the Admin Panel.** Accounts are `user`s unless they're admins. Put your username in `ADMIN_USERS` (comma separated; `ARABIC_ADMINS` works too) and that account becomes an admin when the server starts or when it's registered. Admins get **Admin Panel** in the sidebar: the site at a glance, users (make admin, make user; there's always at least one admin), the cloud catalog of Arabic packs (drop a signed pack's .zip to publish it; unpublish or delete versions; download counts), what players ask for, and the Windows installer the website hands out. The server checks the role on every admin request.
 
@@ -69,7 +70,7 @@ GameShelf also comes as a desktop app for Windows. Players sign in with the same
 - **Make the installer:** on a Windows PC with Python 3, run `npm run dist:win`. It first runs `scripts/prepare-dist.js`: GameShelf's pack signing key pair in `../gameshelf-keys/` (made the first time; keep `pack-signing.key` private and backed up), its public half in `desktop/config.json` (commit that, and update the server, so both check packs with it), and Python with the Arabic pack builder for the installer. You get `dist/GameShelf-Setup.exe`, an installer that asks where to install, adds Start menu and desktop shortcuts, and has everything inside: the app, the pack builder with its Python and fonts, REMSG_Converter and the overlay's OCR helper. Upload it in the Admin Panel (Windows app) for the website's download button.
 - **Finding games:** the app looks for games installed through Steam (its folder from the registry, every library in `libraryfolders.vdf`, and `SteamLibrary` folders on every drive), the Epic Games Launcher (its manifests, with each game's program) and GOG (Galaxy's registry entries, and each game's `goggame-*.info` file), when it starts and when a player signs in or presses **Rescan PC games** in Library. Library starts with **On this PC**: those games, each with its Arabic at a glance (Arabic on, Arabic ready, Arabic on request). Players can have them put on My games, now and as they install more; Steam games they've played start as Played (playing in the last two weeks: Playing), the rest as Want to play.
 
-Without a server (`GAMESHELF_SERVER=local`), the installed app opens on a welcome page where you paste your IGDB keys (and optionally a Steam key), and accounts and lists are saved in `%APPDATA%\GameShelf` on that PC.
+Without a server (`GAMESHELF_SERVER=local`), the installed app gets its game data from Steam and Wikidata itself (a Steam key is optional, for importing a Steam library), and accounts and lists are saved in `%APPDATA%\GameShelf` on that PC.
 
 Good to know:
 
@@ -82,25 +83,16 @@ Good to know:
   **One-time setup for whoever builds GameShelf:** Discord needs to know the activity comes from GameShelf, so GameShelf has its own Discord application, the same for every player (like any app with a Discord activity). Create it once at https://discord.com/developers/applications (**New Application**, named `GameShelf`, with `desktop/icon.png` as its App Icon), then put its **Application ID** in `desktop/config.json` as `discordApplicationId`. The ID is public, not a secret, so it's fine to commit. Until it's set, the Discord option is greyed out.
 - Accounts made in the app live on that computer only. To let people see each other's profiles, the website has to be hosted online; the app can then be pointed at it.
 
-### Connect the full game database (IGDB)
+### Game data: Steam and Wikidata (no keys)
 
-Out of the box GameShelf shows a 35-game sample. Connect IGDB, the game database run by Twitch, to get every game on every platform with official cover art. It's free:
+GameShelf gets its games from two free sources and needs no keys for either:
 
-1. Sign in at https://dev.twitch.tv/console/apps with a Twitch account. Twitch requires two-factor login for this; turn it on in your Twitch security settings if it asks.
-2. Click **Register Your Application** and fill in:
-   - **Name:** anything unique, for example `GameShelf-yourname`
-   - **OAuth Redirect URLs:** `https://localhost` (GameShelf doesn't use it, but Twitch requires one; leave no empty rows)
-   - **Category:** Website Integration
-   - **Client Type:** Confidential (not Public: public apps get no Client Secret)
-3. Click **Create**, then **Manage** next to the new app. Copy the **Client ID**, then click **New Secret** and copy the **Client Secret**.
-4. Put both in your `.env` file (copy `.env.example` if you don't have one):
-   ```
-   IGDB_CLIENT_ID=your-client-id
-   IGDB_CLIENT_SECRET=your-client-secret
-   ```
-5. Restart with `npm start`. The terminal should say `Game data: IGDB.`
+- **The Steam store** (`store.steampowered.com`): search (`/api/storesearch` and Steam's search results), each game's `appdetails` (name, header and library art, description, developers, publishers, genres, release date, PC requirements, supported languages, screenshots, Metacritic) and its store link.
+- **[Wikidata](https://www.wikidata.org)** (`query.wikidata.org/sparql`, CC0 public domain), matched by Steam ID (P1733), Epic Games Store ID (P6278), GOG ID (P2725) or the exact English or Arabic name of a video game (P31/P279* Q7889). It adds the **Arabic title and description**, the **game engine** (P408, shown as a badge on the game page: Unreal Engine 4/5, Unity, RE Engine, Creation Engine, Ren'Py, Godot, MT Framework, RAGE…), the Epic and GOG store links, the official website (P856), and games that aren't on Steam at all.
 
-Keep the Client Secret private: don't share it or commit it. `.env` is excluded from git.
+Everything fetched is kept in the database (`games` and `metadata_cache`) for `METADATA_TTL_DAYS` days (7 by default), so most pages never wait on Steam. Requests go out one at a time per site with a pause between them, and when Steam or Wikidata answers 429/403/5xx GameShelf backs off (30 seconds, doubling up to 30 minutes) and serves what it already has. If Wikidata is down, Steam data still works on its own; Wikidata's queries carry the `User-Agent: GameShelf/1.0 (https://gameshelf.ae)` its policy asks for.
+
+`GAME_DATA=local` uses the built-in 35-game sample instead (handy offline); `GAME_DATA=rawg` with `RAWG_API_KEY` uses RAWG. After upgrading an existing server, `node scripts/backfill-games.js` (with the same `DB_FILE`) fills in Steam and Wikidata details for every game already on players' lists, packs and requests; game IDs, lists, packs and requests are kept as they are.
 
 ### Other optional keys
 
@@ -111,9 +103,11 @@ Keep the Client Secret private: don't share it or commit it. `.env` is excluded 
 | `SMTP_URL` | Email for GameShelf Guard codes and email checks: `smtps://user:password@smtp.example.com:465`, or `smtp://…:587` (STARTTLS is required) | Your mail provider |
 | `MAIL_FROM` | The sender address of those emails, e.g. `GameShelf <no-reply@gameshelf.example>` | |
 | `MAIL_DEV_LOG` | `1` prints emails to the server log instead of sending them. For development only | |
-| `RAWG_API_KEY` | Older alternative game database, used only when IGDB isn't set up | https://rawg.io/apidocs |
+| `METADATA_TTL_DAYS` | How long Steam and Wikidata details are kept before they're fetched again (7) | |
+| `RAWG_API_KEY` | Older alternative game database, with `GAME_DATA=rawg` | https://rawg.io/apidocs |
+| `STRIPE_WEBHOOK_SECRET`, `LEMONSQUEEZY_WEBHOOK_SECRET`, `CHECKOUT_URL_MONTHLY`, `CHECKOUT_URL_YEARLY`, `AFFILIATE_*` | Supporter payments and affiliate links, see [GameShelf Supporter](#gameshelf-supporter-memberships) | Your payment provider |
 
-Steam import reads only the Steam account linked to the GameShelf account (Security → Steam account), and only when its **Game details** are set to Public in Steam's privacy settings. With IGDB, Steam games are matched exactly by their Steam ID.
+Steam import reads only the Steam account linked to the GameShelf account (Security → Steam account), and only when its **Game details** are set to Public in Steam's privacy settings. Steam games are matched exactly by their Steam ID.
 
 ## Accounts, Guard, friends and support
 
@@ -145,6 +139,49 @@ In the desktop app, Steam's sign-in opens in the normal web browser, which isn't
 ### Checking search results
 
 When using RAWG, if a search shows odd games, `npm run search-debug -- <search words>` prints everything RAWG returned (popularity, stores) and which results GameShelf kept. It uses the RAWG key in your `.env`.
+
+## GameShelf Supporter (memberships)
+
+**Every finished Arabic pack is free for every player to download, install and switch on or off.** No plan, quota, payment or code is ever checked on a pack download (`/api/localization/packs/:id/download`, `/api/localization/sets/:id/download`), and `test/plans.test.js` checks that. What a membership pays for is the cloud compute that makes new translations, and extras around GameShelf itself:
+
+| | Free (مجاني) | GameShelf Supporter (داعم GameShelf) |
+| --- | --- | --- |
+| Arabic packs | All of them, unlimited | All of them, unlimited |
+| Cloud AI translation | `TRANSLATE_DAILY_LINES` new lines a day (2,000), `FREE_DAILY_BUILDS` new games a day (1) | `SUPPORTER_DAILY_LINES` a day (30,000), `SUPPORTER_MONTHLY_STRINGS` a month (150,000), any number of games |
+| AI queue | Standard | First in line (`createPriorityGate` in `src/translation-memory.js`) |
+| Boost tokens | | `SUPPORTER_MONTHLY_BOOSTS` a month (5) |
+| Subtitle Studio (desktop overlay) | | Cairo, Tajawal, Amiri or IBM Plex Sans Arabic; size 80–150%; text color; box opacity |
+| Profile | | The gold and emerald «داعم» badge on the profile, account menu and friends lists |
+| Support tickets | | Answered first |
+
+Lines already in the shared translation memory never count against anyone. The usage is kept in `compute_ledger`, the plans in `user_subscriptions`.
+
+**Boost tokens (رموز تعزيز).** Supporters spend them on a requested game on `#/arabic`; the most-boosted games go to the top of Admin Panel → Requests and show "مدعوم من المجتمع (X تعزيز)". The pack that comes out of it is free for everyone like any other.
+
+**The Pricing page** is `#/pricing` (العضوية والدعم, in the sidebar and account menu): both plans, the player's plan and usage, and a box for prepaid or gift codes. Its buttons go to `CHECKOUT_URL_MONTHLY` and `CHECKOUT_URL_YEARLY` (any https payment link, e.g. Stripe Payment Links or LemonSqueezy); without them the page says memberships are sold as codes.
+
+**Prepaid and gift codes** (Admin Panel → Supporters & codes): make 1 to 500 codes at a time, each `XXXX-XXXX-XXXX` (60 random bits) for a number of days, with a note. They're shown once, to copy or download as a .txt, and only their SHA-256 fingerprints are stored. Sell them through Ziina, Tabby or Stripe links, or give them away. Batches can be revoked (codes already used keep working), admins can give a player Supporter time by username, and the tab lists current supporters. Redeeming is limited per address and per account, and 8 wrong codes lock an account out of redeeming for an hour.
+
+**Payment webhooks:** `POST /api/billing/webhook` takes signed events from:
+
+- **Stripe** (`Stripe-Signature`, HMAC-SHA256 of `timestamp.body`, at most 5 minutes old) with `STRIPE_WEBHOOK_SECRET`: `checkout.session.completed` (pass the GameShelf user id as `client_reference_id` or `metadata.gameshelf_user_id`; `metadata.days` sets the length, 31 by default), `invoice.paid` (until the period's end) and `customer.subscription.deleted`.
+- **LemonSqueezy** (`X-Signature`, HMAC-SHA256 hex) with `LEMONSQUEEZY_WEBHOOK_SECRET`: `order_created`, `subscription_created`/`updated`/`resumed`/`payment_success`, `subscription_cancelled` and `subscription_expired` (pass `custom_data.user_id`).
+
+Each event is handled once (`billing_events`); unsigned, wrongly signed or replayed events are refused, and without its secret a provider's webhook answers 503. GameShelf never sees card details.
+
+**Affiliate links** (`src/affiliate.js`): when set, buy links to these stores get the partner tag, are marked "Affiliate" on the game page and carry `rel="noopener noreferrer sponsored"`. Only `https` links to the exact store domains are changed; everything else is left alone.
+
+| Setting | Store | Query parameter (default; check your partner dashboard) |
+| --- | --- | --- |
+| `AFFILIATE_GOG_ID` | gog.com | `pp` (`AFFILIATE_GOG_PARAM`) |
+| `AFFILIATE_HUMBLE_ID` | humblebundle.com | `partner` (`AFFILIATE_HUMBLE_PARAM`) |
+| `AFFILIATE_FANATICAL_ID` | fanatical.com | `ref` (`AFFILIATE_FANATICAL_PARAM`) |
+| `AFFILIATE_GMG_ID` | greenmangaming.com | `tap_a` (`AFFILIATE_GMG_PARAM`) |
+| `AFFILIATE_EPIC_CREATOR_CODE` | store.epicgames.com | `epic_creator_id` (`AFFILIATE_EPIC_PARAM`) |
+
+Each program's terms and link format can change; check the parameter name in your partner dashboard and set the `*_PARAM` setting if it differs. Values may only use letters, digits, `.`, `_` and `-`.
+
+**Subtitle Studio** is in the desktop app's App settings, under Arabic subtitle packs. The app asks GameShelf whether the account has the perk (`/api/me/plan`); without it the overlay uses its usual look, and saved choices come back when the perk does. The fonts are in `public/fonts/studio/` under the SIL Open Font License. The check is a nicety: it only changes how subtitles look on the player's own PC.
 
 ## Arabic
 
@@ -415,9 +452,13 @@ src/friends.js       friend codes, requests, blocks and presence
 src/support.js       support tickets
 src/social-api.js    routes for Steam linking, friends, presence and support
 src/countries.js     the nationality list (public/js/countries.js is the browser's copy)
+src/plans.js         GameShelf Supporter: plans, compute quota, boosts, prepaid codes
+src/billing.js       Stripe and LemonSqueezy webhooks (signed, handled once)
+src/plans-api.js     routes for plans, codes, boosts and webhooks
+src/affiliate.js     partner tags on store links
 src/db.js            SQLite database built into Node (saved to data/gameshelf.db, upgraded automatically)
 src/engine-recipes.js signed engine recipes, per game, for games whose text is packed
-src/games/igdb.js    the IGDB game database (every game, every platform)
+src/games/steam-wikidata.js the game data: Steam store search and details, Wikidata (Arabic titles, engines, Epic/GOG links), cached, rate-limited
 src/games/rawg.js    the RAWG game database (older alternative)
 src/games/local.js   built-in sample catalog (data/games.json)
 src/games/stores.js  "where to buy" store links
@@ -428,7 +469,7 @@ desktop/overlay/     the overlay's two windows: the Arabic subtitles, and the hi
 localization/runtime/ the native runtime adapter (C): the string table (gs_core), the Windows hooks (gs_hook) and the stand-in library (gs_proxy), with its prebuilt version.dll and dinput8.dll
 localization/        the Arabic compiler (Python) for engines that can't shape Arabic, the overlay's fingerprints, the pack generator (.locres files, Ren'Py, Godot and RE Engine text, Bethesda string tables and archives, the loose-file scanner, engine recipes, translation), the engines and tools recipes may use (custom_engines.json) and the bundled Arabic font (assets/fonts)
 public/css/          the stylesheet
-public/fonts/        the Manrope and Alexandria fonts (SIL Open Font License) and Twemoji Country Flags (MIT; flag art CC-BY 4.0)
+public/fonts/        the Manrope and Alexandria fonts (SIL Open Font License), Subtitle Studio's fonts in studio/ (OFL) and Twemoji Country Flags (MIT; flag art CC-BY 4.0)
 public/js/friends.js the Friends & Activity drawer; country-picker.js the nationality picker and flags
 public/js/i18n.js    English and Arabic: t() for phrases, tn() for counts; lang/ar.js has the Arabic
 public/js/boot.js    sets the page's language and direction before it's drawn
@@ -436,8 +477,8 @@ public/js/main.js    navigation and page routing
 public/js/palette.js the search pop-up
 public/js/preview.js hover previews; discover.js the discovery queue; art-color.js the page tint
 public/js/seasons.js when each season runs, and its look (season-fx.js draws its decoration)
-public/js/views/     one file per page (home, browse, game, library, profile, edit profile, import, community, log in and sign up, security, support, about & legal, app settings)
-scripts/             developer tools (search-debug, localization-pack, build-arabic-pack, build-runtime-hook, bundle-arabic-builder, fake-ocr-helper)
+public/js/views/     one file per page (home, browse, game, library, profile, edit profile, import, community, log in and sign up, security, support, pricing, about & legal, app settings)
+scripts/             developer tools (backfill-games, search-debug, localization-pack, build-arabic-pack, build-runtime-hook, bundle-arabic-builder, fake-ocr-helper)
 test/                automated tests: npm test
 ```
 
@@ -445,11 +486,12 @@ test/                automated tests: npm test
 
 GameShelf credits each source where its data appears and on the About & legal page (`#/legal`):
 
-- **IGDB** (Twitch): game data, covers, screenshots and trailers. IGDB's terms require attribution; using it in a product that makes money needs a separate agreement with Twitch.
+- **Steam store**: game names, art, descriptions, genres, release dates, requirements and screenshots from each game's public store page, linked back to it.
+- **Wikidata**: Arabic titles and descriptions, game engines, Epic/GOG links and official websites. Its data is CC0 (public domain), so it can be used in a product that makes money; GameShelf credits it anyway.
 - **CheapShark**: prices. Buy buttons use CheapShark's own redirect links, as its terms ask.
 - **Steam store pages**: "About this game", system requirements, achievements, features and Metacritic scores, credited and linked back to the store page.
 - **YouTube**: trailers play in YouTube's official embedded player (privacy-enhanced mode), only after the visitor presses play.
-- **Fonts**: Manrope and Alexandria are under the SIL Open Font License (license files in `public/fonts/`). Thmanyah Sans isn't included; see [Arabic](#arabic). Flags use Twemoji Country Flags (MIT), whose flag art is Twitter's Twemoji under CC-BY 4.0, credited on the About & legal page.
+- **Fonts**: Manrope and Alexandria, and Subtitle Studio's Cairo, Tajawal, Amiri and IBM Plex Sans Arabic, are under the SIL Open Font License (license files in `public/fonts/` and `public/fonts/studio/`). Thmanyah Sans isn't included; see [Arabic](#arabic). Flags use Twemoji Country Flags (MIT), whose flag art is Twitter's Twemoji under CC-BY 4.0, credited on the About & legal page.
 - **QR codes**: drawn in the browser with qrcode-generator (MIT, `public/js/vendor/qrcode.mjs`).
 - **Steam sign-in**: linking uses Steam's public OpenID sign-in. GameShelf isn't affiliated with Valve.
 
@@ -493,7 +535,13 @@ The website talks to the server only through this JSON API, so a phone app can r
 | GET · POST | `/api/support/tickets` | My tickets; `{ category, subject, gameId?, message }` opens one |
 | GET | `/api/support/tickets/:id` | A ticket and its messages (`POST …/messages { body }` replies, `POST …/close`) |
 | GET | `/api/admin/support?status=&category=` | Admins: the ticket queue (`GET /api/admin/support/:id`, `POST …/messages { body, status? }`, `PATCH { status }`) |
-| GET | `/api/me` | The logged-in user (or `null`) |
+| GET | `/api/plans` | The plans (for `#/pricing`), checkout links, and `packsAlwaysFree: true` |
+| GET | `/api/me/plan` | The player's plan, perks, AI usage today and this month, and boost tokens left |
+| POST | `/api/me/plan/redeem` | `{ code }` a prepaid or gift code → `{ days, plan, until, summary }` |
+| POST | `/api/arabic/boosts` | `{ game, tokens }` (Supporters) → `{ game, boosts, boosters, you }` |
+| GET · POST | `/api/admin/plans`, `/api/admin/plans/codes`, `/api/admin/plans/codes/:batch/revoke`, `/api/admin/plans/grant` | Admins: batches and supporters; `{ count, days, note }` makes codes (shown once); revoke a batch's unused codes; `{ username, days }` |
+| POST | `/api/billing/webhook` | Stripe or LemonSqueezy events, checked by signature |
+| GET | `/api/me` | The logged-in user (or `null`), with `supporter` |
 | PATCH | `/api/me` | `{ displayName, headline, bio, country, avatarFrame, background, accent, showcases }` |
 | PUT | `/api/me/avatar` | `{ image }` as a JPEG/PNG/WebP data URL |
 | DELETE | `/api/me/avatar` | Removes your avatar |

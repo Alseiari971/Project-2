@@ -39,6 +39,15 @@
     hideTimer = setTimeout(() => { box.hidden = true; }, 90);
   });
 
+  // Subtitle Studio: { family, size (80-150), color, background (0-100) }.
+  window.gsOverlay.onStudio?.((studio) => {
+    if (studio?.family) root.setProperty('--studio-font', `"${studio.family.replace(/"/g, '')}"`);
+    else root.removeProperty('--studio-font');
+    root.setProperty('--studio-scale', String((Number(studio?.size) || 100) / 100));
+    root.setProperty('--studio-color', /^#[0-9a-f]{6}$/i.test(studio?.color || '') ? studio.color : '#ffffff');
+    root.setProperty('--studio-bg', String(Math.min(100, Math.max(0, Number(studio?.background ?? 86))) / 100));
+  });
+
   // 'floating' (outlined text, no box) or 'box' (on a dark box), from App settings.
   window.gsOverlay.onStyle((style) => {
     document.body.dataset.style = style === 'box' ? 'box' : 'floating';

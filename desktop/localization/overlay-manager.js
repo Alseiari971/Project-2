@@ -41,6 +41,8 @@ function createOverlayManager({ BrowserWindow, desktopCapturer, screen, ipcMain,
   const sessions = new Map();
   let helperTimer = null;
   let style = OVERLAY_STYLES.includes(initialStyle) ? initialStyle : DEFAULT_STYLE;
+  // Subtitle Studio's font, size, color and box opacity (null: the defaults).
+  let studio = null;
 
   // Over the English only with a box to hide it, and only when the capture can't see the overlay.
   const placementFor = (session) => (style === 'box' && session.canCover ? 'cover' : 'above');
@@ -175,6 +177,7 @@ function createOverlayManager({ BrowserWindow, desktopCapturer, screen, ipcMain,
     overlay.loadFile(OVERLAY_HTML);
     overlay.webContents.once('did-finish-load', () => {
       if (!overlay.isDestroyed()) overlay.webContents.send('gs-overlay:style', style);
+      if (!overlay.isDestroyed() && studio) overlay.webContents.send('gs-overlay:studio', studio);
     });
 
     const capture = new BrowserWindow({
@@ -237,6 +240,12 @@ function createOverlayManager({ BrowserWindow, desktopCapturer, screen, ipcMain,
     }
   }
 
+  /** Applies Subtitle Studio settings ({ family, size, color, background }) to every overlay, and the next ones. */
+  function setStudio(next) {
+    studio = next || null;
+    for (const session of sessions.values()) send(session, 'gs-overlay:studio', studio || { family: null, size: 100, color: '#ffffff', background: 86 });
+  }
+
   /** Switches every overlay, and the next ones, to 'floating' or 'box'. */
   function setStyle(next) {
     if (!OVERLAY_STYLES.includes(next)) throw new Error(`Unknown overlay style "${next}".`);
@@ -268,6 +277,7 @@ function createOverlayManager({ BrowserWindow, desktopCapturer, screen, ipcMain,
     stopAll: () => [...sessions.keys()].forEach(stop),
     has: (key) => sessions.has(key),
     setStyle,
+    setStudio,
     style: () => style,
     status: (key) => {
       const s = sessions.get(key);

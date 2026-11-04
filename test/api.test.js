@@ -351,7 +351,7 @@ test('seasonal home: the season picks its sections, and a failing section is lef
     ...local,
     async collection(query) {
       asked.push(query);
-      if (query.sort === 'upcoming') throw new Error('IGDB is down');
+      if (query.sort === 'upcoming') throw new Error('Steam is down');
       const { results } = await local.search({ pageSize: 40 });
       return results;
     },

@@ -21,7 +21,8 @@ import { arabicRequestsView } from './views/arabic-requests.js';
 import { securityView } from './views/security.js';
 import { supportView } from './views/support.js';
 import { initFriends, wireFriendsButton } from './friends.js';
-import { flagBadge } from './country-picker.js';
+import { flagBadge, supporterBadge } from './country-picker.js';
+import { pricingView } from './views/pricing.js';
 
 const app = document.getElementById('app');
 const SIDEBAR_GAMES = 12;
@@ -44,9 +45,9 @@ function renderTopbar() {
   label('search-open', 'Search games (Ctrl+K)');
   document.querySelector('.topbar .logo').setAttribute('aria-label', t('GameShelf home'));
   mount(document.querySelector('.footer'), html`
-    <p>${th("GameShelf doesn't sell anything. Every buy button goes straight to the store. {legal}", { legal: html`<a href="#/legal">${t('About & legal')}</a>` })} · <a href="#/support">${t('Support')}</a></p>
+    <p>${th("Arabic packs are free for everyone. Buy buttons go straight to the store. {legal}", { legal: html`<a href="#/legal">${t('About & legal')}</a>` })} · <a href="#/support">${t('Support')}</a></p>
     <p id="data-credit"></p>
-    <p>${t('Game names, art and trademarks belong to their owners. Not affiliated with Valve, Twitch or any publisher.')}</p>`);
+    <p>${t('Game names, art and trademarks belong to their owners. Not affiliated with Valve or any publisher.')}</p>`);
   document.getElementById('go-back').addEventListener('click', () => history.back());
   document.getElementById('go-forward').addEventListener('click', () => history.forward());
   document.getElementById('search-open').addEventListener('click', () => openPalette());
@@ -93,12 +94,13 @@ function renderAccount() {
           ${avatar(state.user)}
         </button>
         <div class="menu-list" id="menu-list" hidden>
-          <div class="menu-user">${avatar(state.user)}<div><strong>${bdi(state.user.displayName)} ${flagBadge(state.user.nationality)}</strong><div class="muted small">${bdi(`@${state.user.username}`)}</div></div></div>
+          <div class="menu-user">${avatar(state.user)}<div><strong>${bdi(state.user.displayName)} ${flagBadge(state.user.nationality)} ${supporterBadge(state.user)}</strong><div class="muted small">${bdi(`@${state.user.username}`)}</div></div></div>
           <a href="${profileHref(state.user.username)}">${t('My profile')}</a>
           <a href="#/customize">${t('Edit profile')}</a>
           <a href="#/settings/security">${t('Security')}${state.user.guard ? '' : html`<span class="menu-dot" title="${t('GameShelf Guard is off')}"></span>`}</a>
           <a href="#/import">${t('Import from Steam')}</a>
           <a href="#/support">${t('Support')}</a>
+          <a href="#/pricing">${state.user.supporter ? t('My membership') : t('Support GameShelf')}</a>
           <div class="menu-sep"></div>
           <button type="button" id="logout">${t('Log out')}</button>
         </div>
@@ -145,6 +147,7 @@ function renderSidebar() {
       ${link(state.user ? '#/library' : '#/login', 'Library', 'solid-library', 'library')}
       ${link('#/community', 'Community', 'solid-users', 'community')}
       ${link('#/arabic', 'Arabic requests', 'star', 'arabic')}
+      ${link('#/pricing', 'Membership & support', 'solid-tag', 'pricing')}
       ${state.user ? link('#/import', 'Steam import', 'solid-import', 'import', html`<span class="tag tag-new">${t('NEW')}</span>`) : ''}
       ${state.user ? link('#/support', 'Support', 'info', 'support') : ''}
       ${state.user?.role === 'admin' ? link('#/admin', 'Admin Panel', 'shield', 'admin') : ''}
@@ -198,7 +201,7 @@ async function route() {
   const parts = (path || '/').split('/').filter(Boolean).map(decodeURIComponent);
   const isMe = parts[0] === 'u' && state.user && parts[1]?.toLowerCase() === state.user.username.toLowerCase();
   current = {
-    section: { undefined: 'home', browse: 'browse', library: 'library', community: 'community', import: 'import', admin: 'admin', arabic: 'arabic', support: 'support', settings: 'settings', u: isMe ? 'library' : 'community' }[parts[0]] || '',
+    section: { undefined: 'home', browse: 'browse', library: 'library', community: 'community', import: 'import', admin: 'admin', arabic: 'arabic', pricing: 'pricing', support: 'support', settings: 'settings', u: isMe ? 'library' : 'community' }[parts[0]] || '',
     gameId: parts[0] === 'game' ? parts[1] : null,
   };
 
@@ -224,6 +227,7 @@ async function route() {
       case 'legal': await legalView(app); break;
       case 'admin': await adminView(app, params); break;
       case 'arabic': await arabicRequestsView(app); break;
+      case 'pricing': await pricingView(app); break;
       case 'app-settings':
         if (!desktop) throw Object.assign(new Error(''), { status: 404 });
         await appSettingsView(app, params);
@@ -279,8 +283,9 @@ document.addEventListener('library-changed', renderSidebar);
   pcGamesOnSignIn();
   api('/info').then(({ source }) => {
     const credit = {
-      igdb: th('Game data from {igdb}. Prices from {cheapshark}.', {
-        igdb: html`<a href="https://www.igdb.com" target="_blank" rel="noopener noreferrer">IGDB</a>`,
+      steam: th('Game data from {steam} and {wikidata} (CC0). Prices from {cheapshark}.', {
+        steam: html`<a href="https://store.steampowered.com" target="_blank" rel="noopener noreferrer">Steam</a>`,
+        wikidata: html`<a href="https://www.wikidata.org" target="_blank" rel="noopener noreferrer">Wikidata</a>`,
         cheapshark: html`<a href="https://www.cheapshark.com" target="_blank" rel="noopener noreferrer">CheapShark</a>`,
       }),
       rawg: th('Game data from {rawg}.', { rawg: html`<a href="https://rawg.io" target="_blank" rel="noopener noreferrer">RAWG</a>` }),

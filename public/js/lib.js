@@ -70,7 +70,7 @@ export function applyStyles(root) {
     el.style.backgroundImage = cssUrl(el.dataset.bg);
     // A background has no error event, so the picture is tried first: when it's
     // missing (newer Steam games keep their art at other addresses), the
-    // fallback in data-bg-fallback (the game's IGDB picture) takes its place.
+    // fallback in data-bg-fallback (the game's other picture) takes its place.
     const fallback = el.dataset.bgFallback;
     if (!fallback || fallback === el.dataset.bg) return;
     const probe = new Image();

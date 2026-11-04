@@ -1,6 +1,6 @@
 // The main color of a picture, for tinting the page around it (like a TV
-// app's home screen takes on the colors of the show in focus). Steam's and
-// IGDB's image servers allow this; anything else simply gives no color.
+// app's home screen takes on the colors of the show in focus). Steam's image
+// servers allow this; anything else simply gives no color.
 
 const cache = new Map();
 const SIZE = 24;

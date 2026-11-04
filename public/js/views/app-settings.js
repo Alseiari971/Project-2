@@ -13,9 +13,9 @@ const OVERLAY_STYLES = [
 
 const link = (href, text) => html`<a href="${href}" target="_blank" rel="noopener noreferrer">${text}</a>`;
 const SOURCES = {
-  igdb: t('Connected to IGDB: every game on every platform.'),
+  steam: t('Game data from Steam and Wikidata: no keys needed.'),
   rawg: t('Using RAWG.'),
-  local: t('Using the built-in sample of 35 games. Add IGDB keys to get every game.'),
+  local: t('Using the built-in sample of 35 games.'),
 };
 
 export async function appSettingsView(app, params) {
@@ -29,7 +29,7 @@ export async function appSettingsView(app, params) {
     <div class="page app-settings">
       <div class="page-head"><h1>${params.get('welcome') ? t('Welcome to GameShelf') : t('App settings')}</h1></div>
       ${params.get('welcome')
-        ? html`<p class="muted lead">${t('Add your free IGDB keys to look up every game in the world. You can skip this for now and try the 35-game sample.')}</p>`
+        ? html`<p class="muted lead">${t('Game data comes from Steam and Wikidata, so there\'s nothing to set up. Add a Steam Web API key if you want to import your Steam library.')}</p>`
         : ''}
       <form class="panel" id="settings-form">
         <h2>${t('Language')}</h2>
@@ -40,11 +40,6 @@ export async function appSettingsView(app, params) {
         ${cloud ? '' : html`
         <h2>${t('Game database')}</h2>
         <p class="settings-status ${source}" id="settings-status">${SOURCES[source]}</p>
-        <div class="form-grid">
-          ${field('IGDB_CLIENT_ID', t('IGDB Client ID'))}
-          ${field('IGDB_CLIENT_SECRET', t('IGDB Client Secret'), 'password')}
-        </div>
-        <p class="muted small">${th('Free from the {console}: register an application (Confidential, redirect URL https://localhost), then copy its Client ID and make a New Secret.', { console: link('https://dev.twitch.tv/console/apps', t('Twitch developer console')) })}</p>
 
         <h2>${t('Steam import')}</h2>
         <div class="form-grid">${field('STEAM_API_KEY', t('Steam Web API key'), 'password')}</div>
@@ -83,13 +78,14 @@ export async function appSettingsView(app, params) {
           </div>
           <p class="muted small" id="overlay-style-note"></p>
         </div>
+        <div class="studio" id="studio" hidden></div>
       </section>
 
       <section class="panel">
         <h2>${t('Your data')}</h2>
         <p class="muted">${cloud
           ? t('Your account, game lists and profile are saved on GameShelf, the same as on the website. This PC keeps your settings and Arabic packs.')
-          : t('Accounts, game lists and profiles you make in the app are saved on this computer only. Your keys stay here too and are only sent to IGDB and Steam.')}</p>
+          : t('Accounts, game lists and profiles you make in the app are saved on this computer only. Your Steam key stays here too and is only sent to Steam.')}</p>
         ${dataDir ? html`<p class="muted small">${t('Folder:')} <code dir="ltr">${dataDir}</code></p>` : ''}
         <button class="btn btn-quiet" type="button" id="open-data">${t('Open data folder')}</button>
       </section>
@@ -174,6 +170,7 @@ export async function appSettingsView(app, params) {
     showPacks();
   });
   showPacks();
+  showStudio(desktop);
   document.getElementById('settings-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const button = e.submitter;
@@ -189,7 +186,7 @@ export async function appSettingsView(app, params) {
         status.textContent = SOURCES[result.source];
       }
       if (result.problem) {
-        error.textContent = t("Saved, but IGDB didn't accept the keys: {problem}", { problem: result.problem });
+        error.textContent = t("Saved, but the game data couldn't be reached: {problem}", { problem: result.problem });
       } else {
         toast(t('Settings saved'));
         if (params.get('welcome')) location.hash = '#/';
@@ -200,5 +197,75 @@ export async function appSettingsView(app, params) {
     } finally {
       button.disabled = false;
     }
+  });
+}
+
+// Subtitle Studio (a GameShelf Supporter perk): how the overlay's Arabic looks.
+// The app checks the perk with GameShelf; the packs themselves are free either way.
+async function showStudio(desktop) {
+  const el = document.getElementById('studio');
+  if (!el || !desktop.subtitleStudio) return;
+  let studio;
+  try {
+    studio = await desktop.subtitleStudio();
+  } catch {
+    return;
+  }
+  const { settings, allowed, fonts, defaults } = studio;
+  el.hidden = false;
+  const lock = allowed ? '' : 'disabled';
+  mount(el, html`
+    <h3>${t('Subtitle Studio')} ${allowed ? '' : html`<span class="supporter-badge">${t('Supporter')}</span>`}</h3>
+    ${allowed ? '' : html`<p class="muted small">${t('Pick the Arabic font, size, color and box of the overlay subtitles with GameShelf Supporter.')} <a href="#/pricing">${t('See membership')}</a></p>`}
+    <form class="studio-form" id="studio-form">
+      <label>${t('Font')}
+        <select class="input" name="font" ${lock}>
+          ${fonts.map((f) => html`<option value="${f.id}" ${f.id === settings.font ? 'selected' : ''}>${f.id === 'default' ? t('GameShelf default') : f.name}</option>`)}
+        </select>
+      </label>
+      <label>${t('Size')} <span class="muted small" id="studio-size-out" dir="ltr">${settings.size}%</span>
+        <input type="range" name="size" min="80" max="150" step="5" value="${settings.size}" ${lock}>
+      </label>
+      <label>${t('Text color')}
+        <input class="studio-color" type="color" name="color" value="${settings.color}" ${lock}>
+      </label>
+      <label>${t('Box opacity')} <span class="muted small" id="studio-bg-out" dir="ltr">${settings.background}%</span>
+        <input type="range" name="background" min="0" max="100" step="2" value="${settings.background}" ${lock}>
+      </label>
+      <p class="studio-preview" id="studio-preview" lang="ar" dir="rtl">مرحباً أيها المسافر، الطريق إلى القلعة طويل.</p>
+      <div class="row-actions">
+        <button class="btn btn-light" type="submit" ${lock}>${t('Save')}</button>
+        <button class="btn btn-quiet" type="button" id="studio-reset">${t('Reset to default')}</button>
+      </div>
+    </form>`);
+  const form = document.getElementById('studio-form');
+  const preview = document.getElementById('studio-preview');
+  const draw = () => {
+    const font = fonts.find((f) => f.id === form.font.value);
+    preview.dataset.font = form.font.value;
+    preview.title = font?.name || '';
+    preview.style.setProperty('--studio-scale', Number(form.size.value) / 100);
+    preview.style.setProperty('--studio-color', form.color.value);
+    preview.style.setProperty('--studio-bg', Number(form.background.value) / 100);
+    document.getElementById('studio-size-out').textContent = `${form.size.value}%`;
+    document.getElementById('studio-bg-out').textContent = `${form.background.value}%`;
+  };
+  form.addEventListener('input', draw);
+  draw();
+  const save = async (values) => {
+    try {
+      await desktop.setSubtitleStudio(values);
+      toast(t('Subtitle Studio saved'));
+    } catch (err) {
+      toast(t(err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')), { error: true });
+    }
+  };
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    save({ font: form.font.value, size: Number(form.size.value), color: form.color.value, background: Number(form.background.value) });
+  });
+  document.getElementById('studio-reset').addEventListener('click', async () => {
+    await save(defaults);
+    showStudio(desktop);
   });
 }

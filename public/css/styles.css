@@ -1466,7 +1466,7 @@ label { display: grid; gap: 8px; font-size: 13px; font-weight: 700; color: var(-
 .app-settings code { font-size: 13px; word-break: break-all; }
 .settings-status { display: flex; align-items: center; gap: 8px; margin: 0 0 16px !important; font-weight: 700; }
 .settings-status::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
-.settings-status.igdb::before, .settings-status.rawg::before { background: var(--accent); }
+.settings-status.steam::before, .settings-status.rawg::before { background: var(--accent); }
 .settings-actions { display: flex; gap: 8px; margin-top: 8px; }
 .check-row { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; font-weight: 700; cursor: pointer; }
 .check-row input { width: 18px; height: 18px; accent-color: var(--accent); }
@@ -2130,3 +2130,94 @@ label[hidden], .label-like[hidden] { display: none; }
   .session-row .btn { grid-column: 2; justify-self: start; }
   .ticket-msg { max-width: 100%; }
 }
+
+/* ---- GameShelf Supporter: badge, boosts, pricing, Subtitle Studio ---------------- */
+.supporter-badge {
+  display: inline-flex; align-items: center; gap: 4px; padding: 2px 9px; border-radius: 999px;
+  font-size: 11px; font-weight: 800; letter-spacing: 0.02em; vertical-align: middle; white-space: nowrap;
+  color: #10230f; background: linear-gradient(135deg, #f7d774, #d4a72c 45%, #3fcf8e);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18) inset;
+}
+h1 .supporter-badge { font-size: 12px; }
+.boost-badge {
+  display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; padding: 2px 8px; border-radius: 999px;
+  font-size: 12px; font-weight: 700; color: #3fcf8e; background: rgba(63, 207, 142, 0.12);
+}
+.boost-badge .icon { width: 12px; height: 12px; }
+.boost-btn { color: #3fcf8e; }
+.free-note {
+  display: block; margin: 0 0 16px; line-height: 1.6; padding: 10px 14px; border-radius: 12px;
+  background: rgba(63, 207, 142, 0.08); border: 1px solid rgba(63, 207, 142, 0.25); color: var(--text); font-size: 14px;
+}
+.free-note > .icon { color: #3fcf8e; vertical-align: -3px; margin-inline-end: 4px; }
+.row-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+
+.gp-name-ar { margin: 2px 0 6px; font-size: 18px; color: var(--dim); }
+.engine-badge {
+  display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; padding: 3px 10px; border-radius: 999px;
+  font-size: 12px; font-weight: 700; color: var(--dim); background: var(--pill);
+}
+.engine-badge .icon { width: 13px; height: 13px; }
+
+.pricing-page { display: grid; gap: 20px; max-width: 1040px; }
+.pricing-head h1 { margin-bottom: 10px; }
+.free-promise {
+  display: block; margin: 0; padding: 14px 18px; border-radius: 14px; font-size: 16px; line-height: 1.6;
+  background: rgba(63, 207, 142, 0.08); border: 1px solid rgba(63, 207, 142, 0.3);
+}
+.free-promise .icon { color: #3fcf8e; vertical-align: -3px; }
+.plan-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+.plan-card { display: flex; flex-direction: column; gap: 8px; }
+.plan-card h2 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+.plan-ar { font-size: 15px; font-weight: 600; }
+.plan-supporter { border-color: rgba(212, 167, 44, 0.45); background: linear-gradient(160deg, rgba(212, 167, 44, 0.1), rgba(63, 207, 142, 0.06) 60%, var(--panel)); }
+.plan-supporter .plan-ar { color: #f7d774; }
+.plan-price { margin: 0; font-size: 22px; font-weight: 800; }
+.plan-list { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 10px; flex: 1; }
+.plan-list li { display: grid; grid-template-columns: 18px 1fr; gap: 10px; align-items: start; line-height: 1.5; }
+.plan-list .icon { width: 16px; height: 16px; margin-top: 3px; color: #3fcf8e; }
+.plan-supporter .plan-list .icon { color: #f7d774; }
+.my-plan { display: grid; gap: 12px; }
+.my-plan.is-supporter { border-color: rgba(212, 167, 44, 0.45); }
+.plan-head { display: flex; justify-content: space-between; gap: 12px; align-items: start; }
+.plan-head h2 { margin: 0 0 4px; }
+.usage { display: grid; gap: 6px; }
+.usage-head { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; color: var(--dim); }
+.usage-bar { --progress: 0; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.1); overflow: hidden; }
+.usage-bar span { display: block; height: 100%; width: calc(var(--progress) * 100%); background: #3fcf8e; transition: width 0.6s var(--ease); }
+.pricing-rules p { margin: 0; line-height: 1.7; }
+
+.new-codes { margin-top: 14px; }
+.code-dump { width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: 0.06em; resize: vertical; }
+.inline-form label { display: grid; gap: 4px; font-size: 13px; color: var(--dim); flex: 1 1 140px; }
+.inline-form label .input { width: 100%; }
+.inline-form > .btn { align-self: end; }
+
+/* Subtitle Studio (desktop App Settings) */
+@font-face { font-family: "GS Cairo"; src: url("/fonts/studio/Cairo-Bold.ttf") format("truetype"); font-weight: 700; font-display: swap; }
+@font-face { font-family: "GS Tajawal"; src: url("/fonts/studio/Tajawal-Bold.ttf") format("truetype"); font-weight: 700; font-display: swap; }
+@font-face { font-family: "GS Amiri"; src: url("/fonts/studio/Amiri-Bold.ttf") format("truetype"); font-weight: 700; font-display: swap; }
+@font-face { font-family: "GS IBM Plex Sans Arabic"; src: url("/fonts/studio/IBMPlexSansArabic-Bold.ttf") format("truetype"); font-weight: 700; font-display: swap; }
+.studio { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
+.studio h3 { display: flex; align-items: center; gap: 8px; }
+.studio-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-top: 10px; }
+.studio-form label { display: grid; gap: 6px; font-size: 13px; color: var(--dim); }
+.studio-form input[type="range"] { width: 100%; accent-color: #3fcf8e; }
+.studio-color { width: 56px; height: 34px; padding: 0; border: 1px solid var(--border-strong); border-radius: 8px; background: none; }
+.studio-form .row-actions { grid-column: 1 / -1; margin-top: 0; }
+.studio-preview {
+  --studio-scale: 1; --studio-color: #fff; --studio-bg: 0.86;
+  grid-column: 1 / -1; margin: 0; padding: 14px 18px; border-radius: 12px; text-align: center;
+  font-family: "Thmanyah Local", "Alexandria", sans-serif; font-weight: 700; font-size: calc(22px * var(--studio-scale));
+  color: var(--studio-color); background: rgba(0, 0, 0, var(--studio-bg));
+  outline: 1px solid var(--border); background-image: linear-gradient(rgba(0, 0, 0, var(--studio-bg)), rgba(0, 0, 0, var(--studio-bg))), linear-gradient(135deg, #2b4a6b, #6b3b2b);
+}
+.studio-preview[data-font="cairo"] { font-family: "GS Cairo", sans-serif; }
+.studio-preview[data-font="tajawal"] { font-family: "GS Tajawal", sans-serif; }
+.studio-preview[data-font="amiri"] { font-family: "GS Amiri", serif; }
+.studio-preview[data-font="ibm-plex-sans-arabic"] { font-family: "GS IBM Plex Sans Arabic", sans-serif; }
+.plan-list { align-content: start; }
+[dir="rtl"] .plan-ar { display: none; }
+.board-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.board-name .boost-badge { justify-self: start; max-width: 100%; }
+@media (max-width: 640px) { .board-actions { grid-column: 2 / -1; justify-content: flex-start; } }

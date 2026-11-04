@@ -111,6 +111,40 @@ function glossaryPrompt(glossary, lines) {
 
 class TranslationLimit extends Error {}
 
+/**
+ * The AI's queue: at most `slots` requests at once, and supporters' (priority
+ * 1) waiting requests go before free ones (priority 0); within a priority,
+ * first come, first served.
+ */
+function createPriorityGate(slots) {
+  let busy = 0;
+  const waiting = [];
+  const next = () => {
+    if (busy >= slots || !waiting.length) return;
+    waiting.sort((a, b) => b.priority - a.priority || a.order - b.order);
+    busy += 1;
+    waiting.shift().resolve();
+  };
+  let order = 0;
+  return {
+    async run(priority, fn) {
+      await new Promise((resolve) => {
+        waiting.push({ priority, order: order++, resolve });
+        next();
+      });
+      try {
+        return await fn();
+      } finally {
+        busy -= 1;
+        next();
+      }
+    },
+    get waiting() {
+      return waiting.length;
+    },
+  };
+}
+
 function createTranslationMemory({ db, env = process.env, fetch = globalThis.fetch, now = () => new Date() }) {
   const apiKey = env.OPENAI_API_KEY || '';
   const model = env.TRANSLATE_MODEL || 'gpt-4.1-mini';
@@ -203,7 +237,16 @@ function createTranslationMemory({ db, env = process.env, fetch = globalThis.fet
    * `lines` is [{ hash, english }]; returns { arabic: { hash: text }, failed:
    * { hash: why }, limited: true when some weren't translated because of a limit }.
    */
-  async function translate(user, game, lines, { context = '' } = {}) {
+  // Every AI request from every player goes through one queue (supporters first).
+  const gate = createPriorityGate(Math.max(1, Number(env.TRANSLATE_CONCURRENCY) || WORKERS * 2));
+
+  /**
+   * `limits` come from the player's plan (src/plans.js): dailyLines replaces the
+   * server's per-day default, maxLines caps this request (the month's
+   * remainder), priority puts the request ahead in the AI's queue. The answer
+   * also says how many new lines the AI translated (used).
+   */
+  async function translate(user, game, lines, { context = '', dailyLines: planDaily = null, maxLines = null, priority = 0 } = {}) {
     checkGame(game);
     if (!apiKey) throw new TranslationLimit('Shared translation isn\'t set up on this server.');
     const arabic = {};
@@ -220,7 +263,7 @@ function createTranslationMemory({ db, env = process.env, fetch = globalThis.fet
         else if (!todo.some((t) => t.hash === hash)) todo.push({ hash, english });
       }
     }
-    if (!todo.length) return { arabic, failed, limited: false };
+    if (!todo.length) return { arabic, failed, limited: false, used: { lines: 0, chars: 0 } };
 
     while (busy.has(game)) await busy.get(game).catch(() => {});
     let release;
@@ -233,7 +276,11 @@ function createTranslationMemory({ db, env = process.env, fetch = globalThis.fet
         return !row;
       });
       const day = now().toISOString().slice(0, 10);
-      const leftToday = Math.max(0, dailyLines - (usageToday.get(user.id, day)?.lines || 0));
+      const leftToday = Math.min(
+        Math.max(0, (planDaily ?? dailyLines) - (planDaily == null ? usageToday.get(user.id, day)?.lines || 0 : 0)),
+        maxLines == null ? Infinity : Math.max(0, maxLines),
+      );
+      const used = { lines: 0, chars: 0 };
       let leftMonth = Math.max(0, monthlyChars - usageMonth.get(`${day.slice(0, 7)}%`).chars);
       const allowed = [];
       for (const t of fresh) {
@@ -249,10 +296,12 @@ function createTranslationMemory({ db, env = process.env, fetch = globalThis.fet
         while (next < batches.length) {
           const lines = batches[next++].map((t, i) => [i, t.english, t.hash]);
           const known = glossary(game);
-          const { good, failed: bad } = await batch(lines.map(([i, english]) => [i, english]), String(context).slice(0, 300),
-            known ? glossaryPrompt(known, lines.map(([, english]) => english)) : '');
+          const { good, failed: bad } = await gate.run(priority, () => batch(lines.map(([i, english]) => [i, english]), String(context).slice(0, 300),
+            known ? glossaryPrompt(known, lines.map(([, english]) => english)) : ''));
           const chars = lines.reduce((sum, [, english]) => sum + english.length, 0);
           addUsage.run(user.id, day, lines.length, chars);
+          used.lines += lines.length;
+          used.chars += chars;
           for (const [i, , hash] of lines) {
             if (i in good) {
               insert.run(game, hash, good[i], model);
@@ -264,7 +313,7 @@ function createTranslationMemory({ db, env = process.env, fetch = globalThis.fet
         }
       };
       await Promise.all(Array.from({ length: Math.min(WORKERS, batches.length) }, worker));
-      return { arabic, failed, limited };
+      return { arabic, failed, limited, used };
     } finally {
       busy.delete(game);
       release();
@@ -339,4 +388,4 @@ function createTranslationMemory({ db, env = process.env, fetch = globalThis.fet
   return { configured: Boolean(apiKey), lookup, translate, review, stored, model, glossary, ensureGlossary, setGlossary };
 }
 
-module.exports = { createTranslationMemory, problemWith, sha256, TranslationLimit, GAME_RE, cleanGlossary, glossaryPrompt, GLOSSARY_PROMPT };
+module.exports = { createTranslationMemory, createPriorityGate, problemWith, sha256, TranslationLimit, GAME_RE, cleanGlossary, glossaryPrompt, GLOSSARY_PROMPT };

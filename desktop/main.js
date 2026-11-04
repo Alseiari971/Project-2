@@ -19,6 +19,7 @@ const { createPresenceLoop } = require('./presence');
 const { externalUrl, createPickedPaths, trustedSender, lockContents, permissionPolicy, SAFE_PREFERENCES } = require('./safety');
 const { pathToFileURL } = require('node:url');
 const { localSteamAccount } = require('./steam-account');
+const { FONTS: STUDIO_FONTS, DEFAULTS: STUDIO_DEFAULTS, cleanStudio, isDefault, createStudioStore, effectiveStudio } = require('./subtitle-studio');
 const { createArabicService } = require('./localization/service');
 const { createOcrHelper, defaultSpawn } = require('./localization/ocr');
 const { createOverlayManager } = require('./localization/overlay-manager');
@@ -512,6 +513,22 @@ function schedulePoll() {
   if (starting.size || running.size) pollTimer = setTimeout(checkRunning, POLL_MS);
 }
 
+// ---- Subtitle Studio ------------------------------------------------------------
+
+const studioStore = createStudioStore(dataDir);
+/** Whether the signed-in player has the Subtitle Studio perk (asked of GameShelf's server). */
+async function studioAllowed() {
+  try {
+    return Boolean((await cloud.json('/api/me/plan', { timeout: 8000 })).perks?.subtitleStudio);
+  } catch {
+    return false;
+  }
+}
+function applyStudio(saved, allowed) {
+  const s = effectiveStudio(saved, allowed);
+  overlays?.setStudio({ family: STUDIO_FONTS[s.font].family, size: s.size, color: s.color, background: s.background });
+}
+
 // ---- Friends' presence -------------------------------------------------------------
 
 /** What friends see: the game started most recently (and whether its Arabic is on), or just online. */
@@ -566,7 +583,7 @@ function updatePresence(installed) {
       updatePresence(installed);
     });
   }
-  const url = games.name === 'igdb' && page?.id ? `https://www.igdb.com/games/${encodeURIComponent(page.id)}`
+  const url = page?.wikidataId ? `https://www.wikidata.org/wiki/${encodeURIComponent(page.wikidataId)}`
     : game.steamAppId ? `https://store.steampowered.com/app/${game.steamAppId}/` : null;
   presence.set({
     name: page?.name || game.name,
@@ -1067,6 +1084,20 @@ function registerIpc() {
     return arabic.packs.add(folder);
   });
   handle('arabic:remove-pack', async (id) => arabic.packs.remove(String(id)));
+  // Subtitle Studio (a GameShelf Supporter perk): font, size, color, box opacity.
+  // Whether the perk is on comes from GameShelf's server; without it the
+  // overlay uses the defaults (saved choices are kept for when it's back).
+  handle('arabic:studio', async () => {
+    const allowed = await studioAllowed();
+    return { settings: studioStore.read(), allowed, fonts: Object.entries(STUDIO_FONTS).map(([id, f]) => ({ id, name: f.name })), defaults: STUDIO_DEFAULTS };
+  });
+  handle('arabic:set-studio', async (input) => {
+    const settings = cleanStudio(input || {});
+    if (!isDefault(settings) && !(await studioAllowed())) throw new Error('Subtitle Studio is a GameShelf Supporter perk. Arabic packs stay free either way.');
+    studioStore.save(settings);
+    applyStudio(settings, true);
+    return { settings, allowed: true };
+  });
   handle('arabic:overlay-style', async () => arabic.overlayStyle());
   handle('arabic:set-overlay-style', async (style) => {
     const saved = await arabic.setOverlayStyle(String(style));
@@ -1106,6 +1137,7 @@ async function start() {
   friendsPresence.start();
   overlays = createOverlayManager({ BrowserWindow, desktopCapturer, screen, ipcMain, helper: ocrHelper });
   arabic.overlayStyle().then((style) => overlays.setStyle(style)).catch((err) => console.error('Arabic overlay style:', err.message));
+  studioAllowed().then((allowed) => applyStudio(studioStore.read(), allowed)).catch(() => {});
   // Takes back any Arabic patch that was cut short by a crash.
   arabic.recover().catch((err) => console.error('Could not tidy up Arabic patches:', err.message));
   if (process.platform !== 'darwin') Menu.setApplicationMenu(null);

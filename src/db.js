@@ -80,6 +80,35 @@ const ADDED_COLUMNS = {
   },
 };
 
+// Columns for tables created further down (games), added the same way.
+const LATE_COLUMNS = {
+  games: {
+    steam_appid: 'INTEGER',
+    wikidata_qid: 'TEXT',
+    detected_engine: 'TEXT',
+    engine_label: 'TEXT',
+    title_ar: 'TEXT',
+    description_ar: 'TEXT',
+    epic_slug: 'TEXT',
+    gog_slug: 'TEXT',
+    website: 'TEXT',
+    description: 'TEXT',
+    released: 'TEXT',
+    image: 'TEXT',
+    header_image: 'TEXT',
+    backdrop: 'TEXT',
+    poster: 'TEXT',
+    genres: "TEXT NOT NULL DEFAULT '[]'",
+    developers: "TEXT NOT NULL DEFAULT '[]'",
+    publishers: "TEXT NOT NULL DEFAULT '[]'",
+    platforms: "TEXT NOT NULL DEFAULT '[]'",
+    review_percent: 'INTEGER',
+    review_count: 'INTEGER',
+    details_at: 'INTEGER',
+    wikidata_at: 'INTEGER',
+  },
+};
+
 function migrate(db) {
   for (const [table, columns] of Object.entries(ADDED_COLUMNS)) {
     const existing = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name));
@@ -404,6 +433,88 @@ function openDatabase(file = process.env.DB_FILE || path.join(__dirname, '..', '
       body       TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+  `);
+  db.exec(`
+    -- Game data from Steam and Wikidata (src/games/steam-wikidata.js). The id is
+    -- GameShelf's id for the game, the one lists, Arabic requests and packs use
+    -- (ids from before, such as old IGDB slugs, are kept and filled in when seen).
+    CREATE TABLE IF NOT EXISTS games (
+      id   TEXT PRIMARY KEY,
+      name TEXT NOT NULL
+    );
+    -- Every response fetched from Steam or Wikidata, reused until it's older than the TTL.
+    CREATE TABLE IF NOT EXISTS metadata_cache (
+      key        TEXT PRIMARY KEY,
+      body       TEXT NOT NULL,
+      fetched_at INTEGER NOT NULL
+    );
+
+    -- GameShelf Supporter ("داعم"): who supports, until when, and how they paid
+    -- (a gift code, Stripe, LemonSqueezy or an admin). Arabic packs never depend on this.
+    CREATE TABLE IF NOT EXISTS user_subscriptions (
+      user_id     INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      plan        TEXT NOT NULL DEFAULT 'free' CHECK (plan IN ('free', 'supporter')),
+      status      TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'canceled', 'expired')),
+      source      TEXT NOT NULL DEFAULT '',
+      external_id TEXT,
+      period_end  INTEGER,
+      created_at  INTEGER NOT NULL,
+      updated_at  INTEGER NOT NULL
+    );
+    -- Cloud AI translation used, per player: what the plans' quotas count.
+    CREATE TABLE IF NOT EXISTS compute_ledger (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      kind       TEXT NOT NULL CHECK (kind IN ('translate', 'grant')),
+      game       TEXT NOT NULL DEFAULT '',
+      strings    INTEGER NOT NULL DEFAULT 0,
+      chars      INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS compute_ledger_user ON compute_ledger (user_id, created_at);
+    -- Boost tokens supporters spend on requested games ("دعم تعريب اللعبة").
+    CREATE TABLE IF NOT EXISTS game_boosts (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      game       TEXT NOT NULL,
+      tokens     INTEGER NOT NULL CHECK (tokens > 0),
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS game_boosts_game ON game_boosts (game);
+    CREATE INDEX IF NOT EXISTS game_boosts_user ON game_boosts (user_id, created_at);
+    -- Prepaid / gift codes (XXXX-XXXX-XXXX): only a hash is kept, like passwords.
+    CREATE TABLE IF NOT EXISTS gift_codes (
+      code_hash   TEXT PRIMARY KEY,
+      hint        TEXT NOT NULL,
+      plan        TEXT NOT NULL DEFAULT 'supporter',
+      days        INTEGER NOT NULL CHECK (days BETWEEN 1 AND 3660),
+      note        TEXT NOT NULL DEFAULT '',
+      batch       TEXT NOT NULL DEFAULT '',
+      created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_at  INTEGER NOT NULL,
+      redeemed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      redeemed_at INTEGER,
+      revoked     INTEGER NOT NULL DEFAULT 0
+    );
+    -- Payment webhooks already handled, so a replayed event does nothing twice.
+    CREATE TABLE IF NOT EXISTS billing_events (
+      event_id    TEXT PRIMARY KEY,
+      provider    TEXT NOT NULL,
+      type        TEXT NOT NULL,
+      user_id     INTEGER,
+      received_at INTEGER NOT NULL
+    );
+  `);
+  // Columns added to tables made before them (safe to run every start).
+  for (const [table, columns] of Object.entries(LATE_COLUMNS)) {
+    const existing = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name));
+    for (const [name, type] of Object.entries(columns)) {
+      if (!existing.has(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
+    }
+  }
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS games_steam ON games (steam_appid) WHERE steam_appid IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS games_wikidata ON games (wikidata_qid) WHERE wikidata_qid IS NOT NULL AND steam_appid IS NULL;
   `);
   // Every account has a friend code (accounts made before friends get theirs here).
   const { assignFriendCodes } = require('./friends');

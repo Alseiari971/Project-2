@@ -54,7 +54,7 @@ function normalizeCode(text) {
 
 const clean = (text, max) => String(text ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, max);
 
-function createFriends({ db, now = () => Date.now() }) {
+function createFriends({ db, now = () => Date.now(), plans = null }) {
   const pair = (a, b) => (a < b ? [a, b] : [b, a]);
   const q = {
     byName: db.prepare('SELECT * FROM users WHERE username = ?'),
@@ -92,6 +92,7 @@ function createFriends({ db, now = () => Date.now() }) {
     username: u.username,
     displayName: u.display_name,
     nationality: u.nationality || null,
+    supporter: Boolean(plans?.isSupporter(u.id)),
     accent: u.accent,
     avatarUrl: u.avatar_version ? `/api/users/${encodeURIComponent(u.username)}/avatar?v=${u.avatar_version}` : null,
   });

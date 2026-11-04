@@ -63,7 +63,7 @@ function priceSection(prices) {
 }
 
 
-// ---- Sections built from IGDB and Steam store data ------------------------------
+// ---- Sections built from Steam store and Wikidata data --------------------------
 
 const compact = (n) => new Intl.NumberFormat(locale, { notation: 'compact', maximumFractionDigits: 1 }).format(n);
 
@@ -195,7 +195,7 @@ function requirementsSection(steam) {
 }
 
 function sideSections(game, steam) {
-  // "Single player" (IGDB) and "Single-player" (Steam) are the same feature.
+  // "Single player" and "Single-player" (Steam) are the same feature.
   const seen = new Set();
   const SAME = { coop: 'cooperative' };
   const key = (f) => {
@@ -206,7 +206,7 @@ function sideSections(game, steam) {
     .filter((f) => !seen.has(key(f)) && seen.add(key(f)))
     .slice(0, 12);
 
-  // IGDB knows interface, audio and subtitles; Steam knows which have full audio.
+  // The catalog knows interface, audio and subtitles; Steam knows which have full audio.
   const languages = game.languages?.length
     ? game.languages
     : (steam?.languages || []).map((l) => ({ name: l.name, interface: true, audio: l.audio, subtitles: null }));
@@ -280,6 +280,8 @@ export async function gameView(app, id, params) {
             : html`<span class="gp-cover art-fallback" data-hue="${hueFor(game.name)}"></span>`}
           <div class="gp-main-head">
             <h1>${bdi(game.name)}</h1>
+            ${game.nameAr && game.nameAr !== game.name ? html`<p class="gp-name-ar" lang="ar" dir="rtl">${game.nameAr}</p>` : ''}
+            ${game.engine ? html`<span class="engine-badge" title="${t('Game engine (from Wikidata)')}">${icon('sliders')} ${game.engineLabel || game.engine}</span>` : ''}
             <div class="gp-meta">
               <div class="tag-row">${game.genres.slice(0, 4).map((g) => html`<a class="tag" href="#/browse?genre=${encodeURIComponent(g)}">${t(g)}</a>`)}</div>
               <span class="gp-facts">${facts.join(' · ')}</span>
@@ -336,8 +338,8 @@ export async function gameView(app, id, params) {
               ${game.buy.links.length ? html`
                 <h3 class="buy-subhead">${t('Stores')}</h3>
                 <div class="store-list">${game.buy.links.map((l) => html`
-                  <a class="store" href="${l.url}" target="_blank" rel="noopener noreferrer">
-                    <span>${l.name}</span>
+                  <a class="store" href="${l.url}" target="_blank" rel="${l.sponsored ? 'noopener noreferrer sponsored' : 'noopener noreferrer'}">
+                    <span>${l.name}${l.sponsored ? html` <small class="muted" title="${t('GameShelf may earn a small commission from this store, at no cost to you.')}">${t('Affiliate')}</small>` : ''}</span>
                     <span class="store-kind">${l.direct ? t('Store page') : t('Search')} ${icon('external')}</span>
                   </a>`)}</div>` : ''}
               <a class="text-link small" href="${game.buy.compareUrl}" target="_blank" rel="noopener noreferrer">${t('Compare on IsThereAnyDeal')} ${icon('external')}</a>

@@ -11,19 +11,31 @@ export async function legalView(app) {
   mount(app, html`
     <div class="page legal">
       <div class="page-head"><h1>${t('About & legal')}</h1></div>
-      <p class="muted lead">${t("GameShelf helps you find games, see where to buy them and keep a list of what you play. It doesn't sell anything.")}</p>
+      <p class="muted lead">${t('GameShelf helps you find games, see where to buy them, keep a list of what you play and play them in Arabic. It never sells games, or the Arabic for them.')}</p>
 
       <section class="panel">
         <h2>${t('Where the information comes from')}</h2>
         <ul class="plain-list">
-          ${item('Game details, covers, screenshots and trailers:', '{igdb}, the game database run by Twitch.', { igdb: link('https://www.igdb.com', 'IGDB') })}
+          ${item('Game details, artwork and screenshots:', "each game's public {steam} page, written by its publisher.", { steam: link('https://store.steampowered.com', 'Steam store') })}
+          ${item('Arabic titles, game engines and other stores\' links:', '{wikidata}, the free knowledge base, whose data is public domain (CC0).', { wikidata: link('https://www.wikidata.org', 'Wikidata') })}
           ${item('PC prices and deals:', '{cheapshark}. Buy buttons go through CheapShark to the store, and prices can change at any time. Always check the price on the store before you pay.', { cheapshark: link('https://www.cheapshark.com', 'CheapShark') })}
           ${item('"About this game", system requirements, achievements and features:', "each game's public Steam store page, written by the publisher.")}
           ${item('Metacritic scores', 'come from Steam and link to {metacritic}.', { metacritic: link('https://www.metacritic.com', 'Metacritic') })}
           ${item('Trailers', "play in YouTube's own player, in its privacy-enhanced mode, and only when you press play.")}
           ${item('Steam library import', 'uses the Steam Web API and only reads profiles whose game details are public.')}
         </ul>
-        <p class="muted small">${t("GameShelf isn't affiliated with or endorsed by Valve, Twitch, IGDB, CheapShark, Metacritic, YouTube or any game publisher or store.")}</p>
+        <p class="muted small">${t("GameShelf isn't affiliated with or endorsed by Valve, the Wikimedia Foundation, CheapShark, Metacritic, YouTube or any game publisher or store.")}</p>
+      </section>
+
+      <section class="panel">
+        <h2>${t('Membership and affiliate links')}</h2>
+        <ul class="plain-list">
+          ${item('Arabic packs:', 'every finished pack is free for every player to download, install and switch on or off. No plan, payment or code is ever needed for one.')}
+          ${item('GameShelf Supporter', 'is an optional membership. It pays for the cloud AI that makes new translations and gives more of it, a place first in its queue, boost tokens, Subtitle Studio in the desktop app, a profile badge and priority support. See {pricing}.', { pricing: html`<a href="#/pricing">${t('Membership & support')}</a>` })}
+          ${item('Payments', 'happen on the payment provider\'s own page. GameShelf never sees your card details; it only hears that a payment went through.')}
+          ${item('Affiliate links:', 'some buy buttons are marked "Affiliate". GameShelf may earn a small commission when you buy through them, at no extra cost to you. The price is the store\'s own.')}
+          ${item('Subtitle fonts:', 'Cairo, Tajawal, Amiri and IBM Plex Sans Arabic, used under the SIL Open Font License.')}
+        </ul>
       </section>
 
       <section class="panel">

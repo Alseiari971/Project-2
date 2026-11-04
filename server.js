@@ -1,7 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-// Read settings such as IGDB_CLIENT_ID from a .env file when there is one.
+// Read settings such as STEAM_API_KEY from a .env file when there is one.
 try {
   process.loadEnvFile(path.join(__dirname, '.env'));
 } catch {}
@@ -89,6 +89,9 @@ function createApp({
   mailer = createMailer(),
   fetchImpl = fetch,
   now = () => Date.now(),
+  // GameShelf Supporter (src/plans.js) and payment webhooks (src/billing.js); made from process.env when left out.
+  plans,
+  billing,
 } = {}) {
   const downloadsDir = path.join(dataDir, 'downloads');
   const app = express();
@@ -99,9 +102,10 @@ function createApp({
   app.use('/api', sameOriginWrites(() => [process.env.PUBLIC_URL].filter(Boolean).map((u) => new URL(u).origin)));
 
   // Large enough for a resized avatar image.
-  app.use(express.json({ limit: '500kb' }));
+  // The raw bytes are kept for payment webhooks, whose signatures cover them exactly.
+  app.use(express.json({ limit: '500kb', verify: (req, _res, buf) => { if (req.originalUrl === '/api/billing/webhook') req.rawBody = buf.toString('utf8'); } }));
   app.use(loadUser(db));
-  app.use('/api', createApi({ db, games, prices, steam, steamStore, translations, arabicGames, packs, submissions, recipes, community, downloadsDir, mailer, fetchImpl, now }));
+  app.use('/api', createApi({ db, games, prices, steam, steamStore, translations, arabicGames, packs, submissions, recipes, community, downloadsDir, mailer, fetchImpl, now, plans, billing }));
   // The website's "Download GameShelf for Windows" button: the installer an admin
   // uploaded in the Admin Panel, or else DOWNLOAD_URL (a GitHub release, say).
   app.get('/download/windows', (_req, res) => {
@@ -131,10 +135,11 @@ if (require.main === module) {
   const games = createGameProvider(process.env, { db });
   createApp({ db, games }).listen(port, () => {
     console.log(`GameShelf running at http://localhost:${port}`);
-    const source = { igdb: 'IGDB', rawg: 'RAWG', local: 'the built-in 35-game sample catalog' }[games.name];
+    const source = { steam: 'Steam and Wikidata (no keys needed)', rawg: 'RAWG', local: 'the built-in 35-game sample catalog (GAME_DATA=local)' }[games.name];
     console.log(`Game data: ${source}.`);
-    if (games.name === 'local') {
-      console.log('Set IGDB_CLIENT_ID and IGDB_CLIENT_SECRET to search every game (see README).');
+    // Twitch/IGDB keys are no longer used; say so instead of silently ignoring them.
+    if (process.env.IGDB_CLIENT_ID || process.env.TWITCH_CLIENT_ID) {
+      console.log('IGDB_CLIENT_ID / TWITCH_CLIENT_ID are set but no longer used: game data now comes from Steam and Wikidata. You can remove them.');
     }
     if (!process.env.STEAM_API_KEY) {
       console.log('Steam import is off. Set STEAM_API_KEY to turn it on (see README).');

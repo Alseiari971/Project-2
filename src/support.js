@@ -23,7 +23,7 @@ class SupportError extends Error {
 
 const text = (value, max) => String(value ?? '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').trim().slice(0, max);
 
-function createSupport({ db, games = null }) {
+function createSupport({ db, games = null, plans = null }) {
   const q = {
     insert: db.prepare('INSERT INTO support_tickets (user_id, category, subject, game_id, game_name) VALUES (?, ?, ?, ?, ?)'),
     addMessage: db.prepare('INSERT INTO support_messages (ticket_id, author_id, from_admin, body) VALUES (?, ?, ?, ?)'),
@@ -73,6 +73,8 @@ function createSupport({ db, games = null }) {
     steamLinked: Boolean(u.steam_id),
     guard: u.twofa_method || null,
     emailVerified: Boolean(u.email_verified),
+    // GameShelf Supporters' tickets come first in the queue (priority support).
+    supporter: Boolean(plans?.isSupporter(u.user_id ?? u.id)),
   });
 
   function ownTicket(user, id) {
@@ -140,8 +142,14 @@ function createSupport({ db, games = null }) {
     const c = CATEGORIES.includes(category) ? category : '';
     const counts = Object.fromEntries(STATUSES.map((x) => [x, 0]));
     for (const row of q.counts.all()) counts[row.status] = row.n;
+    const order = { open: 0, replied: 1, resolved: 2, closed: 3 };
+    const tickets = q.queue.all({ status: s, category: c }).map((t) => ({ ...summary(t), from: sender(t), userTickets: t.user_tickets }));
+    // Same status: supporters first, then the order it already had.
+    tickets.forEach((t, i) => { t.rank = i; });
+    tickets.sort((a, b) => order[a.status] - order[b.status] || Number(b.from.supporter) - Number(a.from.supporter) || a.rank - b.rank);
+    tickets.forEach((t) => { delete t.rank; });
     return {
-      tickets: q.queue.all({ status: s, category: c }).map((t) => ({ ...summary(t), from: sender(t), userTickets: t.user_tickets })),
+      tickets,
       counts,
       categories: CATEGORIES,
       statuses: STATUSES,

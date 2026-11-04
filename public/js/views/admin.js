@@ -11,10 +11,10 @@ import { flagBadge } from '../country-picker.js';
 import { CATEGORY_LABELS, TICKET_STATUS, statusChip, threadHtml, when } from './support.js';
 
 const desktop = window.gameshelfDesktop;
-const TABS = ['overview', 'support', 'approvals', 'requests', 'fixes', 'packs', 'users', 'installer', ...(desktop?.studio ? ['studio'] : [])];
+const TABS = ['overview', 'support', 'approvals', 'requests', 'fixes', 'packs', 'users', 'supporters', 'installer', ...(desktop?.studio ? ['studio'] : [])];
 const TAB_LABELS = {
   overview: 'Overview', support: 'Support', approvals: 'Pending approvals', users: 'Users', packs: 'Arabic packs', requests: 'Requests', fixes: 'Translation fixes',
-  installer: 'Windows app', studio: 'Pack Studio',
+  supporters: 'Supporters & codes', installer: 'Windows app', studio: 'Pack Studio',
 };
 const ENGINE_LABELS = {
   auto: 'Detect it', unreal: 'Unreal Engine', unity: 'Unity', reengine: 'Capcom RE Engine', godot: 'Godot', renpy: "Ren'Py",
@@ -92,7 +92,7 @@ export async function adminView(app, params) {
       <div id="admin-body" class="admin-body"></div>
     </div>`);
   const body = document.getElementById('admin-body');
-  await { overview, support, approvals, users, packs, requests, fixes, installer, studio }[tab](body, params);
+  await { overview, support, approvals, users, packs, requests, fixes, supporters, installer, studio }[tab](body, params);
 }
 
 // ---- Overview ------------------------------------------------------------------
@@ -357,13 +357,13 @@ async function requests(body) {
   const byGame = new Map(rows.map((r) => [r.game, r]));
   mount(body, html`
     <h2 class="admin-board-head">${icon('star')} ${t('Most requested games')}</h2>
-    <p class="muted small">${t('Every game players asked Arabic for, most votes first. Players upvote the ones still without Arabic on the Arabic requests page.')}</p>
+    <p class="muted small">${t('Every game players asked Arabic for: community-boosted games first, then most votes. Players upvote the ones still without Arabic on the Arabic requests page.')}</p>
     ${rows.length
       ? html`<div class="admin-table">${rows.map((r, i) => html`
           <div class="admin-row admin-request">
             <div><strong><span class="admin-rank">#${i + 1}</span> ${bdi(r.name || r.game)}</strong> <span class="muted small">${r.game}${r.reason ? html` · ${t(r.reason)}` : ''}</span>
               ${r.fingerprint ? folderPrint(r.fingerprint) : ''}</div>
-            <span>${r.requests === 1 ? t('1 vote') : t('{count} votes', { count: r.requests })}</span>
+            <span>${r.requests === 1 ? t('1 vote') : t('{count} votes', { count: r.requests })}${r.boosts ? html` · <span class="boost-badge">${(r.boosts === 1 ? t('Community boosted (1 boost)') : t('Community boosted ({n} boosts)', { n: r.boosts }))}</span>` : ''}</span>
             <span class="muted small">${r.recipe ? html`<span class="recipe-tag">${t('Engine recipe attached')}</span> ` : ''}${r.pending ? t('Waiting for approval') : t(STATUS[r.status])}${r.total ? ` · ${r.translated}/${r.total}` : ''}</span>
             <span class="admin-row-actions">
               <button class="btn btn-sm btn-quiet" type="button" data-recipe="${r.game}" data-family="${r.fingerprint?.engine?.id || ''}">${r.recipe ? t('Edit engine recipe…') : t('Attach engine recipe…')}</button>
@@ -729,6 +729,113 @@ async function review(body, id) {
       toast(errorText(err), { error: true });
     }
   });
+}
+
+// ---- Supporters & codes ------------------------------------------------------------
+
+const shortDate = (ms) => new Date(ms).toLocaleDateString();
+
+async function supporters(body) {
+  mount(body, html`
+    <p class="free-note">${icon('check')} ${t('Codes and memberships only pay for cloud AI translation, queue priority and extras. Arabic packs stay free for everyone.')}</p>
+    <section class="panel">
+      <h2>${t('Make prepaid / gift codes')}</h2>
+      <p class="muted small">${t('Each code gives GameShelf Supporter for the days you choose and works once. Codes are shown only now: GameShelf keeps just a fingerprint of each. Sell them through Ziina, Tabby or Stripe payment links, or give them away.')}</p>
+      <form class="inline-form" id="code-form">
+        <label>${t('How many')} <input class="input" type="number" name="count" min="1" max="500" value="10" required></label>
+        <label>${t('Days each')} <input class="input" type="number" name="days" min="1" max="3660" value="30" required></label>
+        <label>${t('Note (only admins see it)')} <input class="input" name="note" maxlength="120" placeholder="${t('e.g. Ziina monthly, March')}"></label>
+        <button class="btn btn-accent" type="submit">${t('Make codes')}</button>
+      </form>
+      <div id="new-codes"></div>
+    </section>
+    <section class="panel">
+      <h2>${t('Give Supporter to a player')}</h2>
+      <form class="inline-form" id="grant-form">
+        <label>${t('Username')} <input class="input" name="username" required autocomplete="off" dir="ltr"></label>
+        <label>${t('Days')} <input class="input" type="number" name="days" min="1" max="3660" value="30" required></label>
+        <button class="btn" type="submit">${t('Give')}</button>
+      </form>
+    </section>
+    <section class="panel"><h2>${t('Code batches')}</h2><div id="batch-list"></div></section>
+    <section class="panel"><h2>${t('Supporters')}</h2><div id="supporter-list"></div></section>`);
+
+  const show = async () => {
+    const { batches, supporters: people } = await api('/admin/plans');
+    mount(document.getElementById('batch-list'), batches.length
+      ? html`<div class="admin-table">${batches.map((b) => html`
+          <div class="admin-row">
+            <div><strong>${b.note || t('No note')}</strong> <span class="muted small" dir="ltr">${b.batch}</span></div>
+            <span class="muted small">${t('{days} days', { days: b.days })} · ${shortDate(b.createdAt)}</span>
+            <span class="muted small">${t('{used} of {n} used', { used: b.redeemed, n: b.codes })}${b.revoked ? ` · ${t('{n} revoked', { n: b.revoked })}` : ''}</span>
+            ${b.revoked < b.codes - b.redeemed ? html`<button class="btn btn-sm btn-quiet" type="button" data-revoke="${b.batch}">${t('Revoke unused')}</button>` : html`<span></span>`}
+          </div>`)}</div>`
+      : html`<p class="muted">${t('No codes yet.')}</p>`);
+    mount(document.getElementById('supporter-list'), people.length
+      ? html`<div class="admin-table">${people.map((p) => html`
+          <div class="admin-row">
+            <div><strong>${bdi(p.displayName)}</strong> <span class="muted small">${bdi(`@${p.username}`)}</span></div>
+            <span class="muted small">${t('Until {date}', { date: shortDate(p.until) })}</span>
+            <span class="muted small">${{ stripe: 'Stripe', lemonsqueezy: 'LemonSqueezy', code: t('Prepaid code'), admin: t('Given by an admin') }[p.source] || p.source || ''}</span>
+            <span class="supporter-badge">${t('Supporter')}</span>
+          </div>`)}</div>`
+      : html`<p class="muted">${t('No supporters yet.')}</p>`);
+  };
+
+  document.getElementById('code-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    const button = f.querySelector('button');
+    button.disabled = true;
+    try {
+      const made = await api('/admin/plans/codes', { method: 'POST', body: { count: Number(f.count.value), days: Number(f.days.value), note: f.note.value } });
+      const text = made.codes.join('\n');
+      const file = URL.createObjectURL(new Blob([`${text}\n`], { type: 'text/plain' }));
+      onLeave(() => URL.revokeObjectURL(file));
+      mount(document.getElementById('new-codes'), html`
+        <div class="new-codes">
+          <p class="form-error">${t('Copy or download these now. They won\'t be shown again.')}</p>
+          <textarea class="input code-dump" readonly rows="${Math.min(12, made.codes.length)}" dir="ltr">${text}</textarea>
+          <div class="row-actions">
+            <button class="btn btn-sm" type="button" id="copy-codes">${icon('link')} ${t('Copy')}</button>
+            <a class="btn btn-sm btn-quiet" href="${file}" download="gameshelf-codes-${made.batch}.txt">${icon('download')} ${t('Download .txt')}</a>
+          </div>
+        </div>`);
+      document.getElementById('copy-codes').addEventListener('click', () => navigator.clipboard.writeText(text).then(() => toast(t('Copied'))));
+      await show();
+    } catch (err) {
+      toast(errorText(err), { error: true });
+    }
+    button.disabled = false;
+  });
+
+  document.getElementById('grant-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    try {
+      await api('/admin/plans/grant', { method: 'POST', body: { username: f.username.value, days: Number(f.days.value) } });
+      toast(t('{name} is a GameShelf Supporter for {days} more days.', { name: f.username.value, days: f.days.value }));
+      f.username.value = '';
+      await show();
+    } catch (err) {
+      toast(errorText(err), { error: true });
+    }
+  });
+
+  body.addEventListener('click', async (e) => {
+    const button = e.target.closest('[data-revoke]');
+    if (!button || !confirm(t('Revoke every unused code in this batch? Codes already redeemed keep working.'))) return;
+    button.disabled = true;
+    try {
+      const done = await api(`/admin/plans/codes/${encodeURIComponent(button.dataset.revoke)}/revoke`, { method: 'POST' });
+      toast(t('{n} codes revoked', { n: done.revoked }));
+      await show();
+    } catch (err) {
+      toast(errorText(err), { error: true });
+      button.disabled = false;
+    }
+  });
+  await show();
 }
 
 // ---- Windows installer -------------------------------------------------------------

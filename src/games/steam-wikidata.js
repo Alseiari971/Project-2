@@ -1,0 +1,618 @@
+// GameShelf's game data: Steam's public store API and Wikidata (CC0), no keys needed.
+//
+// - Steam (store.steampowered.com): search (storesearch), browse lists (the
+//   store's search results: names, release dates, review scores and tags in
+//   one request), and each game's page (appdetails: description, developers,
+//   publishers, genres, requirements, screenshots, languages, artwork).
+// - Wikidata (query.wikidata.org, CC0 public domain): matched by Steam app ID
+//   (P1733), or by name for games that aren't on Steam. It adds the official
+//   Arabic title and description, the game engine (P408, mapped to the engines
+//   GameShelf can patch), the Epic (P6278) and GOG (P2725) store IDs and the
+//   official website (P856).
+//
+// Everything fetched is kept in SQLite: each game in `games` (whose id is the
+// GameShelf id players' lists, Arabic requests and packs point at) and every
+// response in `metadata_cache`, fresh for METADATA_TTL_DAYS (7 by default).
+// Requests to each site go one at a time with a minimum gap, and a refusal
+// (429, 403, 5xx) backs off exponentially; while backing off, cached data is
+// served even when old. If Wikidata is down, Steam's data stands alone.
+const { buildBuyLinks } = require('./stores');
+const { GENRES, findGenre } = require('./genres');
+const { normalizeTitle } = require('../text');
+
+const STORE = 'https://store.steampowered.com';
+const SPARQL = 'https://query.wikidata.org/sparql';
+const USER_AGENT = 'GameShelf/1.0 (https://gameshelf.ae)';
+const DAY = 24 * 60 * 60 * 1000;
+const LIST_TTL_MS = 6 * 60 * 60 * 1000;
+const SEARCH_TTL_MS = DAY;
+
+// Steam's store tags (store.steampowered.com/tag/browse) for the site's genres
+// and for the words the seasonal sections and moods use (src/seasons.js).
+const TAGS = {
+  action: 19, adventure: 21, 'role-playing': 122, rpg: 122, shooter: 1774, indie: 492, strategy: 9, platform: 1625, platformer: 1625,
+  simulator: 599, simulation: 599, puzzle: 1664, racing: 699, sport: 701, sports: 701, fighting: 1743, casual: 597, family: 5350, kids: 5350,
+  horror: 1667, thriller: 4064, 'co-operative': 1685, multiplayer: 3859, 'split screen': 10816, sandbox: 3810, 'open world': 1695,
+  fantasy: 1684, historical: 3987, party: 7178, card: 1666, quiz: 10437, music: 1621, 'visual novel': 3799, drama: 5984, mystery: 5716,
+  'science fiction': 3942, 'battle royale': 176981, moba: 1718, 'real time strategy': 1676, 'turn-based strategy': 1741, tactical: 1708,
+  'point-and-click': 1698, arcade: 1773, 'hack and slash': 1646, warfare: 1678, war: 1678, erotic: 12095, pinball: 6621,
+};
+const GENRE_TAGS = Object.fromEntries(GENRES.map((g) => [g.name, g.steamTag || null]));
+const SORTS = { popular: '_ASC', top: 'Reviews_DESC', new: 'Released_DESC', year: 'Reviews_DESC', upcoming: '_ASC' };
+
+// Wikidata's engine items, by name, to the engines GameShelf makes Arabic for.
+const ENGINE_MAP = [
+  [/^unreal engine/i, 'unreal'],
+  [/^unity\b/i, 'unity'],
+  [/^re engine/i, 'reengine'],
+  [/creation engine|gamebryo/i, 'bethesda'],
+  [/ren'?py/i, 'renpy'],
+  [/^godot/i, 'godot'],
+  [/^mt framework/i, 'mtframework'],
+  [/rockstar advanced game engine|^rage\b/i, 'rage'],
+];
+const mapEngine = (label) => (label ? ENGINE_MAP.find(([re]) => re.test(label))?.[1] || null : null);
+
+const asset = (appId, file) => `https://cdn.cloudflare.steamstatic.com/steam/apps/${appId}/${file}`;
+// Steam's newer artwork lives under a per-upload folder; the small capsule's
+// folder holds the big capsule too. The old fixed address is the fallback.
+const bigCapsule = (url) => (url ? String(url).replace(/capsule_(231x87|184x69|sm_120|120x45)/, 'capsule_616x353').replace(/\?.*$/, '') : null);
+const slugify = (name) => String(name).normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase()
+  .replace(/['’®™©]/g, '').replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'game';
+const htmlText = (s) => String(s || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&quot;/g, '"').replace(/&amp;/g, '&')
+  .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#39;/g, "'").replace(/&nbsp;/g, ' ').replace(/[ \t]+/g, ' ').trim();
+const sparqlString = (s) => `"${String(s).replace(/[\\"\n\r]/g, ' ').slice(0, 120)}"`;
+const isArabicText = (s) => /[؀-ۿ]/.test(s);
+// Store search also finds soundtracks and art books; those aren't games.
+const NOT_A_GAME = /\b(soundtrack|ost|artbook|art book|wallpapers?)\b/i;
+
+function isoDate(text) {
+  const t = Date.parse(String(text || '').trim());
+  if (!Number.isFinite(t)) return null;
+  return new Date(t - new Date(t).getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+}
+
+class MetadataError extends Error {}
+
+/**
+ * A polite client for one site: one request at a time, at least `gapMs`
+ * apart, and exponential backoff (up to 30 minutes) after a refusal.
+ */
+function createPoliteClient({ fetchImpl, gapMs, name, now, sleep }) {
+  let chain = Promise.resolve();
+  let last = 0;
+  let strikes = 0;
+  let coolUntil = 0;
+  return {
+    get cooling() {
+      return now() < coolUntil;
+    },
+    request(url, init = {}) {
+      const run = async () => {
+        if (now() < coolUntil) throw new MetadataError(`${name} asked us to slow down; using saved data for now.`);
+        const wait = last + gapMs - now();
+        if (wait > 0) await sleep(wait);
+        last = now();
+        let res;
+        try {
+          res = await fetchImpl(url, { ...init, headers: { 'User-Agent': USER_AGENT, Accept: 'application/json', ...(init.headers || {}) }, signal: AbortSignal.timeout(15000) });
+        } catch (err) {
+          throw new MetadataError(`${name} didn't answer: ${err.message}`);
+        }
+        if (res.status === 429 || res.status === 403 || res.status >= 500) {
+          strikes += 1;
+          coolUntil = now() + Math.min(30 * 60 * 1000, 30 * 1000 * 2 ** (strikes - 1));
+          throw new MetadataError(`${name} refused (${res.status}); backing off.`);
+        }
+        if (!res.ok) throw new MetadataError(`${name} answered ${res.status}.`);
+        strikes = 0;
+        return res.json();
+      };
+      const result = chain.then(run, run);
+      chain = result.catch(() => {});
+      return result;
+    },
+  };
+}
+
+function createSteamWikidataProvider({
+  db, fetchImpl = fetch, env = process.env, now = () => Date.now(),
+  sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
+  // Steam's appdetails allows about 200 requests in 5 minutes; search and lists are lighter.
+  steamGapMs = 1600, steamListGapMs = 350, wikidataGapMs = 1000,
+} = {}) {
+  if (!db) throw new Error('The Steam + Wikidata provider needs the database for its cache.');
+  const TTL_MS = (Number(env.METADATA_TTL_DAYS) > 0 ? Number(env.METADATA_TTL_DAYS) : 7) * DAY;
+  const steamHttp = createPoliteClient({ fetchImpl, gapMs: steamGapMs, name: 'Steam', now, sleep });
+  const steamListHttp = createPoliteClient({ fetchImpl, gapMs: steamListGapMs, name: 'Steam', now, sleep });
+  const wikiHttp = createPoliteClient({ fetchImpl, gapMs: wikidataGapMs, name: 'Wikidata', now, sleep });
+
+  const q = {
+    cacheGet: db.prepare('SELECT body, fetched_at FROM metadata_cache WHERE key = ?'),
+    cachePut: db.prepare('INSERT INTO metadata_cache (key, body, fetched_at) VALUES (?, ?, ?) ON CONFLICT (key) DO UPDATE SET body = excluded.body, fetched_at = excluded.fetched_at'),
+    byId: db.prepare('SELECT * FROM games WHERE id = ?'),
+    byApp: db.prepare('SELECT * FROM games WHERE steam_appid = ?'),
+    byQid: db.prepare('SELECT * FROM games WHERE wikidata_qid = ?'),
+    insert: db.prepare(`INSERT INTO games (id, name, steam_appid, wikidata_qid, image, released, review_percent, review_count)
+      VALUES (@id, @name, @appid, @qid, @image, @released, @percent, @count)`),
+    touchList: db.prepare(`UPDATE games SET name = COALESCE(NULLIF(@name, ''), name), image = COALESCE(@image, image),
+      released = COALESCE(@released, released), review_percent = COALESCE(@percent, review_percent), review_count = COALESCE(@count, review_count) WHERE id = @id`),
+    details: db.prepare(`UPDATE games SET name = @name, description = @description, released = @released, image = COALESCE(@image, image),
+      header_image = @header, backdrop = @backdrop, genres = @genres, developers = @developers, publishers = @publishers,
+      platforms = @platforms, website = COALESCE(website, @website), details_at = @at WHERE id = @id`),
+    wiki: db.prepare(`UPDATE games SET wikidata_qid = COALESCE(@qid, wikidata_qid), title_ar = @titleAr, description_ar = @descriptionAr,
+      detected_engine = @engine, engine_label = @engineLabel, epic_slug = @epic, gog_slug = @gog,
+      website = COALESCE(@website, website), poster = COALESCE(poster, @poster), wikidata_at = @at WHERE id = @id`),
+  };
+
+  // ---- Cache ----
+
+  /** `fetcher()`'s result, kept for `ttl`; an old copy is used when fetching fails. */
+  async function cached(key, ttl, fetcher) {
+    const row = q.cacheGet.get(key);
+    if (row && now() - row.fetched_at < ttl) return JSON.parse(row.body);
+    try {
+      const fresh = await fetcher();
+      q.cachePut.run(key, JSON.stringify(fresh), now());
+      return fresh;
+    } catch (err) {
+      if (row) return JSON.parse(row.body);
+      throw err;
+    }
+  }
+
+  // ---- The games table: GameShelf ids for Steam apps and Wikidata items ----
+
+  function uniqueId(name, suffix) {
+    const base = slugify(name);
+    if (!q.byId.get(base)) return base;
+    const withSuffix = `${base}-${suffix}`.slice(0, 100);
+    return q.byId.get(withSuffix) ? `${withSuffix}-${Date.now().toString(36)}` : withSuffix;
+  }
+
+  /** The row for a Steam app, made on first sight. `seen` updates what a list showed. */
+  function rowForApp(appid, seen = {}) {
+    const id = Number(appid);
+    let row = q.byApp.get(id);
+    const listed = { image: seen.image || null, released: seen.released || null, percent: seen.percent ?? null, count: seen.count ?? null, name: seen.name || '' };
+    if (!row) {
+      if (!seen.name) return null;
+      q.insert.run({ id: uniqueId(seen.name, id), name: seen.name, appid: id, qid: null, ...listed });
+      return q.byApp.get(id);
+    }
+    if (seen.name || seen.image || seen.released || seen.percent != null) {
+      q.touchList.run({ id: row.id, ...listed });
+      row = q.byId.get(row.id);
+    }
+    return row;
+  }
+
+  const json = (text, fallback = []) => {
+    try {
+      return text ? JSON.parse(text) : fallback;
+    } catch {
+      return fallback;
+    }
+  };
+
+  /** A game row as the summary every page uses. */
+  function summary(row) {
+    const appid = row.steam_appid;
+    const legacy = appid ? asset(appid, 'capsule_616x353.jpg') : null;
+    const image = row.image || row.header_image || legacy || row.poster || null;
+    return {
+      id: row.id,
+      name: row.name,
+      nameAr: row.title_ar || null,
+      released: row.released || null,
+      image,
+      // When Steam's newer artwork address is missing, the page falls back to this.
+      fallbackImage: row.header_image && row.header_image !== image ? row.header_image : (legacy !== image ? legacy : null),
+      backdrop: row.backdrop || (appid ? asset(appid, 'library_hero.jpg') : null),
+      logo: appid ? asset(appid, 'logo.png') : null,
+      poster: row.poster || (appid ? asset(appid, 'library_600x900_2x.jpg') : null),
+      artHasTitle: Boolean(appid),
+      steamAppId: appid || null,
+      wikidataId: row.wikidata_qid || null,
+      engine: row.detected_engine || null,
+      genres: json(row.genres),
+      platforms: json(row.platforms, appid ? ['PC'] : []),
+      description: row.description || null,
+      popularity: row.review_count || 0,
+    };
+  }
+
+  // ---- Steam ----
+
+  /** Steam's search results page (names, dates, review scores, tags), as rows. */
+  function parseSearchHtml(html) {
+    const out = [];
+    for (const block of String(html || '').split(/<a\s+href="https:\/\/store\.steampowered\.com\/(?:app|bundle|sub)\//).slice(1)) {
+      const appid = Number(/data-ds-appid="(\d+)"/.exec(block)?.[1]);
+      const name = htmlText(/<span class="title">([\s\S]*?)<\/span>/.exec(block)?.[1]);
+      if (!appid || !name) continue;
+      const review = /data-tooltip-html="[^"]*?(\d+)% of the ([\d,]+) user reviews/.exec(block);
+      out.push({
+        appid,
+        name,
+        image: bigCapsule(/<div class="search_capsule"><img src="([^"]+)"/.exec(block)?.[1]),
+        released: isoDate(htmlText(/<div class="search_released[^"]*">([\s\S]*?)<\/div>/.exec(block)?.[1])),
+        percent: review ? Number(review[1]) : null,
+        count: review ? Number(review[2].replace(/,/g, '')) : null,
+        tags: json(/data-ds-tagids="(\[[\d,]*\])"/.exec(block)?.[1]),
+      });
+    }
+    return out;
+  }
+
+  async function steamList({ tags = [], untags = [], sort = 'popular', start = 0, count = 30, term = '' }) {
+    const params = new URLSearchParams({ start: String(start), count: String(Math.min(count, 50)), category1: '998', infinite: '1', cc: 'US', l: 'english', sort_by: SORTS[sort] || '_ASC' });
+    if (term) params.set('term', term);
+    if (tags.length) params.set('tags', tags.join(','));
+    if (untags.length) params.set('untags', untags.join(','));
+    if (sort === 'upcoming') params.set('filter', 'popularcomingsoon');
+    const key = `steam:list:${params}`;
+    const body = await cached(key, LIST_TTL_MS, () => steamListHttp.request(`${STORE}/search/results/?${params}`));
+    // Steam may send more than asked for.
+    return { rows: parseSearchHtml(body.results_html).slice(0, Math.min(count, 50)), total: Number(body.total_count) || 0 };
+  }
+
+  async function storeSearch(term) {
+    const params = new URLSearchParams({ term, l: 'english', cc: 'US' });
+    const body = await cached(`steam:search:${term.toLowerCase()}`, SEARCH_TTL_MS, () => steamListHttp.request(`${STORE}/api/storesearch/?${params}`));
+    return (body.items || []).filter((i) => i.type === 'app' && i.id && i.name && !NOT_A_GAME.test(i.name)).map((i) => ({ appid: Number(i.id), name: i.name, image: bigCapsule(i.tiny_image) }));
+  }
+
+  async function appDetails(appid) {
+    const body = await cached(`steam:app:${appid}`, TTL_MS, () => steamHttp.request(`${STORE}/api/appdetails?appids=${Number(appid)}&l=english&cc=US`));
+    const entry = body?.[String(appid)];
+    return entry?.success ? entry.data : null;
+  }
+
+  // ---- Wikidata ----
+
+  const WIKI_FIELDS = `?item ?steam ?label ?ar ?arDesc ?engineLabel ?epic ?gog ?site ?image ?date`;
+  const WIKI_OPTIONALS = `
+    OPTIONAL { ?item rdfs:label ?label FILTER(LANG(?label) = "en") }
+    OPTIONAL { ?item rdfs:label ?ar FILTER(LANG(?ar) = "ar") }
+    OPTIONAL { ?item schema:description ?arDesc FILTER(LANG(?arDesc) = "ar") }
+    OPTIONAL { ?item wdt:P408 ?engine . ?engine rdfs:label ?engineLabel FILTER(LANG(?engineLabel) = "en") }
+    OPTIONAL { ?item wdt:P6278 ?epic }
+    OPTIONAL { ?item wdt:P2725 ?gog }
+    OPTIONAL { ?item wdt:P856 ?site }
+    OPTIONAL { ?item wdt:P18 ?image }
+    OPTIONAL { ?item wdt:P577 ?date }`;
+
+  async function sparql(query) {
+    const body = await wikiHttp.request(`${SPARQL}?${new URLSearchParams({ query, format: 'json' })}`, { headers: { Accept: 'application/sparql-results+json' } });
+    return (body?.results?.bindings || []).map((b) => Object.fromEntries(Object.entries(b).map(([k, v]) => [k, v.value])));
+  }
+
+  /** Wikidata's rows grouped per item, with the engine mapped. */
+  function wikiItems(rows) {
+    const items = new Map();
+    for (const r of rows) {
+      const qid = /Q\d+$/.exec(r.item || '')?.[0];
+      if (!qid) continue;
+      const item = items.get(qid) || { qid, steam: null, label: null, titleAr: null, descriptionAr: null, engineLabel: null, engine: null, epic: null, gog: null, website: null, image: null, released: null };
+      item.steam ||= r.steam ? Number(r.steam) : null;
+      item.label ||= r.label || null;
+      item.titleAr ||= r.ar || null;
+      item.descriptionAr ||= r.arDesc || null;
+      // Several engines: the first one GameShelf can patch wins.
+      if (r.engineLabel && (!item.engine || !mapEngine(item.engineLabel))) {
+        if (mapEngine(r.engineLabel) || !item.engineLabel) {
+          item.engineLabel = r.engineLabel;
+          item.engine = mapEngine(r.engineLabel);
+        }
+      }
+      item.epic ||= r.epic || null;
+      item.gog ||= r.gog || null;
+      item.website ||= /^https?:\/\//.test(r.site || '') ? r.site : null;
+      item.image ||= r.image ? `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(decodeURIComponent(r.image.split('/').pop()))}?width=600` : null;
+      item.released ||= r.date ? r.date.slice(0, 10) : null;
+      items.set(qid, item);
+    }
+    return [...items.values()];
+  }
+
+  /** Wikidata for these Steam apps (one query for all that aren't cached): appid -> item or null. */
+  async function wikidataForApps(appids) {
+    const out = new Map();
+    const missing = [];
+    for (const appid of appids) {
+      const row = q.cacheGet.get(`wd:steam:${appid}`);
+      if (row && now() - row.fetched_at < TTL_MS) out.set(appid, JSON.parse(row.body));
+      else missing.push(appid);
+    }
+    for (let i = 0; i < missing.length; i += 40) {
+      const chunk = missing.slice(i, i + 40);
+      try {
+        const items = wikiItems(await sparql(`SELECT ${WIKI_FIELDS} WHERE { VALUES ?steam { ${chunk.map((a) => sparqlString(a)).join(' ')} } ?item wdt:P1733 ?steam . ${WIKI_OPTIONALS} }`));
+        for (const appid of chunk) {
+          const item = items.find((it) => it.steam === appid) || null;
+          q.cachePut.run(`wd:steam:${appid}`, JSON.stringify(item), now());
+          out.set(appid, item);
+        }
+      } catch {
+        // Wikidata is optional: Steam's data stands alone (old cached answers are still used).
+        for (const appid of chunk) {
+          const row = q.cacheGet.get(`wd:steam:${appid}`);
+          out.set(appid, row ? JSON.parse(row.body) : null);
+        }
+      }
+    }
+    return out;
+  }
+
+  /** Video games on Wikidata whose English or Arabic name matches `term` (for games not on Steam). */
+  async function wikidataSearch(term) {
+    const lang = isArabicText(term) ? 'ar' : 'en';
+    return cached(`wd:search:${lang}:${term.toLowerCase()}`, SEARCH_TTL_MS, async () => wikiItems(await sparql(`SELECT ${WIKI_FIELDS} WHERE {
+      SERVICE wikibase:mwapi { bd:serviceParam wikibase:api "EntitySearch"; wikibase:endpoint "www.wikidata.org";
+        mwapi:search ${sparqlString(term)}; mwapi:language "${lang}". ?item wikibase:apiOutputItem mwapi:item. }
+      ?item wdt:P31/wdt:P279* wd:Q7889 .
+      OPTIONAL { ?item wdt:P1733 ?steam }
+      ${WIKI_OPTIONALS}
+    } LIMIT 40`)));
+  }
+
+  function applyWiki(row, item) {
+    if (!item) return row;
+    q.wiki.run({
+      id: row.id, qid: item.qid, titleAr: item.titleAr, descriptionAr: item.descriptionAr, engine: item.engine, engineLabel: item.engineLabel,
+      epic: item.epic, gog: item.gog, website: item.website, poster: row.steam_appid ? null : item.image, at: now(),
+    });
+    return q.byId.get(row.id);
+  }
+
+  /** A row for a Wikidata-only game (Epic or GOG exclusive, console, older games). */
+  function rowForWikiItem(item) {
+    // A Steam game keeps Steam's name; Wikidata only adds to it.
+    if (item.steam) {
+      const row = q.byApp.get(item.steam) || (item.label ? rowForApp(item.steam, { name: item.label }) : null);
+      return row ? applyWiki(row, item) : null;
+    }
+    let row = q.byQid.get(item.qid);
+    if (!row) {
+      const name = item.label || item.titleAr;
+      if (!name) return null;
+      q.insert.run({ id: uniqueId(name, item.qid.toLowerCase()), name, appid: null, qid: item.qid, image: item.image, released: item.released, percent: null, count: null });
+      row = q.byQid.get(item.qid);
+    }
+    return applyWiki(row, item);
+  }
+
+  /** Fills the games table from Steam's page for the app (and Wikidata), within the cache's TTL. */
+  async function refresh(row, { wiki = true } = {}) {
+    let current = row;
+    if (current.steam_appid && (!current.details_at || now() - current.details_at > TTL_MS)) {
+      try {
+        const d = await appDetails(current.steam_appid);
+        if (d) {
+          const platforms = ['windows', 'mac', 'linux'].filter((p) => d.platforms?.[p]).map((p) => ({ windows: 'PC', mac: 'macOS', linux: 'Linux' })[p]);
+          const steamGenres = (d.genres || []).map((g) => g.description);
+          const genres = GENRES.map((g) => g.name).filter((name) => steamGenres.some((s) => s.toLowerCase() === name.toLowerCase() || (name === 'Simulation' && /simulat/i.test(s)) || (name === 'Sports' && /sport/i.test(s))));
+          q.details.run({
+            id: current.id,
+            name: d.name || current.name,
+            description: htmlText(d.short_description) || null,
+            released: d.release_date?.coming_soon ? null : isoDate(d.release_date?.date) || current.released,
+            image: null,
+            header: d.header_image ? String(d.header_image).replace(/\?.*$/, '') : null,
+            backdrop: d.screenshots?.[0]?.path_full ? String(d.screenshots[0].path_full).replace(/\?.*$/, '') : null,
+            genres: JSON.stringify(genres.length ? genres : steamGenres.slice(0, 3)),
+            developers: JSON.stringify(d.developers || []),
+            publishers: JSON.stringify(d.publishers || []),
+            platforms: JSON.stringify(platforms.length ? platforms : ['PC']),
+            website: /^https?:\/\//.test(d.website || '') ? d.website : null,
+            at: now(),
+          });
+          current = q.byId.get(current.id);
+        }
+      } catch {
+        // Steam unreachable or backing off: what's saved is shown.
+      }
+    }
+    if (wiki && current.steam_appid && (!current.wikidata_at || now() - current.wikidata_at > TTL_MS)) {
+      const item = (await wikidataForApps([current.steam_appid])).get(current.steam_appid);
+      current = item ? applyWiki(current, item) : current;
+    }
+    return current;
+  }
+
+  /** Adds what Wikidata knows to many rows at once (one query), skipping fresh ones. */
+  async function enrichWiki(rows) {
+    const stale = rows.filter((r) => r.steam_appid && (!r.wikidata_at || now() - r.wikidata_at > TTL_MS));
+    if (!stale.length) return rows;
+    const found = await wikidataForApps(stale.map((r) => r.steam_appid));
+    return rows.map((r) => (found.get(r.steam_appid) ? applyWiki(r, found.get(r.steam_appid)) : r));
+  }
+
+  /** The row for an id: saved, or (for ids from before, such as old IGDB slugs) found by name once and kept. */
+  async function resolve(id) {
+    const saved = q.byId.get(id);
+    if (saved) return saved;
+    if (!/^[a-z0-9][a-z0-9-]{0,99}$/.test(id)) return null;
+    // "red-dead-redemption-2" is the whole name; "hollow-knight-367520" may carry a made-up suffix.
+    const tries = [...new Set([id, id.replace(/-(\d{5,}|q\d+)$/, '')])].map((x) => x.replace(/-/g, ' '));
+    let words = tries[0];
+    let target = normalizeTitle(words);
+    let match = null;
+    for (const attempt of tries) {
+      try {
+        match = (await storeSearch(attempt)).find((s) => normalizeTitle(s.name) === normalizeTitle(attempt)) || null;
+      } catch {}
+      if (match) {
+        words = attempt;
+        target = normalizeTitle(attempt);
+        break;
+      }
+    }
+    if (match) {
+      const existing = q.byApp.get(match.appid);
+      // Another id already points at this app: keep both ids working.
+      if (existing) return existing;
+      q.insert.run({ id, name: match.name, appid: match.appid, qid: null, image: match.image, released: null, percent: null, count: null });
+      return q.byId.get(id);
+    }
+    try {
+      const item = (await wikidataSearch(words)).find((it) => normalizeTitle(it.label || '') === target);
+      if (item && !item.steam && !q.byQid.get(item.qid)) {
+        q.insert.run({ id, name: item.label, appid: null, qid: item.qid, image: item.image, released: item.released, percent: null, count: null });
+        return applyWiki(q.byId.get(id), item);
+      }
+      if (item) return rowForWikiItem(item);
+    } catch {}
+    return null;
+  }
+
+  const tagsFor = (words = []) => words.map((w) => TAGS[String(w).toLowerCase()]).filter(Boolean);
+
+  // Wikidata for lists is added in the background: lists show at once, and
+  // Arabic titles and engines appear the next time (or on the game's page).
+  let backgroundWiki = Promise.resolve();
+  const enrichLater = (rows) => {
+    backgroundWiki = backgroundWiki.then(() => enrichWiki(rows)).catch(() => {});
+    return backgroundWiki;
+  };
+
+  async function listed(opts, pageSize, { wait = false } = {}) {
+    const { rows } = await steamList({ ...opts, count: pageSize });
+    const games = rows.map((r) => rowForApp(r.appid, r)).filter(Boolean);
+    if (wait) return enrichWiki(games);
+    enrichLater(games);
+    return games;
+  }
+
+  function parseLanguages(html) {
+    // "English<strong>*</strong>, French<strong>*</strong>, Arabic<br><strong>*</strong>languages with full audio support"
+    const text = String(html || '').split(/<br\s*\/?>/i)[0];
+    return text.split(',').map((part) => {
+      const name = htmlText(part.replace(/<strong>\*<\/strong>/g, '')).replace(/\*$/, '').trim();
+      return name ? { name, interface: true, subtitles: true, audio: /<strong>\*<\/strong>|\*/.test(part) } : null;
+    }).filter(Boolean);
+  }
+
+  return {
+    name: 'steam',
+
+    async search({ query: text = '', genre = '', sort = 'popular', page = 1, pageSize = 24 }) {
+      const term = String(text).trim();
+      if (term) {
+        const found = [];
+        try {
+          // Arabic names are found through Wikidata; Steam's search is English.
+          if (!isArabicText(term)) for (const s of await storeSearch(term)) found.push(rowForApp(s.appid, s));
+        } catch {}
+        if (page === 1 && found.length < 6) {
+          try {
+            for (const item of await wikidataSearch(term)) {
+              const row = rowForWikiItem(item);
+              if (row && !found.some((f) => f.id === row.id)) found.push(row);
+            }
+          } catch {}
+        }
+        const target = normalizeTitle(term);
+        const rows = (await enrichWiki(found.filter(Boolean)))
+          .sort((a, b) => (normalizeTitle(b.name) === target) - (normalizeTitle(a.name) === target));
+        return { count: rows.length, hasMore: false, results: page === 1 ? rows.map(summary) : [] };
+      }
+      const tag = genre ? GENRE_TAGS[findGenre(genre)?.name] : null;
+      if (genre && !tag) return { count: 0, hasMore: false, results: [] };
+      const rows = await listed({ tags: tag ? [tag] : [], untags: [TAGS.erotic], sort, start: (page - 1) * pageSize }, pageSize);
+      return { count: rows.length, hasMore: rows.length === pageSize, results: rows.map(summary) };
+    },
+
+    /** Games for a seasonal section or mood (src/seasons.js): each group's first known word is a Steam tag. */
+    async collection({ all = [], not = {}, sort = 'popular', pageSize = 24 }) {
+      const tags = [];
+      for (const group of all) {
+        const tag = tagsFor([...(group.themes || []), ...(group.genres || []), ...(group.modes || [])])[0];
+        if (!tag) return [];
+        tags.push(tag);
+      }
+      const untags = [...new Set([TAGS.erotic, ...tagsFor([...(not.themes || []), ...(not.genres || [])])])];
+      const rows = await listed({ tags, untags, sort }, pageSize);
+      return rows.map(summary);
+    },
+
+    /** Fills in Steam's real artwork and dates for a few games at a time (the rest come from the cache later). */
+    async addSteamArt(games, { budgetMs = 1500, max = 6 } = {}) {
+      const started = now();
+      let fetched = 0;
+      for (const g of games) {
+        if (!g?.id || fetched >= max || now() - started > budgetMs) break;
+        const row = q.byId.get(g.id);
+        if (!row?.steam_appid || row.details_at) continue;
+        fetched += 1;
+        const fresh = await refresh(row, { wiki: false });
+        Object.assign(g, summary(fresh));
+      }
+      return games;
+    },
+
+    // Steam app ids map straight to rows: exact, and no requests.
+    async matchSteamGames(steamGames) {
+      return steamGames.map((s) => {
+        const row = rowForApp(s.appid, { name: s.name });
+        return row ? summary(row) : null;
+      });
+    },
+
+    async getGame(id) {
+      let row = await resolve(String(id));
+      if (!row) return null;
+      row = await refresh(row);
+      const base = summary(row);
+      const details = row.steam_appid ? await appDetails(row.steam_appid).catch(() => null) : null;
+      const stores = [
+        { key: 'steam', url: row.steam_appid ? `${STORE}/app/${row.steam_appid}/` : undefined, when: row.steam_appid },
+        { key: 'epic', url: row.epic_slug ? `https://store.epicgames.com/p/${encodeURIComponent(row.epic_slug)}` : undefined, when: row.epic_slug },
+        { key: 'gog', url: row.gog_slug ? `https://www.gog.com/en/${row.gog_slug.replace(/[^\w/-]/g, '')}` : undefined, when: row.gog_slug },
+      ].filter((s) => s.when).map(({ key, url }) => ({ key, url }));
+
+      let similar = [];
+      try {
+        const genre = base.genres[0];
+        if (genre && GENRE_TAGS[genre]) similar = (await listed({ tags: [GENRE_TAGS[genre]], untags: [TAGS.erotic] }, 14)).filter((r) => r.id !== row.id).slice(0, 12).map(summary);
+      } catch {}
+
+      const media = (details?.screenshots || []).slice(0, 14).map((s) => ({ type: 'image', thumb: s.path_thumbnail, full: s.path_full }));
+      const links = [
+        row.website ? { label: 'Official website', url: row.website } : null,
+        row.wikidata_qid ? { label: 'Wikidata', url: `https://www.wikidata.org/wiki/${row.wikidata_qid}` } : null,
+      ].filter(Boolean);
+      return {
+        ...base,
+        description: base.description || (details ? htmlText(details.short_description) : null) || null,
+        descriptionAr: row.description_ar || null,
+        engineLabel: row.engine_label || null,
+        developers: json(row.developers),
+        publishers: json(row.publishers),
+        website: row.website || null,
+        buy: buildBuyLinks(row.name, stores),
+        similar,
+        media,
+        scores: {
+          critics: details?.metacritic?.score ? { score: details.metacritic.score, count: null } : null,
+          players: row.review_percent != null && row.review_count ? { score: row.review_percent, count: row.review_count } : null,
+        },
+        features: (details?.categories || []).map((c) => c.description).slice(0, 12),
+        languages: parseLanguages(details?.supported_languages),
+        links,
+        editions: [],
+        addons: [],
+        epicSlug: row.epic_slug || null,
+        gogSlug: row.gog_slug || null,
+      };
+    },
+
+    // For tests and the backfill script.
+    resolve,
+    refresh,
+    settled: () => backgroundWiki,
+  };
+}
+
+module.exports = { createSteamWikidataProvider, mapEngine, slugify, TAGS, MetadataError, USER_AGENT };

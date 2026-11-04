@@ -295,7 +295,7 @@ test('support: tickets with a thread, the admin queue with who sent them, replie
 
   const queue = (await admin('/api/admin/support?status=open&category=arabic')).body;
   assert.deepEqual(queue.tickets.map((t) => t.id), [id]);
-  assert.deepEqual(queue.tickets[0].from, { username: 'layla', displayName: 'layla', nationality: 'EG', steamLinked: false, guard: null, emailVerified: false });
+  assert.deepEqual(queue.tickets[0].from, { username: 'layla', displayName: 'layla', nationality: 'EG', steamLinked: false, guard: null, emailVerified: false, supporter: false });
   assert.equal(queue.tickets[0].userTickets, 2);
   assert.equal(queue.counts.open, 2);
   const opened = (await admin(`/api/admin/support/${id}`)).body;

@@ -20,6 +20,10 @@ const { createMailer } = require('./mailer');
 const { createSteamOpenId } = require('./steam-openid');
 const { createFriends } = require('./friends');
 const { createSupport } = require('./support');
+const { createPlans } = require('./plans');
+const { createBilling } = require('./billing');
+const { mountPlanRoutes } = require('./plans-api');
+const { withAffiliates } = require('./affiliate');
 const { normalizeCountry } = require('./countries');
 const { ROLES, adminNames, bootstrapAdmins } = require('./roles');
 const { readBody, RegistryError, MAX_PACK_BYTES } = require('./pack-registry');
@@ -115,8 +119,10 @@ function createApi({
   mailer = createMailer(), fetchImpl = fetch, now = () => Date.now(),
   guard = createGuard({ db, mailer, now }),
   steamOpenId = createSteamOpenId({ db, fetchImpl, steam, now }),
-  friends = createFriends({ db, now }),
-  support = createSupport({ db, games }),
+  plans = createPlans({ db, now }),
+  billing = createBilling({ db, plans, now }),
+  friends = createFriends({ db, now, plans }),
+  support = createSupport({ db, games, plans }),
 }) {
   bootstrapAdmins(db);
   const api = express.Router();
@@ -214,7 +220,7 @@ function createApi({
         id: `genre-${genre.toLowerCase()}`, title: genre, genre, sort: 'popular',
       })),
     ];
-    // Seasonal sections need a game database that can filter by theme (IGDB);
+    // Seasonal sections need a game database that can filter by theme (Steam's tags);
     // a seasonal section that fails is left out rather than failing the page.
     const collect = (query) => (query && games.collection
       ? games.collection(query).catch((err) => {
@@ -285,7 +291,7 @@ function createApi({
       if (game) used.add(game.id);
       return { name, image: game ? game.backdrop || game.image : null };
     });
-    // Moods need a game database that can filter by theme and mode (IGDB).
+    // Moods need a game database that can filter by theme and mode (Steam's tags).
     const moods = games.collection ? MOODS.map(({ id, label }) => ({ id, label })) : [];
     res.json({ source: games.name, season: plan.id, spotlight, sections, rows: visibleRows, genres, moods });
   }));
@@ -358,9 +364,11 @@ function createApi({
     if (!GAME_ID_RE.test(id)) return res.status(404).json({ error: 'Game not found.' });
     const game = await games.getGame(id);
     if (!game) return res.status(404).json({ error: 'Game not found.' });
+    // Store links with GameShelf's affiliate IDs, where set (marked sponsored on the page).
+    game.buy = withAffiliates(game.buy);
 
     // "More like this" is a nice extra; never fail the page over it.
-    // IGDB lists similar games itself; otherwise use popular games in the same genre.
+    // The catalog may list similar games itself; otherwise use popular games in the same genre.
     let similar = game.similar || [];
     const genre = game.genres.map(findGenre).find(Boolean);
     if (!similar.length && genre) {
@@ -414,13 +422,14 @@ function createApi({
   mountAccountRoutes(api, { db, guard, selfUser, accentFor: () => DEFAULT_ACCENT, adminNames, steamOpenId });
   // Steam linking, friends and presence, customer support (src/social-api.js).
   mountSocialRoutes(api, { steamOpenId, friends, support, guard, db });
+  mountPlanRoutes(api, { db, plans, billing });
 
   // The logged-in user, including the settings the profile editor needs.
   api.get('/me', (req, res) => {
     if (!req.user) return res.json({ user: null });
     const user = q.userById.get(req.user.id);
     res.json({
-      user: selfUser(user),
+      user: { ...selfUser(user), supporter: plans.isSupporter(user.id) },
       showcases: JSON.parse(user.showcases),
       options: {
         backgrounds: profile.BACKGROUNDS,
@@ -485,7 +494,7 @@ function createApi({
 
     q.updateProfile.run(update);
     const user = q.userById.get(current.id);
-    res.json({ user: selfUser(user), showcases: JSON.parse(user.showcases) });
+    res.json({ user: { ...selfUser(user), supporter: plans.isSupporter(user.id) }, showcases: JSON.parse(user.showcases) });
   });
 
   // Avatars are resized in the browser and sent as a data URL.
@@ -622,7 +631,7 @@ function createApi({
     const showcases = JSON.parse(user.showcases);
     const stats = profile.statsFor(library);
     res.json({
-      user: publicUser(user),
+      user: { ...publicUser(user), supporter: plans.isSupporter(user.id) },
       background: profile.resolveBackground(user.background, library),
       stats,
       progression: profile.progression(stats, {
@@ -735,7 +744,16 @@ function createApi({
     if (!Array.isArray(lines) || !lines.length || lines.length > 200) return res.status(400).json({ error: 'Send 1 to 200 lines at a time.' });
     try {
       const wanted = lines.map((l) => ({ hash: String(l?.hash || ''), english: l?.english }));
-      res.json(await translations.translate(req.user, String(game), wanted, { context: String(context || '') }));
+      // Lines already in the shared memory are free; new ones count against the player's plan.
+      const allowance = plans.allowance(req.user, String(game));
+      const result = await translations.translate(req.user, String(game), wanted, {
+        context: String(context || ''),
+        dailyLines: allowance.ok ? allowance.dailyLines : 0,
+        maxLines: allowance.maxLines,
+        priority: allowance.priority,
+      });
+      plans.record(req.user.id, String(game), result.used?.lines || 0, result.used?.chars || 0);
+      res.json({ ...result, ...(result.limited && !allowance.ok ? { limit: { code: allowance.code, reason: allowance.reason, plan: allowance.plan } } : {}) });
     } catch (err) {
       if (err instanceof TranslationLimit) return res.status(503).json({ error: err.message });
       if (err instanceof TypeError) return res.status(400).json({ error: clientMessage(err) });
@@ -777,7 +795,10 @@ function createApi({
   });
   const fixLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 60 });
   // The games players most want Arabic for (still without it); `voted` for the signed-in player.
-  api.get('/arabic/leaderboard', communityRoute(async (req) => ({ games: community.leaderboard(req.user ? askerOf(req) : null, req.query.limit) })));
+  api.get('/arabic/leaderboard', communityRoute(async (req) => ({
+    games: community.leaderboard(req.user ? askerOf(req) : null, req.query.limit).map((g) => ({ ...g, ...plans.boostTotal(g.game) })),
+    boosts: req.user ? plans.boostsLeft(req.user.id) : null,
+  })));
   // Taking a vote back (POST /arabic/requests is the vote).
   api.delete('/arabic/requests/:game', requireUser, communityRoute(async (req) => community.unvote(askerOf(req), String(req.params.game))));
   // "Report a translation issue": { game, english, current, suggestion, note }.
@@ -892,7 +913,8 @@ function createApi({
     return { pack };
   }));
 
-  // The pack itself, for signed-in players only.
+  // The pack itself, for signed-in players only. Free for every account, always:
+  // no plan, quota or payment is ever checked here (see src/plans.js).
   api.get('/localization/packs/:id/download', requireUser, (req, res) => {
     const found = packs?.download(req.params.id, req.user.id);
     if (!found) return res.status(404).json({ error: 'That Arabic pack isn\'t in the catalog.' });
@@ -1007,7 +1029,10 @@ function createApi({
   });
 
   api.get('/admin/requests', requireAdmin, (_req, res) => {
-    res.json({ requests: arabicGames ? arabicGames.requests() : [] });
+    // Community boosts first (then requests): the queue admins work through.
+    const list = (arabicGames ? arabicGames.requests() : []).map((r) => ({ ...r, ...plans.boostTotal(r.game) }));
+    list.sort((a, b) => b.boosts - a.boosts || b.requests - a.requests);
+    res.json({ requests: list });
   });
   // An RE Engine game's file list (REE.PAK.Tool's .list, as text): the font names in it
   // are saved for the game, so players' apps can give those fonts the Arabic font.

@@ -19,7 +19,7 @@ test('messages survive being split or joined in transit', () => {
 test('the activity shows the game, its launcher, play time, cover and a link', () => {
   assert.deepStrictEqual(buildActivity({
     name: 'Resident Evil Requiem', launcher: 'Steam', startedAt: 1700000000000,
-    image: 'https://images.igdb.com/cover.jpg', badge: 'https://example.com/gameshelf.png', url: 'https://www.igdb.com/games/resident-evil-requiem',
+    image: 'https://shared.akamai.steamstatic.com/cover.jpg', badge: 'https://example.com/gameshelf.png', url: 'https://gameshelf.ae/#/game/resident-evil-requiem',
     getUrl: 'https://example.com/get',
   }), {
     type: 0,
@@ -28,13 +28,13 @@ test('the activity shows the game, its launcher, play time, cover and a link', (
     timestamps: { start: 1700000000000 },
     instance: false,
     assets: {
-      large_image: 'https://images.igdb.com/cover.jpg',
+      large_image: 'https://shared.akamai.steamstatic.com/cover.jpg',
       large_text: 'Resident Evil Requiem',
       small_image: 'https://example.com/gameshelf.png',
       small_text: 'GameShelf',
     },
     buttons: [
-      { label: 'View game', url: 'https://www.igdb.com/games/resident-evil-requiem' },
+      { label: 'View game', url: 'https://gameshelf.ae/#/game/resident-evil-requiem' },
       { label: 'Get GameShelf', url: 'https://example.com/get' },
     ],
     status_display_type: 2,

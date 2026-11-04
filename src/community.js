@@ -28,7 +28,8 @@ function createCommunity({ db, translations, arabicGames = null, submissions = n
       WHERE NOT EXISTS (SELECT 1 FROM arabic_sets s WHERE s.game = r.game)
         AND NOT EXISTS (SELECT 1 FROM localization_packs p WHERE p.published = 1
           AND (r.game = 'steam:' || p.steam_app_id OR r.game = 'game:' || p.game_id))
-      GROUP BY r.game ORDER BY votes DESC, last DESC LIMIT ?`),
+      -- Ties go to the game asked for first (fair, and the same order every time).
+      GROUP BY r.game ORDER BY votes DESC, first ASC, MIN(r.rowid) ASC LIMIT ?`),
     voted: db.prepare('SELECT 1 FROM arabic_requests WHERE game = ? AND asker = ?'),
     unvote: db.prepare('DELETE FROM arabic_requests WHERE game = ? AND asker = ?'),
     pendingFix: db.prepare("SELECT id FROM translation_fixes WHERE game = ? AND line_hash = ? AND reported_by = ? AND status = 'pending'"),

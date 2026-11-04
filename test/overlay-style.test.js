@@ -96,6 +96,7 @@ test('floating text has no box: a heavy outline drawn under the letters, and a s
 
   // The box look puts the box back and drops the outline.
   const box = rule('body[data-style="box"] .subtitle');
-  assert.match(box.background, /^rgba\(8, 8, 10, 0\.86\)$/);
+  // 0.86 unless Subtitle Studio (a Supporter perk) sets another opacity.
+  assert.match(box.background, /^rgba\(8, 8, 10, var\(--studio-bg, 0\.86\)\)$/);
   assert.equal(rule('body[data-style="box"] .subtitle p')['-webkit-text-stroke'], '0');
 });

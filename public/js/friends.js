@@ -11,7 +11,7 @@ import { html, bdi, th, api, mount, state, toast, gameHref, profileHref } from '
 import { t } from './i18n.js';
 import { icon } from './icons.js';
 import { avatar } from './components.js';
-import { flagBadge } from './country-picker.js';
+import { flagBadge, supporterBadge } from './country-picker.js';
 
 const desktop = window.gameshelfDesktop;
 const LIST_MS = 30 * 1000;
@@ -45,7 +45,7 @@ function friendRow(f) {
       <a class="friend-who" href="${profileHref(f.username)}">
         <span class="presence-avatar">${avatar(f)}<span class="presence-dot" aria-hidden="true"></span></span>
         <span class="friend-text">
-          <span class="friend-name">${bdi(f.displayName)} ${flagBadge(f.nationality)}</span>
+          <span class="friend-name">${bdi(f.displayName)} ${flagBadge(f.nationality)} ${supporterBadge(f)}</span>
           ${statusLine(f)}
           ${p.arabic ? html`<span class="arabic-neon" lang="ar" dir="rtl" title="${t('Playing with GameShelf\'s Arabic')}">يلعب بالعربية</span>` : ''}
         </span>

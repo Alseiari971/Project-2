@@ -2,7 +2,7 @@
 // visitor's own calendar (public/js/seasons.js) and asks for it by id; this
 // file decides which games fill it.
 //
-// A query lists groups of IGDB genres, themes and game modes. A game must match
+// A query lists groups of genres, themes and game modes (Steam store tags, see src/games/steam-wikidata.js). A game must match
 // every group in `all` (any name within a group), and none of `not`. Sorts:
 // popular, top (highest rated), new (released this past year), year (best of
 // this calendar year) and upcoming (out in the next three months).

@@ -10,6 +10,11 @@
   src: local("Thmanyah Sans Bold"), local("ThmanyahSans-Bold");
   font-weight: 700;
 }
+/* Subtitle Studio's fonts (bundled, SIL Open Font License; see public/fonts/studio/). */
+@font-face { font-family: "GS Cairo"; src: url("../../public/fonts/studio/Cairo-Bold.ttf") format("truetype"); font-weight: 700; }
+@font-face { font-family: "GS Tajawal"; src: url("../../public/fonts/studio/Tajawal-Bold.ttf") format("truetype"); font-weight: 700; }
+@font-face { font-family: "GS Amiri"; src: url("../../public/fonts/studio/Amiri-Bold.ttf") format("truetype"); font-weight: 700; }
+@font-face { font-family: "GS IBM Plex Sans Arabic"; src: url("../../public/fonts/studio/IBMPlexSansArabic-Bold.ttf") format("truetype"); font-weight: 700; }
 @font-face {
   font-family: "Alexandria";
   src: url("../../public/fonts/alexandria-arabic.woff2") format("woff2");
@@ -41,8 +46,9 @@ html, body {
 
 .subtitle p {
   margin: 0;
-  color: #fff;
-  font: 700 var(--size, 30px)/1.5 "Thmanyah Local", "Alexandria", "Segoe UI", Tahoma, sans-serif;
+  /* Subtitle Studio (a Supporter perk) sets the font, scale and color; the defaults otherwise. */
+  color: var(--studio-color, #fff);
+  font: 700 calc(var(--size, 30px) * var(--studio-scale, 1))/1.5 var(--studio-font, "Thmanyah Local"), "Alexandria", "Segoe UI", Tahoma, sans-serif;
   text-align: center;
   white-space: pre-line;
   /* The outline is drawn first and the letters over it, so it shows only
@@ -55,7 +61,7 @@ html, body {
 body[data-style="box"] .subtitle {
   padding: 0.35em 0.9em;
   border-radius: 0.45em;
-  background: rgba(8, 8, 10, 0.86);
+  background: rgba(8, 8, 10, var(--studio-bg, 0.86));
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06);
 }
 body[data-style="box"] .subtitle p {

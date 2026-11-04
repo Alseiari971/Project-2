@@ -1,21 +1,21 @@
 // Genres people can browse by.
-// `rawg` is the matching RAWG genre slug. `igdb` lists words that IGDB genre or
-// theme names contain (IGDB files "Action" as a theme, and has no "Casual").
+// `rawg` is the matching RAWG genre slug; `steamTag` is Steam's store tag for it
+// (store.steampowered.com/tag/browse), which the Steam + Wikidata catalog browses by.
 const GENRES = [
-  { name: 'Action', rawg: 'action', igdb: { themes: ['action'] } },
-  { name: 'Adventure', rawg: 'adventure', igdb: { genres: ['adventure'] } },
-  { name: 'RPG', rawg: 'role-playing-games-rpg', igdb: { genres: ['role-playing'] } },
-  { name: 'Shooter', rawg: 'shooter', igdb: { genres: ['shooter'] } },
-  { name: 'Indie', rawg: 'indie', igdb: { genres: ['indie'] } },
-  { name: 'Strategy', rawg: 'strategy', igdb: { genres: ['strategy'] } },
-  { name: 'Platformer', rawg: 'platformer', igdb: { genres: ['platform'] } },
-  { name: 'Simulation', rawg: 'simulation', igdb: { genres: ['simulator'] } },
-  { name: 'Puzzle', rawg: 'puzzle', igdb: { genres: ['puzzle'] } },
-  { name: 'Racing', rawg: 'racing', igdb: { genres: ['racing'] } },
-  { name: 'Sports', rawg: 'sports', igdb: { genres: ['sport'] } },
-  { name: 'Fighting', rawg: 'fighting', igdb: { genres: ['fighting'] } },
-  { name: 'Casual', rawg: 'casual', igdb: { genres: ['card', 'quiz', 'pinball'], themes: ['party'] } },
-  { name: 'Family', rawg: 'family', igdb: { themes: ['kids'] } },
+  { name: 'Action', rawg: 'action', steamTag: 19 },
+  { name: 'Adventure', rawg: 'adventure', steamTag: 21 },
+  { name: 'RPG', rawg: 'role-playing-games-rpg', steamTag: 122 },
+  { name: 'Shooter', rawg: 'shooter', steamTag: 1774 },
+  { name: 'Indie', rawg: 'indie', steamTag: 492 },
+  { name: 'Strategy', rawg: 'strategy', steamTag: 9 },
+  { name: 'Platformer', rawg: 'platformer', steamTag: 1625 },
+  { name: 'Simulation', rawg: 'simulation', steamTag: 599 },
+  { name: 'Puzzle', rawg: 'puzzle', steamTag: 1664 },
+  { name: 'Racing', rawg: 'racing', steamTag: 699 },
+  { name: 'Sports', rawg: 'sports', steamTag: 701 },
+  { name: 'Fighting', rawg: 'fighting', steamTag: 1743 },
+  { name: 'Casual', rawg: 'casual', steamTag: 597 },
+  { name: 'Family', rawg: 'family', steamTag: 5350 },
 ];
 
 const findGenre = (name) => GENRES.find((g) => g.name.toLowerCase() === String(name).toLowerCase()) || null;

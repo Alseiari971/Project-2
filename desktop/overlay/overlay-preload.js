@@ -5,4 +5,5 @@ contextBridge.exposeInMainWorld('gsOverlay', {
   onShow: (callback) => ipcRenderer.on('gs-overlay:show', (_event, subtitle) => callback(subtitle)),
   onHide: (callback) => ipcRenderer.on('gs-overlay:hide', () => callback()),
   onStyle: (callback) => ipcRenderer.on('gs-overlay:style', (_event, style) => callback(style)),
+  onStudio: (callback) => ipcRenderer.on('gs-overlay:studio', (_event, studio) => callback(studio)),
 });

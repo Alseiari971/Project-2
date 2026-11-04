@@ -1,0 +1,222 @@
+// The Steam + Wikidata game catalog, against stand-ins for both (no network):
+// search, browse lists, game pages, Wikidata's Arabic titles and engines,
+// games that aren't on Steam, old ids, caching with a TTL, backoff, Wikidata
+// being down, and that nothing asks Twitch/IGDB for anything.
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const { openDatabase } = require('../src/db');
+const { createSteamWikidataProvider, mapEngine, slugify, USER_AGENT } = require('../src/games/steam-wikidata');
+const { createGameProvider } = require('../src/games');
+
+const searchRow = (appid, name, date, percent, count) => `<a href="https://store.steampowered.com/app/${appid}/x/" data-ds-appid="${appid}" data-ds-tagids="[19,21]" class="search_result_row">
+  <div class="search_capsule"><img src="https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${appid}/abc123/capsule_231x87.jpg?t=1" ></div>
+  <div class="search_name ellipsis"> <span class="title">${name}</span> </div>
+  <div class="search_released responsive_secondrow"> ${date} </div>
+  <span class="search_review_summary positive" data-tooltip-html="Very Positive&lt;br&gt;${percent}% of the ${count} user reviews for this game are positive."></span></a>`;
+
+function fakeWeb({ wikidataDown = false, steamStatus = 200 } = {}) {
+  const calls = [];
+  const fetchImpl = async (url, init = {}) => {
+    const u = new URL(url);
+    calls.push({ host: u.host, path: u.pathname, url: String(url), headers: init.headers || {} });
+    const reply = (body, status = 200) => ({ ok: status < 400, status, json: async () => body });
+    if (u.host === 'store.steampowered.com') {
+      if (steamStatus !== 200) return reply({}, steamStatus);
+      if (u.pathname === '/api/storesearch/') {
+        return reply({ total: 3, items: [
+          { type: 'app', id: 367520, name: 'Hollow Knight', tiny_image: 'https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/367520/fba7/capsule_231x87.jpg?t=1' },
+          { type: 'app', id: 598190, name: 'Hollow Knight - Official Soundtrack', tiny_image: 'x' },
+          { type: 'app', id: 1030300, name: 'Hollow Knight: Silksong', tiny_image: 'https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1030300/b73e/capsule_231x87.jpg' },
+        ] });
+      }
+      if (u.pathname === '/search/results/') {
+        return reply({ success: 1, total_count: 2, results_html: searchRow(1174180, 'Red Dead Redemption 2', 'Dec 5, 2019', 91, '650,000') + searchRow(489830, 'The Elder Scrolls V: Skyrim Special Edition', 'Oct 27, 2016', 94, '300,000') });
+      }
+      if (u.pathname === '/api/appdetails') {
+        const appid = u.searchParams.get('appids');
+        return reply({ [appid]: { success: true, data: {
+          name: { 367520: 'Hollow Knight', 1174180: 'Red Dead Redemption 2', 489830: 'The Elder Scrolls V: Skyrim Special Edition' }[appid] || 'Some Game',
+          short_description: 'Forge your own path in <b>Hollow Knight</b>!', developers: ['Team Cherry'], publishers: ['Team Cherry'],
+          genres: [{ description: 'Action' }, { description: 'Adventure' }, { description: 'Indie' }], release_date: { coming_soon: false, date: 'Feb 24, 2017' },
+          header_image: `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${appid}/hdr/header.jpg?t=2`,
+          platforms: { windows: true, mac: true, linux: false }, website: 'http://hollowknight.com',
+          screenshots: [{ path_thumbnail: 'https://x/t.jpg', path_full: 'https://x/f.jpg?t=3' }],
+          supported_languages: 'English<strong>*</strong>, Arabic, French<br><strong>*</strong>languages with full audio support',
+          metacritic: { score: 87 }, categories: [{ description: 'Single-player' }],
+        } } });
+      }
+    }
+    if (u.host === 'query.wikidata.org') {
+      if (wikidataDown) return reply({}, 503);
+      const query = u.searchParams.get('query');
+      const b = (o) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, { value: v }]));
+      if (query.includes('EntitySearch')) {
+        return reply({ results: { bindings: [
+          b({ item: 'http://www.wikidata.org/entity/Q64577191', label: 'The Legend of Zelda: Tears of the Kingdom', ar: 'أسطورة زيلدا: دموع المملكة', date: '2023-05-12T00:00:00Z' }),
+          b({ item: 'http://www.wikidata.org/entity/Q999', label: 'Alan Wake 2', epic: 'alan-wake-2', engineLabel: 'Northlight Engine' }),
+        ] } });
+      }
+      return reply({ results: { bindings: [
+        b({ item: 'http://www.wikidata.org/entity/Q29300592', steam: '367520', label: 'Hollow Knight', ar: 'هولو نايت', arDesc: 'لعبة فيديو صدرت سنة 2017', engineLabel: 'Unity', gog: 'game/hollow_knight', site: 'https://hollowknight.com' }),
+        b({ item: 'http://www.wikidata.org/entity/Q27438121', steam: '1174180', label: 'Red Dead Redemption 2', ar: 'ريد ديد ريدمبشن 2', engineLabel: 'Rockstar Advanced Game Engine', epic: 'red-dead-redemption-2' }),
+        b({ item: 'http://www.wikidata.org/entity/Q31602948', steam: '489830', label: 'Skyrim SE', engineLabel: 'Creation Engine' }),
+      ].filter((row) => query.includes(`"${row.steam.value}"`)) } });
+    }
+    throw new Error(`unexpected request to ${u.host}`);
+  };
+  return { fetchImpl, calls };
+}
+
+const provider = (web, extra = {}) => createSteamWikidataProvider({
+  db: openDatabase(':memory:'), fetchImpl: web.fetchImpl, sleep: async () => {}, steamGapMs: 0, steamListGapMs: 0, wikidataGapMs: 0, ...extra,
+});
+
+test('engines from Wikidata map to the engines GameShelf patches', () => {
+  assert.equal(mapEngine('Unreal Engine 5'), 'unreal');
+  assert.equal(mapEngine('Unreal Engine 4'), 'unreal');
+  assert.equal(mapEngine('Unity'), 'unity');
+  assert.equal(mapEngine('RE Engine'), 'reengine');
+  assert.equal(mapEngine('Creation Engine'), 'bethesda');
+  assert.equal(mapEngine('Gamebryo'), 'bethesda');
+  assert.equal(mapEngine("Ren'Py"), 'renpy');
+  assert.equal(mapEngine('Godot'), 'godot');
+  assert.equal(mapEngine('MT Framework'), 'mtframework');
+  assert.equal(mapEngine('Rockstar Advanced Game Engine'), 'rage');
+  assert.equal(mapEngine('Northlight Engine'), null);
+  assert.equal(mapEngine(null), null);
+  assert.equal(slugify('The Elder Scrolls V: Skyrim® Special Edition'), 'the-elder-scrolls-v-skyrim-special-edition');
+  assert.equal(slugify("Assassin's Creed & Co."), 'assassins-creed-and-co');
+});
+
+test('search: Steam\'s results with Wikidata\'s Arabic titles; soundtracks left out', async () => {
+  const web = fakeWeb();
+  const p = provider(web);
+  const { results } = await p.search({ query: 'hollow knight' });
+  assert.deepEqual(results.slice(0, 2).map((g) => [g.id, g.name, g.steamAppId]), [['hollow-knight', 'Hollow Knight', 367520], ['hollow-knight-silksong', 'Hollow Knight: Silksong', 1030300]]);
+  assert.ok(!results.some((g) => /Soundtrack/.test(g.name)));
+  assert.equal(results[0].nameAr, 'هولو نايت');
+  assert.equal(results[0].engine, 'unity');
+  // Steam's newer artwork folder, with the old fixed address as the fallback.
+  assert.equal(results[0].image, 'https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/367520/fba7/capsule_616x353.jpg');
+  assert.equal(results[0].fallbackImage, 'https://cdn.cloudflare.steamstatic.com/steam/apps/367520/capsule_616x353.jpg');
+  // Wikidata was asked with GameShelf's User-Agent, and Twitch/IGDB never.
+  const wd = web.calls.find((c) => c.host === 'query.wikidata.org');
+  assert.equal(wd.headers['User-Agent'], USER_AGENT);
+  assert.equal(USER_AGENT, 'GameShelf/1.0 (https://gameshelf.ae)');
+  assert.ok(web.calls.every((c) => !/twitch|igdb/i.test(c.host)));
+});
+
+test('browse lists: names, dates and review counts from one Steam request; engines added', async () => {
+  const web = fakeWeb();
+  const p = provider(web);
+  const { results } = await p.search({ genre: 'Action', pageSize: 10 });
+  assert.deepEqual(results.map((g) => [g.id, g.released, g.popularity]), [['red-dead-redemption-2', '2019-12-05', 650000], ['the-elder-scrolls-v-skyrim-special-edition', '2016-10-27', 300000]]);
+  const listUrl = new URL(web.calls.find((c) => c.path === '/search/results/').url);
+  assert.equal(listUrl.searchParams.get('tags'), '19');
+  assert.equal(listUrl.searchParams.get('untags'), '12095', 'adult-only games left out');
+  await p.settled();
+  assert.deepEqual((await p.search({ genre: 'Action', pageSize: 10 })).results.map((g) => g.engine), ['rage', 'bethesda']);
+  assert.deepEqual(await p.search({ genre: 'Not a genre' }), { count: 0, hasMore: false, results: [] });
+  // Seasonal sections and moods: each group's word is a Steam tag.
+  await p.collection({ all: [{ themes: ['horror'] }, { modes: ['co-operative'] }], not: { themes: ['warfare'] }, sort: 'top' });
+  const col = new URL(web.calls.filter((c) => c.path === '/search/results/').at(-1).url);
+  assert.deepEqual([col.searchParams.get('tags'), col.searchParams.get('sort_by')], ['1667,1685', 'Reviews_DESC']);
+  assert.ok(col.searchParams.get('untags').split(',').includes('1678'));
+});
+
+test('a game page: Steam\'s details, Wikidata\'s Arabic and stores, kept for the TTL', async () => {
+  const web = fakeWeb();
+  let clock = Date.parse('2026-11-04T12:00:00Z');
+  const p = provider(web, { now: () => clock });
+  await p.search({ query: 'hollow knight' });
+  const g = await p.getGame('hollow-knight');
+  assert.equal(g.description, 'Forge your own path in Hollow Knight!');
+  assert.deepEqual([g.developers, g.publishers, g.released, g.genres], [['Team Cherry'], ['Team Cherry'], '2017-02-24', ['Action', 'Adventure', 'Indie']]);
+  assert.deepEqual([g.nameAr, g.descriptionAr, g.engine, g.engineLabel, g.wikidataId], ['هولو نايت', 'لعبة فيديو صدرت سنة 2017', 'unity', 'Unity', 'Q29300592']);
+  assert.deepEqual(g.buy.links.map((l) => [l.store, l.url]), [['steam', 'https://store.steampowered.com/app/367520/'], ['gog', 'https://www.gog.com/en/game/hollow_knight']]);
+  assert.deepEqual(g.languages.map((l) => [l.name, l.audio]), [['English', true], ['Arabic', false], ['French', false]]);
+  assert.equal(g.scores.critics.score, 87);
+  assert.ok(g.links.some((l) => l.url === 'https://www.wikidata.org/wiki/Q29300592'));
+  assert.equal(g.media[0].full, 'https://x/f.jpg?t=3');
+
+  // Within the TTL: nothing is asked again.
+  const before = web.calls.length;
+  await p.getGame('hollow-knight');
+  assert.equal(web.calls.filter((c, i) => i >= before && c.path !== '/search/results/').length, 0);
+  // After it (7 days by default), Steam is asked again.
+  clock += 8 * 24 * 60 * 60 * 1000;
+  await p.getGame('hollow-knight');
+  assert.ok(web.calls.slice(before).some((c) => c.path === '/api/appdetails'));
+});
+
+test('old ids (like IGDB slugs) keep working: found by name once, then kept', async () => {
+  const web = fakeWeb();
+  const db = openDatabase(':memory:');
+  const p = createSteamWikidataProvider({ db, fetchImpl: web.fetchImpl, sleep: async () => {}, steamGapMs: 0, steamListGapMs: 0, wikidataGapMs: 0 });
+  const g = await p.getGame('hollow-knight');
+  assert.deepEqual([g.id, g.steamAppId], ['hollow-knight', 367520]);
+  assert.equal(db.prepare('SELECT steam_appid FROM games WHERE id = ?').get('hollow-knight').steam_appid, 367520);
+  assert.equal(await p.getGame('no-such-game-at-all'), null);
+  assert.equal(await p.getGame('../../etc'), null);
+  // Steam libraries match by app id, with no requests at all.
+  const before = web.calls.length;
+  const [hk, unknown] = await p.matchSteamGames([{ appid: 367520, name: 'Hollow Knight' }, { appid: 4242, name: 'Brand New Indie' }]);
+  assert.equal(hk.id, 'hollow-knight');
+  assert.deepEqual([unknown.id, unknown.steamAppId], ['brand-new-indie', 4242]);
+  assert.equal(web.calls.length, before);
+});
+
+test('games that aren\'t on Steam come from Wikidata, with their Epic or GOG store', async () => {
+  const web = fakeWeb();
+  const p = provider(web);
+  const { results } = await p.search({ query: 'zelda tears' });
+  const zelda = results.find((g) => g.wikidataId === 'Q64577191');
+  assert.deepEqual([zelda.id, zelda.steamAppId, zelda.nameAr, zelda.released], ['the-legend-of-zelda-tears-of-the-kingdom', null, 'أسطورة زيلدا: دموع المملكة', '2023-05-12']);
+  const alan = await p.getGame('alan-wake-2');
+  assert.deepEqual(alan.buy.links.map((l) => [l.store, l.url]), [['epic', 'https://store.epicgames.com/p/alan-wake-2']]);
+  assert.equal(alan.engine, null, 'engines GameShelf can\'t patch stay unmapped');
+  assert.equal(alan.engineLabel, 'Northlight Engine');
+  // Arabic searches go to Wikidata.
+  await p.search({ query: 'زيلدا' });
+  assert.match(web.calls.filter((c) => c.host === 'query.wikidata.org').at(-1).url, /mwapi%3Alanguage\+%22ar%22|mwapi:language "ar"|language\+%22ar%22/);
+});
+
+test('Wikidata down: Steam stands alone. Steam refusing: back off and use what\'s saved', async () => {
+  const down = fakeWeb({ wikidataDown: true });
+  const p = provider(down);
+  const g = await p.getGame('hollow-knight');
+  assert.deepEqual([g.name, g.nameAr, g.developers], ['Hollow Knight', null, ['Team Cherry']]);
+
+  // Steam answers once, then refuses with 429: the saved list is used, and
+  // Steam isn't asked again while backing off.
+  let clock = 1_000_000;
+  let refuse = false;
+  const web = fakeWeb();
+  const fetchImpl = async (url, init) => (refuse && String(url).includes('steampowered') ? { ok: false, status: 429, json: async () => ({}) } : web.fetchImpl(url, init));
+  const q = createSteamWikidataProvider({ db: openDatabase(':memory:'), fetchImpl, now: () => clock, sleep: async () => {}, steamGapMs: 0, steamListGapMs: 0, wikidataGapMs: 0 });
+  const first = await q.search({ genre: 'Action' });
+  clock += 7 * 60 * 60 * 1000; // the list's 6 hours are up
+  refuse = true;
+  const steamCalls = () => web.calls.filter((c) => c.host === 'store.steampowered.com').length;
+  const again = await q.search({ genre: 'Action' });
+  assert.deepEqual(again.results.map((x) => x.id), first.results.map((x) => x.id), 'old list served');
+  const n = steamCalls();
+  await q.search({ genre: 'Action' });
+  assert.equal(steamCalls(), n, 'no request while backing off');
+});
+
+test('no Twitch or IGDB keys needed: the default catalog is Steam + Wikidata', () => {
+  const db = openDatabase(':memory:');
+  assert.equal(createGameProvider({}, { db }).name, 'steam');
+  assert.equal(createGameProvider({ IGDB_CLIENT_ID: 'x', IGDB_CLIENT_SECRET: 'y', TWITCH_CLIENT_ID: 'z' }, { db }).name, 'steam');
+  assert.equal(createGameProvider({ GAME_DATA: 'local' }, { db }).name, 'local');
+  const fs = require('node:fs');
+  const path = require('node:path');
+  for (const dir of ['src', 'src/games']) {
+    for (const file of fs.readdirSync(path.join(__dirname, '..', dir)).filter((f) => f.endsWith('.js'))) {
+      const text = fs.readFileSync(path.join(__dirname, '..', dir, file), 'utf8');
+      assert.ok(!/api\.igdb\.com|id\.twitch\.tv|TWITCH_CLIENT_SECRET/.test(text), `${dir}/${file} still talks to IGDB`);
+    }
+  }
+  assert.ok(!fs.existsSync(path.join(__dirname, '..', 'src/games/igdb.js')));
+});

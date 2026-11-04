@@ -9,8 +9,11 @@ import { t } from '../i18n.js';
 
 const cover = (steamAppId) => `https://cdn.cloudflare.steamstatic.com/steam/apps/${steamAppId}/capsule_184x69.jpg`;
 
+let boosts = null;
+
 function row(game) {
   const votes = game.votes === 1 ? t('1 vote') : t('{count} votes', { count: game.votes.toLocaleString() });
+  const boosted = game.boosts ? html`<span class="boost-badge" title="${t('Boosted by GameShelf Supporters. Its Arabic will be free for everyone.')}">${icon('star')} ${(game.boosts === 1 ? t('Community boosted (1 boost)') : t('Community boosted ({n} boosts)', { n: game.boosts }))}</span>` : '';
   const notes = [
     game.pending ? t('Waiting for an admin\'s approval') : '',
     game.progress ? t('{percent}% translated so far', { percent: game.progress }) : '',
@@ -23,22 +26,30 @@ function row(game) {
       <div class="board-name">
         <strong>${bdi(game.name)}</strong>
         <span class="muted small"><span class="board-votes">${votes}</span>${notes.length ? ` · ${notes.join(' · ')}` : ''}</span>
+        ${boosted}
       </div>
+      <div class="board-actions">
+      ${boosts?.left ? html`<button class="pill-btn boost-btn" type="button" data-boost="${game.game}" title="${t('Spend a boost token to push this game up the queue')}">${icon('up')} ${t('Boost')}</button>` : ''}
       <button class="pill-btn ${game.voted ? 'pill-light is-voted' : ''}" type="button" data-vote="${game.game}" data-name="${game.name}" aria-pressed="${game.voted}">
         ${game.voted ? html`${icon('check')} ${t('Upvoted')}` : html`${icon('up')} ${t('Upvote request (+1)')}`}
       </button>
+      </div>
     </li>`;
 }
 
 export async function arabicRequestsView(app) {
   document.title = `${t('Most requested games')} · ${t('GameShelf')}`;
-  const { games } = await api('/arabic/leaderboard?limit=100');
+  const board = await api('/arabic/leaderboard?limit=100');
+  const { games } = board;
+  boosts = board.boosts;
   mount(app, html`
     <div class="page arabic-board">
       <div class="page-head">
         <h1>${icon('star')} ${t('Most requested games')}</h1>
         <p class="muted">${t('Games players want Arabic subtitles for, most votes first. Upvote the ones you want: GameShelf\'s team works down this list.')}</p>
       </div>
+      <p class="free-note">${icon('check')} ${t('Every Arabic pack GameShelf makes is free for everyone, forever. Boosts only decide which game gets made first.')}
+        ${boosts ? (boosts.perMonth ? html` <span class="muted">${t('You have {n} boosts left this month.', { n: boosts.left })}</span>` : html` <a href="#/pricing">${t('Supporters get boost tokens')}</a>`) : ''}</p>
       ${games.length
         ? html`<ol class="board-list">${games.map(row)}</ol>`
         : emptyState(t('No requests yet'), t('Ask for Arabic on a game\'s page in GameShelf for Windows, and it shows up here.'))}
@@ -46,6 +57,25 @@ export async function arabicRequestsView(app) {
   // Covers Steam doesn't have just go.
   app.querySelectorAll('.board-cover').forEach((img) => img.addEventListener?.('error', () => img.remove(), { once: true }));
   app.addEventListener('click', async (e) => {
+    const boost = e.target.closest('[data-boost]');
+    if (boost && !boost.disabled) {
+      boost.disabled = true;
+      try {
+        const done = await api('/arabic/boosts', { method: 'POST', body: { game: boost.dataset.boost, tokens: 1 } });
+        const game = games.find((g) => g.game === done.game);
+        game.boosts = done.boosts;
+        boosts = done.you;
+        toast(t('Boosted! {n} boosts left this month.', { n: done.you.left }));
+        const fresh = document.createElement('ol');
+        mount(fresh, row(game));
+        boost.closest('.board-row').replaceWith(fresh.firstElementChild);
+        if (!boosts.left) app.querySelectorAll('[data-boost]').forEach((b) => b.remove());
+      } catch (err) {
+        toast(err.message, { error: true });
+        boost.disabled = false;
+      }
+      return;
+    }
     const button = e.target.closest('[data-vote]');
     if (!button || button.disabled) return;
     if (!state.user) {
