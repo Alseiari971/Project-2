@@ -5,7 +5,7 @@
 // Mail apps ignore stylesheets and block outside images by default, so it's
 // built the old way: tables and inline styles, no pictures, no scripts.
 
-const COLORS = { bg: '#0b0c0e', card: '#15161a', raised: '#1c1d22', border: '#26282e', text: '#f2f3f5', dim: '#a3a6ad', faint: '#7c7f87', accent: '#e7ff0c' };
+const COLORS = { bg: '#0b0c0e', card: '#15161a', raised: '#25272d', border: '#26282e', text: '#f2f3f5', dim: '#a3a6ad', faint: '#7c7f87', accent: '#e7ff0c' };
 const FONT = "'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif";
 const FONT_AR = "'Segoe UI', Tahoma, 'Geeza Pro', 'Noto Naskh Arabic', Arial, sans-serif";
 
@@ -13,11 +13,15 @@ const FONT_AR = "'Segoe UI', Tahoma, 'Geeza Pro', 'Noto Naskh Arabic', Arial, sa
 // leave background images alone, so each background is also a one-color
 // gradient, and the text sits inside two blended layers (the gmail-screen and
 // gmail-difference styles below, which only Gmail applies) that undo the
-// inversion. Other mail apps show the colors as they are.
+// inversion. That gives white and greys back exactly but shifts other colors
+// (lime turns lavender), so in Gmail lime text becomes white (gs-lime) and the
+// lime is only in solid shapes; borders are inverted too, so there are none.
+// Other mail apps show the colors as they are.
 const bg = (color) => `background-color:${color};background-image:linear-gradient(${color},${color});`;
 const GMAIL_FIX = `<style>
   u + .body .gmail-screen { background:#000; mix-blend-mode:screen; }
   u + .body .gmail-difference { background:#000; mix-blend-mode:difference; }
+  u + .body .gs-lime { color:#ffffff !important; }
 </style>`;
 const keepColors = (inner) => `<div class="gmail-screen"><div class="gmail-difference">${inner}</div></div>`;
 
@@ -60,7 +64,7 @@ const fill = (text, code) => text.replace('{code}', code);
 
 /** The digits, each in its own box, reading left to right in both languages. */
 function codeBoxes(code) {
-  const cells = [...code].map((d) => `<td style="padding:0 4px;"><div style="width:44px;height:56px;line-height:56px;border-radius:10px;${bg(COLORS.raised)}border:1px solid ${COLORS.border};color:${COLORS.text};font:700 28px/56px ${FONT};text-align:center;">${keepColors(escape(d))}</div></td>`).join('');
+  const cells = [...code].map((d) => `<td style="padding:0 4px;"><div style="width:44px;height:56px;line-height:56px;border-radius:10px;${bg(COLORS.raised)}color:${COLORS.text};font:700 28px/56px ${FONT};text-align:center;">${keepColors(escape(d))}</div></td>`).join('');
   return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" dir="ltr" style="margin:0 auto;"><tr>${cells}</tr></table>`;
 }
 
@@ -104,8 +108,11 @@ ${GMAIL_FIX}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="${bg(COLORS.bg)}">
 <tr><td align="center" style="padding:32px 16px;">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:520px;">
-    <tr><td style="padding:0 8px 24px;font:800 24px/1 ${FONT};letter-spacing:-0.5px;color:${COLORS.text};">${keepColors(`Game<span style="color:${COLORS.accent};">Shelf</span>`)}</td></tr>
-    <tr><td style="${bg(COLORS.card)}border:1px solid ${COLORS.border};border-radius:16px;overflow:hidden;">
+    <tr><td style="padding:0 8px 24px;font:800 24px/1 ${FONT};letter-spacing:-0.5px;color:${COLORS.text};"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+      <td valign="top" style="vertical-align:top;font:800 24px/1 ${FONT};letter-spacing:-0.5px;color:${COLORS.text};">${keepColors('Game')}</td>
+      <td valign="top" style="vertical-align:top;font:800 24px/1 ${FONT};letter-spacing:-0.5px;">${keepColors(`<span class="gs-lime" style="color:${COLORS.accent};">Shelf</span>`)}<div style="height:4px;margin-top:4px;border-radius:2px;${bg(COLORS.accent)}font-size:0;line-height:0;">&nbsp;</div></td>
+    </tr></table></td></tr>
+    <tr><td style="${bg(COLORS.card)}border-radius:16px;overflow:hidden;">
       <div style="height:4px;${bg(COLORS.accent)}font-size:0;line-height:0;">&nbsp;</div>
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
         <tr><td style="padding:32px 32px 8px;">
@@ -119,7 +126,7 @@ ${GMAIL_FIX}
         <tr><td dir="rtl" lang="ar" style="padding:28px 32px 32px;text-align:right;font-family:${FONT_AR};">
           ${keepColors(`          <h2 style="margin:0 0 8px;font:700 19px/1.5 ${FONT_AR};color:${COLORS.text};">${escape(c.titleAr)}</h2>
           <p style="margin:0 0 12px;font:400 15px/1.8 ${FONT_AR};color:${COLORS.dim};">${escape(c.leadAr)}</p>
-          <p style="margin:0 0 8px;font:600 15px/1.8 ${FONT_AR};color:${COLORS.text};">الرمز: <span dir="ltr" style="color:${COLORS.accent};letter-spacing:3px;font-family:${FONT};">${escape(code)}</span> · يعمل لمدة 10 دقائق ولمرة واحدة.</p>
+          <p style="margin:0 0 8px;font:600 15px/1.8 ${FONT_AR};color:${COLORS.text};">الرمز: <span dir="ltr" class="gs-lime" style="color:${COLORS.accent};letter-spacing:3px;font-weight:800;font-family:${FONT};">${escape(code)}</span> · يعمل لمدة 10 دقائق ولمرة واحدة.</p>
           <p style="margin:0;font:400 13px/1.8 ${FONT_AR};color:${COLORS.faint};">${escape(c.noteAr)}</p>`)}
         </td></tr>
       </table>
