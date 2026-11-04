@@ -9,6 +9,18 @@ const COLORS = { bg: '#0b0c0e', card: '#15161a', raised: '#1c1d22', border: '#26
 const FONT = "'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif";
 const FONT_AR = "'Segoe UI', Tahoma, 'Geeza Pro', 'Noto Naskh Arabic', Arial, sans-serif";
 
+// Gmail's apps turn emails light in dark mode by inverting their colors. They
+// leave background images alone, so each background is also a one-color
+// gradient, and the text sits inside two blended layers (the gmail-screen and
+// gmail-difference styles below, which only Gmail applies) that undo the
+// inversion. Other mail apps show the colors as they are.
+const bg = (color) => `background-color:${color};background-image:linear-gradient(${color},${color});`;
+const GMAIL_FIX = `<style>
+  u + .body .gmail-screen { background:#000; mix-blend-mode:screen; }
+  u + .body .gmail-difference { background:#000; mix-blend-mode:difference; }
+</style>`;
+const keepColors = (inner) => `<div class="gmail-screen"><div class="gmail-difference">${inner}</div></div>`;
+
 const escape = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 const COPY = {
@@ -48,7 +60,7 @@ const fill = (text, code) => text.replace('{code}', code);
 
 /** The digits, each in its own box, reading left to right in both languages. */
 function codeBoxes(code) {
-  const cells = [...code].map((d) => `<td style="padding:0 4px;"><div style="width:44px;height:56px;line-height:56px;border-radius:10px;background:${COLORS.raised};border:1px solid ${COLORS.border};color:${COLORS.text};font:700 28px/56px ${FONT};text-align:center;">${escape(d)}</div></td>`).join('');
+  const cells = [...code].map((d) => `<td style="padding:0 4px;"><div style="width:44px;height:56px;line-height:56px;border-radius:10px;${bg(COLORS.raised)}border:1px solid ${COLORS.border};color:${COLORS.text};font:700 28px/56px ${FONT};text-align:center;">${keepColors(escape(d))}</div></td>`).join('');
   return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" dir="ltr" style="margin:0 auto;"><tr>${cells}</tr></table>`;
 }
 
@@ -85,35 +97,36 @@ function codeEmail(purpose, code, { site = null } = {}) {
 <meta name="color-scheme" content="dark">
 <meta name="supported-color-schemes" content="dark">
 <title>${escape(fill(c.subject, code))}</title>
+${GMAIL_FIX}
 </head>
-<body style="margin:0;padding:0;background:${COLORS.bg};">
+<body class="body" style="margin:0;padding:0;${bg(COLORS.bg)}">
 <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:${COLORS.bg};">${escape(fill(c.preheader, code))}&#8199;&#65279;&#847;&#8199;&#65279;&#847;&#8199;&#65279;&#847;</div>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${COLORS.bg};">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="${bg(COLORS.bg)}">
 <tr><td align="center" style="padding:32px 16px;">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:520px;">
-    <tr><td style="padding:0 8px 24px;font:800 24px/1 ${FONT};letter-spacing:-0.5px;color:${COLORS.text};">Game<span style="color:${COLORS.accent};">Shelf</span></td></tr>
-    <tr><td style="background:${COLORS.card};border:1px solid ${COLORS.border};border-radius:16px;overflow:hidden;">
-      <div style="height:4px;background:${COLORS.accent};font-size:0;line-height:0;">&nbsp;</div>
+    <tr><td style="padding:0 8px 24px;font:800 24px/1 ${FONT};letter-spacing:-0.5px;color:${COLORS.text};">${keepColors(`Game<span style="color:${COLORS.accent};">Shelf</span>`)}</td></tr>
+    <tr><td style="${bg(COLORS.card)}border:1px solid ${COLORS.border};border-radius:16px;overflow:hidden;">
+      <div style="height:4px;${bg(COLORS.accent)}font-size:0;line-height:0;">&nbsp;</div>
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
         <tr><td style="padding:32px 32px 8px;">
-          <h1 style="margin:0 0 12px;font:800 24px/1.25 ${FONT};color:${COLORS.text};">${escape(c.title)}</h1>
-          <p style="margin:0;font:400 15px/1.6 ${FONT};color:${COLORS.dim};">${escape(c.lead)}</p>
+          ${keepColors(`<h1 style="margin:0 0 12px;font:800 24px/1.25 ${FONT};color:${COLORS.text};">${escape(c.title)}</h1>
+          <p style="margin:0;font:400 15px/1.6 ${FONT};color:${COLORS.dim};">${escape(c.lead)}</p>`)}
         </td></tr>
         <tr><td style="padding:24px 24px 8px;" align="center">${codeBoxes(code)}</td></tr>
-        <tr><td align="center" style="padding:8px 32px 24px;font:600 13px/1.5 ${FONT};color:${COLORS.faint};">Works for 10 minutes, once.</td></tr>
-        <tr><td style="padding:0 32px 28px;font:400 13px/1.6 ${FONT};color:${COLORS.faint};">${escape(c.note)}</td></tr>
-        <tr><td style="padding:0 32px;"><div style="height:1px;background:${COLORS.border};font-size:0;line-height:0;">&nbsp;</div></td></tr>
+        <tr><td align="center" style="padding:8px 32px 24px;font:600 13px/1.5 ${FONT};color:${COLORS.faint};">${keepColors('Works for 10 minutes, once.')}</td></tr>
+        <tr><td style="padding:0 32px 28px;font:400 13px/1.6 ${FONT};color:${COLORS.faint};">${keepColors(escape(c.note))}</td></tr>
+        <tr><td style="padding:0 32px;"><div style="height:1px;${bg(COLORS.border)}font-size:0;line-height:0;">&nbsp;</div></td></tr>
         <tr><td dir="rtl" lang="ar" style="padding:28px 32px 32px;text-align:right;font-family:${FONT_AR};">
-          <h2 style="margin:0 0 8px;font:700 19px/1.5 ${FONT_AR};color:${COLORS.text};">${escape(c.titleAr)}</h2>
+          ${keepColors(`          <h2 style="margin:0 0 8px;font:700 19px/1.5 ${FONT_AR};color:${COLORS.text};">${escape(c.titleAr)}</h2>
           <p style="margin:0 0 12px;font:400 15px/1.8 ${FONT_AR};color:${COLORS.dim};">${escape(c.leadAr)}</p>
           <p style="margin:0 0 8px;font:600 15px/1.8 ${FONT_AR};color:${COLORS.text};">الرمز: <span dir="ltr" style="color:${COLORS.accent};letter-spacing:3px;font-family:${FONT};">${escape(code)}</span> · يعمل لمدة 10 دقائق ولمرة واحدة.</p>
-          <p style="margin:0;font:400 13px/1.8 ${FONT_AR};color:${COLORS.faint};">${escape(c.noteAr)}</p>
+          <p style="margin:0;font:400 13px/1.8 ${FONT_AR};color:${COLORS.faint};">${escape(c.noteAr)}</p>`)}
         </td></tr>
       </table>
     </td></tr>
     <tr><td align="center" style="padding:24px 8px 0;font:400 12px/1.6 ${FONT};color:${COLORS.faint};">
-      Sent by ${link} because a code was asked for on your account.<br>
-      GameShelf will never ask you for this code by message or phone.
+      ${keepColors(`Sent by ${link} because a code was asked for on your account.<br>
+      GameShelf will never ask you for this code by message or phone.`)}
     </td></tr>
   </table>
 </td></tr>
