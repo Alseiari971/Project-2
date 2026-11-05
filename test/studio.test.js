@@ -51,6 +51,37 @@ test('the Studio\'s choices become the pack builder\'s command line, and mistake
   assert.throws(() => buildArgs({ ...base, ueVersion: '5.7; rm -rf' }, where), /looks like UE5_7/);
 });
 
+test('a Studio build of an encrypted Unreal game gets the key from its signed recipe, in the environment only', async (t) => {
+  const { EventEmitter } = require('node:events');
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'gs-studio-'));
+  t.after(() => fs.rm(dataDir, { recursive: true, force: true }));
+  const keyFile = path.join(dataDir, 'pack-signing.key');
+  await fs.writeFile(keyFile, keys.privateKey.export({ type: 'pkcs8', format: 'pem' }));
+  const key = '0x' + 'ab'.repeat(32);
+  const started = [];
+  const spawn = (cmd, args, options) => {
+    started.push({ args, env: options.env });
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter(); child.stderr = new EventEmitter();
+    child.stdout.setEncoding = child.stderr.setEncoding = () => {};
+    child.kill = () => {};
+    setImmediate(() => { child.stdout.emit('end'); child.stderr.emit('end'); child.emit('close', 1, null); });
+    return child;
+  };
+  const asked = [];
+  const studio = createStudio({ paths: { ...paths, python: 'python' }, dataDir, cloud: cloudAs('http://x', null), appKeys: [PUBLIC], spawn,
+    keyFor: async (game) => { asked.push(game); return game === 'steam:4115450' ? key : null; } });
+  studio.saveSettings({ keyFile });
+  const options = { source: 'D:/Games/PBZ', id: 'pbz-ar', version: '1.0.0', steamAppId: '4115450', translate: 'none' };
+  await assert.rejects(studio.build(options));
+  assert.deepEqual(asked, ['steam:4115450']);
+  assert.equal(started[0].env.GAMESHELF_AES_KEY, key);
+  assert.ok(!started[0].args.join(' ').includes(key), 'never on the command line');
+  // A game without a key recipe builds without one.
+  await assert.rejects(studio.build({ ...options, steamAppId: '1' }));
+  assert.equal(started[1].env.GAMESHELF_AES_KEY, undefined);
+});
+
 test('Studio settings: the signing key is checked against the app\'s, and API keys are only stored encrypted', async (t) => {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'gs-studio-'));
   t.after(() => fs.rm(dataDir, { recursive: true, force: true }));

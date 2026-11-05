@@ -98,7 +98,7 @@ function readTree(dir) {
  * `secure` encrypts API keys for storing: { available(), encrypt(text) -> Buffer, decrypt(Buffer) -> text }
  * (Electron's safeStorage); without it, keys are kept for this session only.
  */
-function createStudio({ paths, dataDir, cloud, appKeys = [], secure = null, spawn = defaultSpawn, nodePath = process.execPath }) {
+function createStudio({ paths, dataDir, cloud, appKeys = [], secure = null, spawn = defaultSpawn, nodePath = process.execPath, keyFor = null }) {
   const canStore = () => Boolean(secure?.available());
   const dir = path.join(dataDir, 'studio');
   const settingsFile = path.join(dir, 'settings.json');
@@ -210,6 +210,11 @@ function createStudio({ paths, dataDir, cloud, appKeys = [], secure = null, spaw
     const args = buildArgs(options, { script: paths.script, msgTool: paths.msgTool, keyFile: s.keyFile, outDir, server: cloud.server() });
     const env = { ...process.env, GAMESHELF_TOKEN: '', GAMESHELF_NODE: nodePath, GAMESHELF_SIGNER: paths.signer,
       ...(paths.repak ? { GAMESHELF_REPAK: paths.repak } : {}), ...(paths.retoc ? { GAMESHELF_RETOC: paths.retoc } : {}), ELECTRON_RUN_AS_NODE: '1', PYTHONIOENCODING: 'utf-8:backslashreplace', PYTHONUNBUFFERED: '1', PYTHONUTF8: '1', PYTHONDONTWRITEBYTECODE: '1' };
+    // An encrypted Unreal game: its key from the game's signed key recipe, in the environment only (never on the
+    // command line or in the log), as for the Arabic switch's builds.
+    const serverKey = options.steamAppId ? `steam:${options.steamAppId}` : options.gameId ? `game:${options.gameId}` : null;
+    const aesKey = keyFor && serverKey ? await Promise.resolve(keyFor(serverKey)).catch(() => null) : null;
+    if (aesKey && /^0x[0-9A-Fa-f]{64}$/.test(aesKey)) env.GAMESHELF_AES_KEY = aesKey;
     if (options.translate === 'provider') {
       const key = apiKey(options.provider);
       if (!key) throw new StudioError('Save your API key for that provider first.');

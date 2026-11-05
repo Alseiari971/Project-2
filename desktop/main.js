@@ -408,6 +408,8 @@ const studio = createStudio({
   paths: builderPaths,
   dataDir,
   cloud,
+  // An encrypted Unreal game's key, from its admin-signed key recipe (the same one the Arabic switch uses).
+  keyFor: (serverKey) => unrealKey(recipes, serverKey),
   appKeys: [packKey].filter(Boolean),
   secure: {
     available: () => app.isReady() && safeStorage.isEncryptionAvailable(),
