@@ -40,9 +40,10 @@ function securityHeaders(req, res, next) {
     'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()',
     'Content-Security-Policy':
       "default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; " +
-      "img-src 'self' https: data:; style-src 'self'; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; " +
-      // Trailers play in YouTube's privacy-friendly player; Steam's short clips stream from its servers.
-      "frame-src https://www.youtube-nocookie.com; media-src https://*.steamstatic.com",
+      "img-src 'self' https: data:; style-src 'self'; font-src 'self'; connect-src 'self' https://video.akamai.steamstatic.com; frame-ancestors 'none'; " +
+      // Trailers play in YouTube's privacy-friendly player, or stream from Steam (HLS: natively in
+      // Safari, through hls.js and a blob: media source elsewhere); Steam's short clips too.
+      "frame-src https://www.youtube-nocookie.com; media-src https://*.steamstatic.com blob:",
   });
   // HTTPS only from now on, once the site was reached over HTTPS (behind Caddy, req.secure follows X-Forwarded-Proto).
   if (req.secure) res.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');

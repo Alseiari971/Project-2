@@ -46,11 +46,45 @@ function fakeWeb({ wikidataDown = false, steamStatus = 200 } = {}) {
         } } });
       }
     }
+    if (u.host === 'api.steampowered.com' && u.pathname === '/IStoreBrowseService/GetItems/v1/') {
+      if (steamStatus !== 200) return reply({}, steamStatus);
+      const { ids } = JSON.parse(u.searchParams.get('input_json'));
+      const item = ({ appid }) => (appid === 598190 ? { appid, type: 4, name: 'Hollow Knight - Official Soundtrack', assets: {} } : {
+        appid, type: 0, name: 'x',
+        assets: {
+          asset_url_format: `steam/apps/${appid}/\${FILENAME}?t=1`, main_capsule: 'aa11/capsule_616x353.jpg', header: 'bb22/header.jpg',
+          library_capsule_2x: 'cc33/library_600x900_2x.jpg', library_hero: 'dd44/library_hero.jpg', ...(appid === 367520 ? { library_logo: 'ee55/logo.png' } : {}),
+        },
+        trailers: appid === 367520 ? { highlights: [{
+          trailer_name: 'Release Trailer', trailer_url_format: 'steam/apps/${FILENAME}?t=2', screenshot_full: '256679401/movie.jpg',
+          microtrailer: [{ filename: '367520/1/abc/microtrailer.mp4', type: 'video/mp4' }],
+          adaptive_trailers: [{ cdn_path: '367520/1/abc/dash_h264.mpd', encoding: 'dash_h264' }, { cdn_path: '367520/1/abc/hls_264_master.m3u8', encoding: 'hls_h264' }],
+        }] } : {},
+      });
+      return reply({ response: { store_items: ids.map(item) } });
+    }
+    if (u.host === 'en.wikipedia.org' || u.host === 'ar.wikipedia.org') {
+      const title = decodeURIComponent(u.pathname.split('/').pop()).replace(/_/g, ' ');
+      const pages = { 'en:Bloodborne': 'Bloodborne is a 2015 action role-playing game developed by FromSoftware.', 'ar:بلود بورن': 'بلود بورن لعبة تقمص أدوار وحركة صدرت سنة 2015.' };
+      const text = pages[`${u.host.slice(0, 2)}:${title}`];
+      return text ? reply({ type: 'standard', extract: text, content_urls: { desktop: { page: `https://${u.host}/wiki/${encodeURIComponent(title)}` } } }) : reply({}, 404);
+    }
+    if (u.host === 'www.wikidata.org' && u.pathname === '/w/api.php') {
+      // Wikidata's search: Bloodborne for "bloodborne", else two games that aren't on Steam.
+      if (wikidataDown) return reply({}, 503);
+      const ids = /bloodborne/i.test(u.searchParams.get('search')) ? ['Q17154554'] : ['Q64577191', 'Q999'];
+      return reply({ search: [...ids.map((id) => ({ id, description: '2023 video game' })), { id: 'Q12393', description: 'video game series' }] });
+    }
     if (u.host === 'query.wikidata.org') {
       if (wikidataDown) return reply({}, 503);
       const query = u.searchParams.get('query');
       const b = (o) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, { value: v }]));
-      if (query.includes('EntitySearch')) {
+      if (query.includes('wd:Q17154554')) {
+        return reply({ results: { bindings: [
+          b({ item: 'http://www.wikidata.org/entity/Q17154554', label: 'Bloodborne', ar: 'بلود بورن', platform: 'http://www.wikidata.org/entity/Q5014725', enwiki: 'Bloodborne', arwiki: 'بلود بورن' }),
+        ] } });
+      }
+      if (query.includes('wd:Q64577191')) {
         return reply({ results: { bindings: [
           b({ item: 'http://www.wikidata.org/entity/Q64577191', label: 'The Legend of Zelda: Tears of the Kingdom', ar: 'أسطورة زيلدا: دموع المملكة', date: '2023-05-12T00:00:00Z' }),
           b({ item: 'http://www.wikidata.org/entity/Q999', label: 'Alan Wake 2', epic: 'alan-wake-2', engineLabel: 'Northlight Engine' }),
@@ -94,11 +128,17 @@ test('search: Steam\'s results with Wikidata\'s Arabic titles; soundtracks left 
   const { results } = await p.search({ query: 'hollow knight' });
   assert.deepEqual(results.slice(0, 2).map((g) => [g.id, g.name, g.steamAppId]), [['hollow-knight', 'Hollow Knight', 367520], ['hollow-knight-silksong', 'Hollow Knight: Silksong', 1030300]]);
   assert.ok(!results.some((g) => /Soundtrack/.test(g.name)));
-  assert.equal(results[0].nameAr, 'هولو نايت');
-  assert.equal(results[0].engine, 'unity');
-  // Steam's newer artwork folder, with the old fixed address as the fallback.
-  assert.equal(results[0].image, 'https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/367520/fba7/capsule_616x353.jpg');
-  assert.equal(results[0].fallbackImage, 'https://cdn.cloudflare.steamstatic.com/steam/apps/367520/capsule_616x353.jpg');
+  // Steam's exact artwork (newer games keep it at hashed addresses), from one store-items request.
+  assert.equal(results[0].image, 'https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/367520/aa11/capsule_616x353.jpg?t=1');
+  assert.equal(results[0].poster, 'https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/367520/cc33/library_600x900_2x.jpg?t=1');
+  assert.equal(results[0].logo, 'https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/367520/ee55/logo.png?t=1');
+  assert.equal(results[1].logo, null, 'no logo rather than a broken one');
+  assert.equal(web.calls.filter((c) => c.host === 'api.steampowered.com').length, 1);
+  // Arabic titles and engines come from Wikidata in the background, so search answers at once.
+  await p.settled();
+  const again = (await p.search({ query: 'hollow knight' })).results;
+  assert.equal(again[0].nameAr, 'هولو نايت');
+  assert.equal(again[0].engine, 'unity');
   // Wikidata was asked with GameShelf's User-Agent, and Twitch/IGDB never.
   const wd = web.calls.find((c) => c.host === 'query.wikidata.org');
   assert.equal(wd.headers['User-Agent'], USER_AGENT);
@@ -137,7 +177,13 @@ test('a game page: Steam\'s details, Wikidata\'s Arabic and stores, kept for the
   assert.deepEqual(g.languages.map((l) => [l.name, l.audio]), [['English', true], ['Arabic', false], ['French', false]]);
   assert.equal(g.scores.critics.score, 87);
   assert.ok(g.links.some((l) => l.url === 'https://www.wikidata.org/wiki/Q29300592'));
-  assert.equal(g.media[0].full, 'https://x/f.jpg?t=3');
+  // Trailers first (Steam's HLS stream, with its short clip as the preview), then screenshots.
+  assert.deepEqual(g.media[0], {
+    type: 'video', name: 'Release Trailer', thumb: 'https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/256679401/movie.jpg?t=2',
+    hls: 'https://video.akamai.steamstatic.com/store_trailers/367520/1/abc/hls_264_master.m3u8',
+    preview: 'https://video.akamai.steamstatic.com/store_trailers/367520/1/abc/microtrailer.mp4',
+  });
+  assert.equal(g.media[1].full, 'https://x/f.jpg?t=3');
 
   // Within the TTL: nothing is asked again.
   const before = web.calls.length;
@@ -178,7 +224,8 @@ test('games that aren\'t on Steam come from Wikidata, with their Epic or GOG sto
   assert.equal(alan.engineLabel, 'Northlight Engine');
   // Arabic searches go to Wikidata.
   await p.search({ query: 'زيلدا' });
-  assert.match(web.calls.filter((c) => c.host === 'query.wikidata.org').at(-1).url, /mwapi%3Alanguage\+%22ar%22|mwapi:language "ar"|language\+%22ar%22/);
+  const find = new URL(web.calls.filter((c) => c.host === 'www.wikidata.org').at(-1).url);
+  assert.deepEqual([find.searchParams.get('action'), find.searchParams.get('search'), find.searchParams.get('language')], ['wbsearchentities', 'زيلدا', 'ar']);
 });
 
 test('Wikidata down: Steam stands alone. Steam refusing: back off and use what\'s saved', async () => {
@@ -263,4 +310,54 @@ test('an old id with a suffix ("hollow-knight--1") becomes another name for the 
   const before = searches();
   assert.equal((await p.getGame('hollow-knight--1')).id, 'hollow-knight');
   assert.equal(searches(), before);
+});
+
+test('search finds the game, not its DLC, season passes or games that merely share a word', async () => {
+  const calls = [];
+  const fetchImpl = async (url) => {
+    const u = new URL(url);
+    calls.push(u);
+    const reply = (body) => ({ ok: true, status: 200, json: async () => body });
+    const row = (appid, name) => `<a href="https://store.steampowered.com/app/${appid}/x/" data-ds-appid="${appid}" class="search_result_row"><div class="search_name"><span class="title">${name}</span></div></a>`;
+    if (u.pathname === '/search/results/') {
+      return reply({ total_count: 6, results_html: [
+        row(3606480, 'Call of Duty®: Black Ops 7'), row(4200780, 'Call of Duty®: Black Ops 7 - BlackCell (Season 06)'),
+        row(2170970, 'Call of Duty®: Black Ops 7 or Call of Duty®: Warzone™ Points'), row(311210, 'Call of Duty®: Black Ops III'),
+        row(1, 'Seven Nights of the Black Tide'), row(4098660, 'Call of Duty®: Black Ops 7 - Arachnid\'s Mark: Starter Pack'),
+      ].join('') });
+    }
+    if (u.host === 'api.steampowered.com') {
+      const { ids } = JSON.parse(u.searchParams.get('input_json'));
+      return reply({ response: { store_items: ids.map(({ appid }) => ({ appid, type: appid === 4200780 ? 4 : 0, name: 'x', assets: {} })) } });
+    }
+    if (u.host === 'query.wikidata.org') return reply({ results: { bindings: [] } });
+    throw new Error(`unexpected ${u}`);
+  };
+  const p = createSteamWikidataProvider({ db: openDatabase(':memory:'), fetchImpl, sleep: async () => {}, steamGapMs: 0, steamListGapMs: 0, wikidataGapMs: 0, steamApiGapMs: 0 });
+  const { results } = await p.search({ query: 'black ops 7' });
+  assert.deepEqual(results.map((g) => g.name), ['Call of Duty®: Black Ops 7']);
+  const list = calls.find((u) => u.pathname === '/search/results/');
+  assert.deepEqual([list.searchParams.get('term'), list.searchParams.get('category1')], ['black ops 7', '998'], 'games only');
+  // Asked for by name, an add-on is found.
+  assert.ok((await p.search({ query: 'warzone points' })).results.some((g) => /Points/.test(g.name)));
+  // "Newest" is Steam's popular new releases.
+  await p.search({ sort: 'new' });
+  assert.equal(calls.filter((u) => u.pathname === '/search/results/').at(-1).searchParams.get('filter'), 'popularnew');
+});
+
+test('a game that isn\'t on Steam: Wikipedia\'s summary (credited), its platforms and their stores', async () => {
+  const web = fakeWeb();
+  const p = provider(web);
+  const { results } = await p.search({ query: 'bloodborne' });
+  assert.deepEqual(results.map((g) => [g.id, g.steamAppId]), [['bloodborne', null]]);
+  const g = await p.getGame('bloodborne');
+  assert.equal(g.description, 'Bloodborne is a 2015 action role-playing game developed by FromSoftware.');
+  assert.deepEqual(g.descriptionSource, { name: 'Wikipedia', url: 'https://en.wikipedia.org/wiki/Bloodborne', license: 'CC BY-SA 4.0' });
+  assert.equal(g.descriptionAr, 'بلود بورن لعبة تقمص أدوار وحركة صدرت سنة 2015.');
+  assert.equal(g.descriptionArSource.license, 'CC BY-SA 4.0');
+  assert.deepEqual(g.platforms, ['PlayStation 4']);
+  assert.deepEqual(g.buy.links.map((l) => [l.store, l.direct]), [['playstation', false]]);
+  assert.equal(g.nameAr, 'بلود بورن');
+  // Wikipedia was asked with GameShelf's User-Agent.
+  assert.ok(web.calls.filter((c) => /wikipedia/.test(c.host)).every((c) => c.headers['User-Agent'] === USER_AGENT));
 });

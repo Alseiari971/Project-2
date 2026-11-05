@@ -49,9 +49,10 @@ export function th(text, parts) {
   return raw(escapeHtml(t(text)).replace(/\{(\w+)\}/g, (m, k) => (k in parts ? html`${parts[k]}`.value : m)));
 }
 
-/** Renders a template into an element and applies dynamic styles. */
+/** Renders a template into an element and applies dynamic styles. Nothing ('' or null) empties it. */
 export function mount(el, content) {
-  el.innerHTML = content.value;
+  // A plain value (not an html`` template) is shown as text, escaped; nothing leaves the element empty.
+  el.innerHTML = content instanceof Raw ? content.value : html`${content}`.value;
   applyStyles(el);
   return el;
 }

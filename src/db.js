@@ -117,6 +117,13 @@ const LATE_COLUMNS = {
     review_count: 'INTEGER',
     details_at: 'INTEGER',
     wikidata_at: 'INTEGER',
+    // Steam's store item (IStoreBrowseService): its type (0 a game, 4 DLC...), exact artwork, when it was read.
+    steam_type: 'INTEGER',
+    logo: 'TEXT',
+    assets_at: 'INTEGER',
+    // The game's English and Arabic Wikipedia articles (from Wikidata), for its summary.
+    wiki_en: 'TEXT',
+    wiki_ar: 'TEXT',
   },
 };
 

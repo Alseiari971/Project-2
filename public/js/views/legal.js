@@ -18,6 +18,8 @@ export async function legalView(app) {
         <ul class="plain-list">
           ${item('Game details, artwork and screenshots:', "each game's public {steam} page, written by its publisher.", { steam: link('https://store.steampowered.com', 'Steam store') })}
           ${item('Arabic titles, game engines and other stores\' links:', '{wikidata}, the free knowledge base, whose data is public domain (CC0).', { wikidata: link('https://www.wikidata.org', 'Wikidata') })}
+          ${item('Artwork and trailers', 'come from Steam\'s store and play from Steam\'s servers; trailers use the open-source hls.js player (Apache License 2.0) where the browser needs it.')}
+          ${item('Descriptions of games that aren\'t on Steam:', 'the summary of the game\'s {wikipedia} article, under CC BY-SA 4.0, linked on each page.', { wikipedia: link('https://www.wikipedia.org', 'Wikipedia') })}
           ${item('PC prices and deals:', '{cheapshark}. Buy buttons go through CheapShark to the store, and prices can change at any time. Always check the price on the store before you pay.', { cheapshark: link('https://www.cheapshark.com', 'CheapShark') })}
           ${item('"About this game", system requirements, achievements and features:', "each game's public Steam store page, written by the publisher.")}
           ${item('Metacritic scores', 'come from Steam and link to {metacritic}.', { metacritic: link('https://www.metacritic.com', 'Metacritic') })}

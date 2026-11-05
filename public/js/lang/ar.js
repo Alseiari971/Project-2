@@ -1693,6 +1693,12 @@ export const AR = {
   'Unreal Engine': 'Unreal Engine',
   'Ready · key attached': 'جاهز · أُرفق المفتاح',
   'Ready · recipe attached': 'جاهز · أُرفقت الوصفة',
+  'This browser can\'t play the trailer here. It plays on the game\'s Steam page.': 'لا يستطيع هذا المتصفح تشغيل العرض الدعائي هنا. يمكنك مشاهدته في صفحة اللعبة على Steam.',
+  'From {wikipedia}, under {license}.': 'من {wikipedia}، بموجب رخصة {license}.',
+  'Artwork and trailers': 'الصور والعروض الدعائية',
+  'come from Steam\'s store and play from Steam\'s servers; trailers use the open-source hls.js player (Apache License 2.0) where the browser needs it.': 'تأتي من متجر Steam وتُعرض من خوادمه، وتستخدم العروض الدعائية مشغّل hls.js مفتوح المصدر (رخصة Apache 2.0) حين يحتاجه المتصفح.',
+  'Descriptions of games that aren\'t on Steam:': 'أوصاف الألعاب غير الموجودة على Steam:',
+  'the summary of the game\'s {wikipedia} article, under CC BY-SA 4.0, linked on each page.': 'ملخص مقالة اللعبة في {wikipedia}، بموجب رخصة CC BY-SA 4.0، مع رابط لها في كل صفحة.',
 };
 
 // Arabic counts have six forms: no items, one, two, three to ten, eleven to

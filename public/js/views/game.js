@@ -87,8 +87,12 @@ function mediaSection(media) {
 }
 
 // A video starts as its thumbnail with a play button, so nothing loads from
-// YouTube until someone chooses to watch.
+// YouTube or Steam until someone chooses to watch.
 function stage(m, play = false) {
+  // Steam's trailers stream as HLS: Safari plays it as it is; other browsers get hls.js (wireTrailer).
+  if (m.type === 'video' && m.hls && play) {
+    return html`<video class="stage-player" controls autoplay playsinline preload="metadata" poster="${m.thumb || ''}" data-hls="${m.hls}" aria-label="${m.name}"></video>`;
+  }
   if (m.type === 'video' && play) {
     return html`<iframe src="https://www.youtube-nocookie.com/embed/${m.youtubeId}?autoplay=1&rel=0" title="${m.name}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe>`;
   }
@@ -99,6 +103,54 @@ function stage(m, play = false) {
     </button>`;
   }
   return html`<a href="${m.full}" target="_blank" rel="noopener noreferrer" aria-label="${t('Open full-size screenshot')}"><img src="${m.full}" alt="" referrerpolicy="no-referrer"></a>`;
+}
+
+// hls.js (Apache-2.0, public/js/vendor), loaded only when a browser without HLS plays a trailer.
+let hlsLoading = null;
+let activeHls = null;
+const loadHls = () => (hlsLoading ||= new Promise((resolve, reject) => {
+  const s = document.createElement('script');
+  s.src = '/js/vendor/hls.light.min.js';
+  s.onload = () => resolve(window.Hls);
+  s.onerror = () => { hlsLoading = null; reject(new Error('player')); };
+  document.head.append(s);
+}));
+function stopTrailer() {
+  activeHls?.destroy();
+  activeHls = null;
+}
+async function wireTrailer(video) {
+  const url = video.dataset.hls;
+  if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    video.src = url;
+    return;
+  }
+  try {
+    const Hls = await loadHls();
+    if (!Hls?.isSupported()) throw new Error('unsupported');
+    stopTrailer();
+    activeHls = new Hls({ enableWorker: false, capLevelToPlayerSize: true });
+    activeHls.loadSource(url);
+    activeHls.attachMedia(video);
+  } catch {
+    toast(t('This browser can\'t play the trailer here. It plays on the game\'s Steam page.'), { error: true });
+  }
+}
+
+/**
+ * The game's description: in Arabic when the page is and there's Arabic, else
+ * English. Text from Wikipedia (CC BY-SA 4.0) says so and links the article.
+ */
+function aboutText(game) {
+  const arabic = isArabic && game.descriptionAr && game.descriptionAr.length > 40;
+  const text = arabic ? game.descriptionAr : game.description;
+  const source = arabic ? game.descriptionArSource : game.descriptionSource;
+  if (!text) return html`<p class="muted">${t('No description yet.')}</p>`;
+  return html`<p class="prose" dir="auto">${text}</p>
+    ${source ? html`<p class="fine-print">${th('From {wikipedia}, under {license}.', {
+      wikipedia: html`<a href="${source.url}" target="_blank" rel="noopener noreferrer">${arabic ? 'ويكيبيديا' : 'Wikipedia'}</a>`,
+      license: html`<a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer">CC BY-SA 4.0</a>`,
+    })}</p>` : ''}`;
 }
 
 function wireMedia(root) {
@@ -114,8 +166,12 @@ function wireMedia(root) {
     const thumb = media[i].getBoundingClientRect();
     const box = strip.getBoundingClientRect();
     strip.scrollBy({ left: thumb.left + thumb.width / 2 - (box.left + box.width / 2), behavior: 'smooth' });
+    stopTrailer();
     mount(stageEl, stage(gameMedia[i], play));
+    const player = stageEl.querySelector('video[data-hls]');
+    if (player) wireTrailer(player);
   };
+  onLeave(stopTrailer);
 
   // Arrow buttons and faded edges, like the rows on the home page.
   const wrap = strip.parentElement;
@@ -277,7 +333,7 @@ export async function gameView(app, id, params) {
         <header class="gp-head">
           ${cover
             ? html`<img class="gp-cover ${game.poster ? 'tall' : ''}" src="${cover}" alt="" referrerpolicy="no-referrer">`
-            : html`<span class="gp-cover art-fallback" data-hue="${hueFor(game.name)}"></span>`}
+            : html`<span class="gp-cover art-fallback" data-hue="${hueFor(game.name)}"><bdi>${game.name}</bdi></span>`}
           <div class="gp-main-head">
             <h1>${bdi(game.name)}</h1>
             ${game.nameAr && game.nameAr !== game.name ? html`<p class="gp-name-ar" lang="ar" dir="rtl">${game.nameAr}</p>` : ''}
@@ -307,7 +363,7 @@ export async function gameView(app, id, params) {
             <div id="scores">${scoresSection(game, null)}</div>
             <section class="panel" id="about">
               <h2>${t('About this game')}</h2>
-              <div id="about-body">${game.description ? html`<p class="prose" dir="auto">${game.description}</p>` : html`<p class="muted">${t('No description yet.')}</p>`}</div>
+              <div id="about-body">${aboutText(game)}</div>
             </section>
             ${addons.length ? html`
               <section class="panel" id="addons">
