@@ -48,11 +48,36 @@ class SourceError(ValueError):
     pass
 
 
+# Text read from bytes that weren't UTF-8 keeps each bad byte as a lone surrogate (U+DC80-U+DCFF,
+# Python's "surrogateescape"), which can't be saved or sent as UTF-8.
+_SURROGATE = re.compile('[\ud800-\udfff]')
+_ESCAPED_BYTE = re.compile('[\udc80-\udcff]')
+
+
+def clean_text(text):
+    """`text` without lone surrogates: escaped bytes that make UTF-8 together are put back together, the rest
+    are read as Windows-1252 (the usual older code page in games: 0xC6 is Æ), and anything else becomes U+FFFD."""
+    if not isinstance(text, str) or not _SURROGATE.search(text):
+        return text
+    try:
+        raw = text.encode('utf-8', 'surrogateescape')
+    except UnicodeEncodeError:
+        return _SURROGATE.sub('\ufffd', text)
+    mixed = raw.decode('utf-8', 'surrogateescape')
+    fixed = _ESCAPED_BYTE.sub(lambda m: bytes([ord(m.group()) - 0xDC00]).decode('cp1252', 'replace'), mixed)
+    return _SURROGATE.sub('\ufffd', fixed)
+
+
 @dataclass
 class Row:
     source: str
     arabic: str | None = None
     key: str | None = None
+
+    def __post_init__(self):
+        self.source = clean_text(self.source)
+        self.arabic = clean_text(self.arabic)
+        self.key = clean_text(self.key)
 
 
 @dataclass

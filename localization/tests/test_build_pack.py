@@ -487,3 +487,19 @@ class Building(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class StrayBytesTest(unittest.TestCase):
+    """Game text with bytes that weren't UTF-8 (kept as lone surrogates) can't stop a build."""
+
+    def test_stray_bytes_become_letters_and_every_line_can_be_saved(self):
+        from arabic_compiler.sources import Row, clean_text
+        # 0xC6 alone is Windows-1252 for Æ; 0xC3 0xA9 together are UTF-8 for é.
+        self.assertEqual(clean_text('Caf\udcc6 noir'), 'CafÆ noir')
+        self.assertEqual(clean_text('Caf\udcc3\udca9'), 'Café')
+        self.assertEqual(clean_text('half \ud83d pair'), 'half � pair')  # a lone UTF-16 half
+        self.assertEqual(clean_text('plain'), 'plain')
+        self.assertIsNone(clean_text(None))
+        row = Row('Moon \udcc6 sweeper', key='k\udcc6')
+        self.assertEqual((row.source, row.key), ('Moon Æ sweeper', 'kÆ'))
+        row.source.encode('utf-8')  # no error

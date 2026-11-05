@@ -158,7 +158,8 @@ function createPackBuilder({ paths, outDir, keyFile, spawn = defaultSpawn, nodeP
         // An encrypted Unreal game's key, from its admin-signed recipe: in the environment, never on a command line or in a log.
         GAMESHELF_AES_KEY: game.tier === 'unreal-pak' && AES_KEY.test(game.aesKey || '') ? game.aesKey : '',
         ELECTRON_RUN_AS_NODE: '1',
-        PYTHONIOENCODING: 'utf-8',
+        // A stray byte in a game's text shouldn't stop the build at a log line.
+        PYTHONIOENCODING: 'utf-8:backslashreplace',
         // Each progress line as it's printed: piped, Python would hold them back in 8 KB blocks,
         // and the button would sit on "Reading game text…" while the game was being translated.
         PYTHONUNBUFFERED: '1',

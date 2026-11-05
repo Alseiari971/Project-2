@@ -193,7 +193,7 @@ function createStudio({ paths, dataDir, cloud, appKeys = [], secure = null, spaw
   async function startBuild(options, { onLog, onProgress }) {
     const s = readSettings();
     const args = buildArgs(options, { script: paths.script, msgTool: paths.msgTool, keyFile: s.keyFile, outDir, server: cloud.server() });
-    const env = { ...process.env, GAMESHELF_TOKEN: '', GAMESHELF_NODE: nodePath, GAMESHELF_SIGNER: paths.signer, ELECTRON_RUN_AS_NODE: '1', PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1', PYTHONUTF8: '1', PYTHONDONTWRITEBYTECODE: '1' };
+    const env = { ...process.env, GAMESHELF_TOKEN: '', GAMESHELF_NODE: nodePath, GAMESHELF_SIGNER: paths.signer, ELECTRON_RUN_AS_NODE: '1', PYTHONIOENCODING: 'utf-8:backslashreplace', PYTHONUNBUFFERED: '1', PYTHONUTF8: '1', PYTHONDONTWRITEBYTECODE: '1' };
     if (options.translate === 'provider') {
       const key = apiKey(options.provider);
       if (!key) throw new StudioError('Save your API key for that provider first.');
