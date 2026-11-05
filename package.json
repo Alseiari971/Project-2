@@ -70,9 +70,11 @@
           ]
         }
       ],
-      "icon": "desktop/icon.png"
+      "icon": "desktop/icon.ico"
     },
     "nsis": {
+      "installerIcon": "desktop/icon.ico",
+      "uninstallerIcon": "desktop/icon.ico",
       "artifactName": "GameShelf-Setup.${ext}",
       "shortcutName": "GameShelf",
       "oneClick": false,

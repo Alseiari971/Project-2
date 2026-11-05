@@ -191,7 +191,8 @@ function createWindow(startPath) {
     minWidth: 960,
     minHeight: 600,
     title: 'GameShelf',
-    icon: path.join(__dirname, 'icon.png'),
+    // Windows takes the .ico, with its small sizes drawn for the taskbar.
+    icon: path.join(__dirname, process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
     backgroundColor: CHROME_COLOR,
     show: false,
     // GameShelf's top bar is the title bar. On Windows and Linux the page draws

@@ -192,8 +192,13 @@ a.tag:hover { background: #3a3c43; }
   border-bottom: 1px solid var(--border);
 }
 .topbar-left { display: flex; align-items: center; justify-content: space-between; padding-inline: 24px 16px; }
-.logo { font-size: 20px; font-weight: 800; letter-spacing: -0.05em; }
-.logo span { color: var(--accent); }
+.logo { display: inline-flex; align-items: center; gap: 9px; font-size: 20px; font-weight: 800; letter-spacing: -0.05em; }
+.logo .logo-word { color: var(--text); }
+.logo .logo-word span { color: var(--accent); }
+/* The G + ع mark (drawn from Hamad's sketch), in the page's accent. */
+.logo-mark { width: 30px; height: 30px; flex: none; fill: none; stroke: var(--accent); stroke-width: 52; stroke-linecap: round; stroke-linejoin: round; }
+[dir="rtl"] .logo-word { letter-spacing: 0; font-family: "Thmanyah Local", "Alexandria", sans-serif; }
+.empty-art { width: 180px; height: auto; margin-bottom: 8px; }
 .history { display: flex; gap: 4px; }
 .topbar-center { display: flex; align-items: center; justify-content: center; gap: 8px; }
 .search-pill {

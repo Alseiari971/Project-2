@@ -7,6 +7,17 @@
   <title>GameShelf</title>
   <meta name="description" content="Discover every game, find where to buy it, and share the games you've played.">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="GameShelf">
+  <meta property="og:title" content="GameShelf · قيم شلف">
+  <meta property="og:description" content="Discover every game, find where to buy it, share what you play, and play it in Arabic. Arabic packs are always free.">
+  <meta property="og:url" content="https://gameshelf.ae/">
+  <meta property="og:image" content="https://gameshelf.ae/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="The GameShelf mark, a G drawn with the Arabic letter ع, beside GameShelf and قيم شلف">
+  <meta name="twitter:card" content="summary_large_image">
   <script src="/js/boot.js"></script>
   <link rel="stylesheet" href="/css/styles.css">
   <script type="module" src="/js/main.js"></script>
@@ -15,7 +26,7 @@
   <!-- App shell in the style of a desktop game launcher: top bar, sidebar, content. -->
   <header class="topbar" id="topbar">
     <div class="topbar-left">
-      <a href="#/" class="logo" aria-label="GameShelf home">Game<span>Shelf</span></a>
+      <a href="#/" class="logo" aria-label="GameShelf home"><svg class="logo-mark" viewBox="0 0 512 512" aria-hidden="true" focusable="false"><path d="M343.3,198.4 C316.2,182 292.6,166.5 266.8,163.1 C202.3,155.4 120.6,211.3 118.4,301.6 C116.3,391.9 185.1,440 260.3,437 C333.4,434 396.6,394 394,338.1 C391.4,295.1 359.2,280.9 326.9,284.4 C294.7,288.7 267.6,309.3 254.7,331.7"/><path d="M266.8,163.1 C265.9,125.3 296,91.7 329.1,87.8 C353.6,85.3 369.9,94.3 379.4,105.5"/></svg><span class="logo-word">Game<span>Shelf</span></span></a>
       <div class="history">
         <button type="button" class="ghost-btn" id="go-back" aria-label="Back"></button>
         <button type="button" class="ghost-btn" id="go-forward" aria-label="Forward"></button>
@@ -33,9 +44,9 @@
   <div class="content">
     <main id="app" tabindex="-1"></main>
     <footer class="footer">
-      <p>GameShelf doesn't sell anything. Every buy button goes straight to the store. <a href="#/legal">About & legal</a></p>
+      <p>Arabic packs are free for everyone. Buy buttons go straight to the store. <a href="#/legal">About & legal</a></p>
       <p id="data-credit"></p>
-      <p>Game names, art and trademarks belong to their owners. Not affiliated with Valve, Twitch or any publisher.</p>
+      <p>Game names, art and trademarks belong to their owners. Not affiliated with Valve or any publisher.</p>
     </footer>
   </div>
 

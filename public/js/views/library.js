@@ -45,7 +45,9 @@ export async function libraryView(app, params) {
       .sort(SORTS[ui.sort].compare);
     if (!state.library.length) {
       return emptyState(t('Nothing on your shelf yet'), t('Add games from any game page, or bring in your whole Steam library.'),
-        html`<div class="empty-actions"><a class="pill-btn pill-light" href="#/import">${t('Import from Steam')}</a><a class="pill-btn" href="#/browse">${t('Find games')}</a></div>`);
+        html`<div class="empty-actions"><a class="pill-btn pill-light" href="#/import">${t('Import from Steam')}</a><a class="pill-btn" href="#/browse">${t('Find games')}</a></div>`,
+        // The ع whose tail is a shelf, waiting for games.
+        html`<img class="empty-art" src="/img/empty-shelf.svg" alt="" width="180" height="138">`);
     }
     if (!shown.length) return emptyState(t('No games match'), t('Try another search or filter.'));
     if (ui.status !== 'all') return block(shown);

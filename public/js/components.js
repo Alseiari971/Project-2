@@ -253,8 +253,8 @@ export function levelBadge(level, size = '') {
   return html`<span class="level level-tier-${tier} ${size}" title="${t('Level {n}', { n: level })}"><span>${level}</span></span>`;
 }
 
-export const emptyState = (title, body = '', action = '') =>
-  html`<div class="empty"><h3>${title}</h3>${body ? html`<p>${body}</p>` : ''}${action}</div>`;
+export const emptyState = (title, body = '', action = '', art = '') =>
+  html`<div class="empty">${art}<h3>${title}</h3>${body ? html`<p>${body}</p>` : ''}${action}</div>`;
 
 // ---- Loading skeletons ------------------------------------------------------------
 

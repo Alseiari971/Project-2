@@ -44,6 +44,8 @@ function renderTopbar() {
   label('home-btn', 'Home');
   label('search-open', 'Search games (Ctrl+K)');
   document.querySelector('.topbar .logo').setAttribute('aria-label', t('GameShelf home'));
+  // The wordmark beside the G + ع mark: «قيم شلف» on the Arabic site.
+  mount(document.querySelector('.topbar .logo-word'), lang === 'ar' ? html`قيم <span>شلف</span>` : html`Game<span>Shelf</span>`);
   mount(document.querySelector('.footer'), html`
     <p>${th("Arabic packs are free for everyone. Buy buttons go straight to the store. {legal}", { legal: html`<a href="#/legal">${t('About & legal')}</a>` })} · <a href="#/support">${t('Support')}</a></p>
     <p id="data-credit"></p>
