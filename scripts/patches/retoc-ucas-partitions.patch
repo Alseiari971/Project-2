@@ -1,0 +1,98 @@
+diff --git a/retoc/src/iostore.rs b/retoc/src/iostore.rs
+index 73df7a6..8ff5504 100644
+--- a/retoc/src/iostore.rs
++++ b/retoc/src/iostore.rs
+@@ -1,7 +1,7 @@
+ use std::{
+     collections::HashSet,
+     ffi::OsStr,
+-    io::{BufReader, Cursor},
++    io::{BufReader, Cursor, Read, Seek, SeekFrom},
+     path::{Path, PathBuf},
+     sync::Arc,
+ };
+@@ -310,15 +310,47 @@ pub struct IoStoreContainer {
+     #[allow(unused)]
+     path: PathBuf,
+     toc: Toc,
+-    cas: FilePool,
++    /// One pool per .ucas partition: X.ucas, then X_s1.ucas, X_s2.ucas, ...
++    cas: Vec<FilePool>,
+ 
+     container_header: Option<FIoContainerHeader>,
+ }
++
++/// A partition file seen at the container's global offsets: compression block offsets count across
++/// all partitions, so partition N starts at N * partition_size.
++struct PartitionView<'a> {
++    file: &'a mut fs::File,
++    base: u64,
++}
++impl Read for PartitionView<'_> {
++    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
++        self.file.read(buf)
++    }
++}
++impl Seek for PartitionView<'_> {
++    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
++        let local = match pos {
++            SeekFrom::Start(p) => SeekFrom::Start(p.checked_sub(self.base).ok_or_else(|| std::io::Error::other("offset is before this .ucas partition"))?),
++            other => other,
++        };
++        Ok(self.file.seek(local)? + self.base)
++    }
++}
+ impl IoStoreContainer {
+     pub fn open<P: AsRef<Path>>(toc_path: P, config: Arc<Config>) -> Result<Self> {
+         let path = toc_path.as_ref().to_path_buf();
+         let toc: Toc = BufReader::new(fs::File::open(&path)?).de_ctx(config.clone())?;
+-        let cas = FilePool::new(path.with_extension("ucas"), rayon::max_num_threads())?;
++        let partitions = toc.partition_count.max(1);
++        let mut cas = Vec::with_capacity(partitions as usize);
++        for index in 0..partitions {
++            let ucas = if index == 0 {
++                path.with_extension("ucas")
++            } else {
++                let stem = path.file_stem().context("failed to get container name")?.to_string_lossy();
++                path.with_file_name(format!("{stem}_s{index}.ucas"))
++            };
++            cas.push(FilePool::new(ucas, rayon::max_num_threads())?);
++        }
+ 
+         let mut container = Self {
+             name: path.file_stem().context("failed to get container name")?.to_string_lossy().into(),
+@@ -382,8 +414,12 @@ impl IoStoreTrait for IoStoreContainer {
+     fn read(&self, chunk_id: FIoChunkId) -> Result<Vec<u8>> {
+         let chunk_id = chunk_id.with_version(self.toc.version);
+         let index = *self.toc.chunk_id_map.get(&chunk_id).with_context(|| format!("container {:?} does not contain {:?}", self.name, chunk_id))?;
+-        let mut file_lock = self.cas.acquire()?;
+-        self.toc.read(&mut file_lock.file(), index).with_context(|| format!("Failed to read chunk {chunk_id:?}"))
++        let partition = self.toc.chunk_partition(index);
++        let pool = self.cas.get(partition as usize).with_context(|| format!("container {:?} has no .ucas partition {partition}", self.name))?;
++        let mut file_lock = pool.acquire()?;
++        let base = if partition == 0 { 0 } else { partition * self.toc.partition_size };
++        let mut view = PartitionView { file: file_lock.file(), base };
++        self.toc.read(&mut view, index).with_context(|| format!("Failed to read chunk {chunk_id:?}"))
+     }
+     fn read_raw(&self, chunk_id_raw: FIoChunkIdRaw) -> Result<Vec<u8>> {
+         self.read(FIoChunkId::from_raw(chunk_id_raw, self.toc.version))
+diff --git a/retoc/src/lib.rs b/retoc/src/lib.rs
+index 7d33a55..f8a0c0b 100644
+--- a/retoc/src/lib.rs
++++ b/retoc/src/lib.rs
+@@ -637,6 +637,15 @@ impl Toc {
+     fn get_chunk_id_entry_index(&self, chunk_id: FIoChunkId) -> Result<u32> {
+         self.chunk_id_map.get(&chunk_id).copied().with_context(|| "container does not contain entry for {chunk_id}")
+     }
++    /// Which .ucas partition holds a chunk (0 is X.ucas, N is X_sN.ucas). A chunk never spans partitions.
++    pub fn chunk_partition(&self, toc_entry_index: u32) -> u64 {
++        if self.partition_size == 0 || self.partition_size == u64::MAX {
++            return 0;
++        }
++        let offset = self.chunk_offset_lengths[toc_entry_index as usize].get_offset();
++        let first_block_index = (offset / self.compression_block_size as u64) as usize;
++        self.compression_blocks.get(first_block_index).map(|b| b.get_offset() / self.partition_size).unwrap_or(0)
++    }
+     pub fn read<C: Read + Seek>(&self, cas_stream: &mut C, toc_entry_index: u32) -> Result<Vec<u8>> {
+         let offset_and_length = &self.chunk_offset_lengths[toc_entry_index as usize];
+         let offset = offset_and_length.get_offset();
