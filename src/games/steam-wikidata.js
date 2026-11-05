@@ -802,6 +802,15 @@ function createSteamWikidataProvider({
       return games;
     },
 
+    /**
+     * A Steam game's silent 6-second preview clip (MP4, plays everywhere), from the
+     * store items lists already read in batches; null when it has none.
+     */
+    async previewClip(appid) {
+      const item = (await storeItems([Number(appid)])).get(Number(appid));
+      return item?.trailers?.find((t) => t.preview)?.preview || null;
+    },
+
     // Steam app ids map straight to rows: exact, and no requests.
     async matchSteamGames(steamGames) {
       return steamGames.map((s) => {

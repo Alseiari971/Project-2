@@ -381,3 +381,14 @@ test('"New & notable" is what sells now and came out in the last six months, not
   const { results } = await p.search({ sort: 'new', pageSize: 3 });
   assert.deepEqual(results.map((g) => g.name), ['Call of Duty®: Modern Warfare® 4', 'Phantom Blade Zero', 'Some New Indie']);
 });
+
+test('hover previews: the game\'s 6-second clip comes from the store items lists already read, with no extra request', async () => {
+  const web = fakeWeb();
+  const p = provider(web);
+  await p.search({ query: 'hollow knight' });
+  await p.settled(); // the search's background Wikidata lookup
+  const before = web.calls.length;
+  assert.equal(await p.previewClip(367520), 'https://video.akamai.steamstatic.com/store_trailers/367520/1/abc/microtrailer.mp4');
+  assert.equal(web.calls.length, before, 'answered from what the search already read');
+  assert.equal(await p.previewClip(1030300), null, 'a game without a clip');
+});

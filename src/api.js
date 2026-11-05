@@ -343,9 +343,12 @@ function createApi({
   api.get('/steam/:appId/microtrailer', asyncRoute(async (req, res) => {
     const appId = Number(req.params.appId);
     if (!Number.isInteger(appId) || appId <= 0 || appId > 1e8) return res.status(404).json({ error: 'Not found.' });
-    const details = steamStore ? await steamStore.details(appId).catch(() => null) : null;
-    res.set('Cache-Control', 'public, max-age=86400');
-    res.json({ url: details?.microtrailer || null });
+    // From Steam's store items (read in batches for every list, cached for days), else its store page.
+    let url = games.previewClip ? await games.previewClip(appId).catch(() => null) : null;
+    if (!url && steamStore) url = (await steamStore.details(appId).catch(() => null))?.microtrailer || null;
+    // A clip is kept for a day; "none" only briefly, so a moment when Steam was busy isn't remembered.
+    res.set('Cache-Control', url ? 'public, max-age=86400' : 'public, max-age=300');
+    res.json({ url });
   }));
 
   api.get('/games', asyncRoute(async (req, res) => {
