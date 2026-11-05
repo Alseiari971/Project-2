@@ -333,7 +333,7 @@ function createSteamWikidataProvider({
     return out;
   }
 
-  async function steamList({ tags = [], untags = [], sort = 'popular', start = 0, count = 30, term = '' }) {
+  async function steamList({ tags = [], untags = [], sort = 'popular', start = 0, count = 30, term = '', filter = null }) {
     const params = new URLSearchParams({ start: String(start), count: String(Math.min(count, 50)), category1: '998', infinite: '1', cc: 'US', l: 'english', sort_by: SORTS[sort] || '_ASC' });
     if (term) params.set('term', term);
     if (tags.length) params.set('tags', tags.join(','));
@@ -341,6 +341,7 @@ function createSteamWikidataProvider({
     if (sort === 'upcoming') params.set('filter', 'popularcomingsoon');
     // "Newest": Steam's popular new releases, not every game that came out today.
     if (sort === 'new') params.set('filter', 'popularnew');
+    if (filter) params.set('filter', filter);
     const key = `steam:list:${params}`;
     const body = await cached(key, LIST_TTL_MS, () => steamListHttp.request(`${STORE}/search/results/?${params}`));
     // Steam may send more than asked for.
@@ -683,8 +684,24 @@ function createSteamWikidataProvider({
     return backgroundWiki;
   };
 
+  /**
+   * "New & notable": what's selling most on Steam now and came out in the last six
+   * months (Modern Warfare, Phantom Blade...), then Steam's popular new releases
+   * if that's too few. Steam's newest releases alone are mostly obscure games.
+   */
+  async function notableNew(opts, pageSize) {
+    const { rows: sellers } = await steamList({ ...opts, sort: 'popular', filter: 'topsellers', start: 0, count: 50 });
+    const cutoff = now() - 183 * DAY;
+    const rows = sellers.filter((r) => r.released && Date.parse(r.released) >= cutoff && Date.parse(r.released) <= now());
+    if (rows.length < pageSize) {
+      const { rows: more } = await steamList({ ...opts, count: pageSize });
+      for (const m of more) if (!rows.some((r) => r.appid === m.appid)) rows.push(m);
+    }
+    return rows.slice(0, pageSize);
+  }
+
   async function listed(opts, pageSize, { wait = false } = {}) {
-    const { rows } = await steamList({ ...opts, count: pageSize });
+    const rows = opts.sort === 'new' && !opts.start ? await notableNew(opts, pageSize) : (await steamList({ ...opts, count: pageSize })).rows;
     // Steam's exact art for the whole list: one request, then cached.
     const games = await withItems(rows.map((r) => rowForApp(r.appid, r)).filter(Boolean));
     if (wait) return enrichWiki(games);

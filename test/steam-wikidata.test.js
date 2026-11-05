@@ -361,3 +361,23 @@ test('a game that isn\'t on Steam: Wikipedia\'s summary (credited), its platform
   // Wikipedia was asked with GameShelf's User-Agent.
   assert.ok(web.calls.filter((c) => /wikipedia/.test(c.host)).every((c) => c.headers['User-Agent'] === USER_AGENT));
 });
+
+test('"New & notable" is what sells now and came out in the last six months, not Steam\'s obscure newest', async () => {
+  const calls = [];
+  const row = (appid, name, date) => `<a href="https://store.steampowered.com/app/${appid}/x/" data-ds-appid="${appid}" class="search_result_row"><div class="search_name"><span class="title">${name}</span></div><div class="search_released responsive_secondrow">${date}</div></a>`;
+  const fetchImpl = async (url) => {
+    const u = new URL(url);
+    calls.push(u);
+    const reply = (body) => ({ ok: true, status: 200, json: async () => body });
+    if (u.pathname === '/search/results/' && u.searchParams.get('filter') === 'topsellers') {
+      return reply({ results_html: [row(1, 'Counter-Strike 2', 'Aug 21, 2012'), row(2, 'Call of Duty®: Modern Warfare® 4', 'Oct 22, 2026'), row(3, 'Phantom Blade Zero', 'Oct 28, 2026'), row(4, 'Next Year Game', 'Mar 4, 2027')].join('') });
+    }
+    if (u.pathname === '/search/results/') return reply({ results_html: row(5, 'Some New Indie', 'Nov 4, 2026') });
+    if (u.host === 'api.steampowered.com') return reply({ response: { store_items: [] } });
+    if (u.host === 'query.wikidata.org') return reply({ results: { bindings: [] } });
+    throw new Error(`unexpected ${u}`);
+  };
+  const p = createSteamWikidataProvider({ db: openDatabase(':memory:'), fetchImpl, now: () => Date.parse('2026-11-05T12:00:00Z'), sleep: async () => {}, steamGapMs: 0, steamListGapMs: 0, wikidataGapMs: 0, steamApiGapMs: 0 });
+  const { results } = await p.search({ sort: 'new', pageSize: 3 });
+  assert.deepEqual(results.map((g) => g.name), ['Call of Duty®: Modern Warfare® 4', 'Phantom Blade Zero', 'Some New Indie']);
+});
