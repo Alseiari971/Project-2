@@ -943,6 +943,16 @@ async function studio(body) {
       </div>
       ${path('reviewed', form.reviewed, 'csv', t('Use my checked translations.csv'))}
 
+      <h2>${t('Unreal Engine 5 extras')}</h2>
+      <div class="form-grid">
+        <label>${t('Unreal Engine version')}<input class="input" name="ueVersion" value="${form.ueVersion || ''}" placeholder="UE5_7" dir="ltr"></label>
+        <label class="check-row"><input type="checkbox" name="arabicLanguage" ${form.arabicLanguage ? 'checked' : ''}> ${t('Add Arabic as its own language (an "ar" culture, and an Arabic style in every row of the game\'s style tables)')}</label>
+      </div>
+      <p class="muted small">${t('GameShelf takes the style tables out of the game\'s containers itself. Or give the folder you took them out to with retoc to-legacy:')}</p>
+      ${path('uiAssets', form.uiAssets, 'ui-folder', t('Choose style tables folder'))}
+      <p class="muted small">${t('Arabic title logo (شعار اللعبة بالعربي): your own logo, cooked in the Unreal Editor for the game\'s engine version, at its path inside the game (<Project>/Content/...).')}</p>
+      ${path('logoAssets', form.logoAssets, 'logo-folder', t('Choose title logo folder'))}
+
       <h2>${t('3. Sign and build')}</h2>
       <div class="studio-key ${s.keyMatchesApp ? 'ok' : 'warn'}">
         ${path('keyFile', s.keyFile, 'key', t('Choose pack-signing.key'))}
@@ -965,7 +975,8 @@ async function studio(body) {
 
   const read = () => {
     const values = Object.fromEntries([...body.querySelectorAll('input[name], select[name]')].map((el) => [el.name, el.value.trim()]));
-    for (const name of ['source', 'pakList', 'reviewed']) values[name] = form[name] || '';
+    for (const name of ['source', 'pakList', 'reviewed', 'uiAssets', 'logoAssets']) values[name] = form[name] || '';
+    values.arabicLanguage = Boolean(body.querySelector('input[name="arabicLanguage"]')?.checked);
     return { ...form, ...values };
   };
   const remember = () => {

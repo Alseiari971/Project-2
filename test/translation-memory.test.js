@@ -266,3 +266,18 @@ test('approved Arabic becomes examples the AI follows for the rest of the game; 
   assert.doesNotMatch(openai.calls.at(-1).body.messages[0].content, /Approved translations/);
   assert.equal(examplesPrompt([], ['x']), '');
 });
+
+test('a translator\'s credit, a link or a handle that isn\'t in the English never gets into the memory', async () => {
+  // Another team's watermark slipped into a version line, a Discord invite, a modder's handle.
+  assert.equal(problemWith('Version 1.0.5', 'الإصدار 1.0.5 | تعريب إنما'), 'it adds a translation credit that isn\'t in the English');
+  assert.equal(problemWith('Join the community', 'انضم إلى المجتمع discord.gg/abcd'), 'it adds a link or handle that isn\'t in the English');
+  assert.equal(problemWith('Thanks for playing', 'شكرًا للعب @modder_ar'), 'it adds a link or handle that isn\'t in the English');
+  // What the English has itself may stay.
+  assert.equal(problemWith('Visit https://example.com', 'زر https://example.com'), null);
+  assert.equal(problemWith('Translated by the studio', 'ترجمة فريق الاستوديو'), null);
+  assert.equal(problemWith('New Game', 'لعبة جديدة'), null);
+  const db = openDatabase(':memory:');
+  const memory = createTranslationMemory({ db, env: {}, fetch: async () => { throw new Error('no AI here'); } });
+  assert.throws(() => memory.review('steam:4115450', 'Version 1.0.5', 'الإصدار 1.0.5 | تعريب إنما'), /translation credit/);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM translation_memory').get().n, 0);
+});

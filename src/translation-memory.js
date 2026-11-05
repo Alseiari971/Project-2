@@ -62,6 +62,23 @@ function matchBreaks(english, arabic) {
   return text;
 }
 
+// Text in the Arabic that the English doesn't have: a link, a handle, or a translator's credit (another team's
+// or anyone's). It never goes in the shared memory or a pack; GameShelf's own credit is added by the pack itself.
+const LINK = /(?:https?:\/\/|www\.)\S+|\b(?:discord\.(?:gg|com)|t\.me|youtube\.com|youtu\.be|twitter\.com|x\.com|instagram\.com|tiktok\.com|patreon\.com|nexusmods\.com|ko-fi\.com)\S*/gi;
+const HANDLE = /(?:^|[\s(«"])@[A-Za-z0-9_.]{3,}/g;
+const CREDIT = /تعريب|ترجم(?:ة|ه)\s*(?::|فريق|بواسطة|و\s*تعريب)|فريق\s+(?:الترجمة|التعريب)|translated\s+by|locali[sz]ed\s+by|locali[sz]ation\s+by/i;
+
+/** Why `arabic` carries something its English doesn't (a link, a handle, a translation credit), or null. */
+function addedCredit(english, arabic) {
+  for (const pattern of [LINK, HANDLE]) {
+    for (const [found] of arabic.matchAll(pattern)) {
+      if (!english.toLowerCase().includes(found.replace(/^[\s("«]+/, '').toLowerCase())) return 'it adds a link or handle that isn\'t in the English';
+    }
+  }
+  if (CREDIT.test(arabic) && !/translat|locali[sz]/i.test(english)) return 'it adds a translation credit that isn\'t in the English';
+  return null;
+}
+
 /** Why a translation can't be used, or null. */
 function problemWith(english, arabic) {
   if (typeof arabic !== 'string' || !arabic.trim()) return 'it came back empty';
@@ -76,7 +93,7 @@ function problemWith(english, arabic) {
     return has < had ? `it's missing ${tokenName(key)}` : `it has an extra ${tokenName(key)}`;
   }
   if (/[A-Za-z]/.test(english.replace(TOKENS, '')) && !/[؀-ۿ]/.test(arabic)) return 'it isn\'t Arabic';
-  return null;
+  return addedCredit(english, arabic);
 }
 
 const SYSTEM_PROMPT = `You translate video game text from English into natural Modern Standard Arabic for players in the Middle East and North Africa.

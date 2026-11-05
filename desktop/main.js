@@ -1045,6 +1045,8 @@ function registerIpc() {
       list: { title: 'Choose the game\'s file list', properties: ['openFile'], filters: [{ name: 'File lists', extensions: ['list', 'txt'] }] },
       csv: { title: 'Choose your checked translations.csv', properties: ['openFile'], filters: [{ name: 'CSV', extensions: ['csv'] }] },
       'keys-folder': { title: 'Choose a folder for the new signing key (keep it private)', properties: ['openDirectory', 'createDirectory'] },
+      'ui-folder': { title: 'Choose the folder with the game\'s style tables (from retoc to-legacy)', properties: ['openDirectory'] },
+      'logo-folder': { title: 'Choose the folder with your cooked Arabic title logo (<Project>/Content/...)', properties: ['openDirectory'] },
     }[kind];
     if (!choices) throw new Error('Not allowed.');
     const result = await dialog.showOpenDialog(win, choices);

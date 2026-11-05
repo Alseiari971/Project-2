@@ -503,3 +503,15 @@ class StrayBytesTest(unittest.TestCase):
         row = Row('Moon \udcc6 sweeper', key='k\udcc6')
         self.assertEqual((row.source, row.key), ('Moon Æ sweeper', 'kÆ'))
         row.source.encode('utf-8')  # no error
+
+
+class AddedCreditTest(unittest.TestCase):
+    """Arabic that brings a credit, a link or a handle the English doesn't have is never used."""
+
+    def test_credits_links_and_handles_not_in_the_english_are_refused(self):
+        from arabic_compiler.translate import problem_with
+        self.assertEqual(problem_with('Version 1.0.5', 'الإصدار 1.0.5 | تعريب إنما'), 'it adds a translation credit that isn\'t in the English')
+        self.assertEqual(problem_with('Join us', 'انضم إلينا discord.gg/abcd'), 'it adds a link or handle that isn\'t in the English')
+        self.assertEqual(problem_with('Thanks', 'شكرًا @modder_ar'), 'it adds a link or handle that isn\'t in the English')
+        self.assertIsNone(problem_with('Visit https://example.com', 'زر https://example.com'))
+        self.assertIsNone(problem_with('New Game', 'لعبة جديدة'))

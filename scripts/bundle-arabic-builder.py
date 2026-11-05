@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import os
 import shutil
 import subprocess
 import sys
@@ -133,6 +134,12 @@ def add_tools(out: Path, version: str):
                         (tools / f'repak-{Path(name).name}').write_bytes(archive.read(name))
         except Exception as err:  # noqa: BLE001 (any failure just leaves Unreal out)
             print(f'WARNING: repak wasn\'t added ({err}).')
+    # A retoc built with scripts/patches/retoc-ucas-partitions.patch (GAMESHELF_RETOC_EXE): released retoc can't read
+    # containers whose .ucas is split into partitions (X_s1.ucas, ...), such as Phantom Blade Zero's.
+    patched = os.environ.get('GAMESHELF_RETOC_EXE')
+    if patched and Path(patched).is_file():
+        shutil.copyfile(patched, tools / 'retoc.exe')
+        print(f'retoc: using {patched} (built with the partitions patch).')
     if not (tools / 'retoc.exe').is_file():
         try:
             with zipfile.ZipFile(io.BytesIO(download(RETOC_URL))) as archive:
@@ -227,6 +234,8 @@ def main(argv=None) -> int:
     parser.add_argument('--if-missing', action='store_true', help='do nothing when build-tools/arabic-builder is already there')
     parser.add_argument('--python', default=PYTHON, help=f'the Python version to bundle (default {PYTHON})')
     args = parser.parse_args(argv)
+    if os.environ.get('GAMESHELF_RETOC_EXE') and (OUT / 'tools').is_dir():
+        (OUT / 'tools' / 'retoc.exe').unlink(missing_ok=True)  # add_tools puts the patched one in
     if args.if_missing and (OUT / 'python').is_dir() and (OUT / 'remsg' / 'src' / 'main.py').is_file():
         # The builder's own code is copied fresh every time, so the app never ships an old one.
         shutil.rmtree(OUT / 'localization', ignore_errors=True)

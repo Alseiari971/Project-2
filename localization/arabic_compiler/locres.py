@@ -193,3 +193,35 @@ def write(locres: LocRes) -> bytes:
         if version >= OPTIMIZED_CRC32:
             table += struct.pack('<i', counts[i])
     return bytes(head + body + table)
+
+
+# ---- .locmeta: a localization target's native culture and the cultures it was compiled for ----------------
+# (TextLocalizationMetaDataResource.cpp: magic GUID, version, native culture, native .locres path, and from
+# version 1 the compiled cultures, which the engine offers as the game's languages.)
+LOCMETA_MAGIC = struct.pack('<4I', 0xA14CEE4F, 0x83554868, 0xBD464C6C, 0x7C50DA70)
+
+
+@dataclass
+class LocMeta:
+    native_culture: str
+    native_locres: str
+    cultures: list = field(default_factory=list)
+    version: int = 1
+
+
+def read_locmeta(data: bytes) -> LocMeta:
+    if data[:16] != LOCMETA_MAGIC:
+        raise LocResError('That isn\'t an Unreal .locmeta file.')
+    r = _Reader(data)
+    r.take(16)
+    version = r.u8()
+    native = r.string()
+    native_locres = r.string()
+    cultures = [r.string() for _ in range(r.i32())] if version >= 1 else []
+    return LocMeta(native, native_locres, cultures, version)
+
+
+def write_locmeta(meta: LocMeta) -> bytes:
+    out = LOCMETA_MAGIC + struct.pack('<B', max(meta.version, 1)) + _string(meta.native_culture) + _string(meta.native_locres)
+    out += struct.pack('<i', len(meta.cultures)) + b''.join(_string(c) for c in meta.cultures)
+    return out

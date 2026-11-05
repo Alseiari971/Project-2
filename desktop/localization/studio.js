@@ -26,7 +26,8 @@ class StudioError extends Error {}
 /**
  * The builder's command line for a Studio build. `options`: { source, engine,
  * id, version, title, steamAppId, gameId, translate: 'shared' | 'provider' |
- * 'none', provider, model, pakList, reviewed }.
+ * 'none', provider, model, pakList, reviewed, and for Unreal Engine 5: arabicLanguage, ueVersion, uiAssets,
+ * logoAssets }.
  */
 function buildArgs(options, { script, msgTool, keyFile, outDir, server }) {
   const o = options || {};
@@ -51,6 +52,20 @@ function buildArgs(options, { script, msgTool, keyFile, outDir, server }) {
   if (msgTool) args.push('--msg-tool', msgTool);
   if (o.pakList) args.push('--pak-list', o.pakList);
   if (o.reviewed) args.push('--translations', o.reviewed);
+  // Unreal Engine 5: Arabic as its own language (style tables patched), and cooked replacements such as a title logo.
+  if (o.ueVersion) {
+    if (!/^UE[45]_\d{1,2}$/.test(String(o.ueVersion))) throw new StudioError('The Unreal Engine version looks like UE5_7.');
+    args.push('--ue-version', String(o.ueVersion));
+  }
+  if (o.arabicLanguage) {
+    if (!o.ueVersion) throw new StudioError('Adding Arabic as its own language needs the game\'s Unreal Engine version, like UE5_7.');
+    args.push('--arabic-language');
+  }
+  if (o.uiAssets) args.push('--ui-assets', o.uiAssets);
+  if (o.logoAssets) {
+    if (!o.ueVersion) throw new StudioError('A cooked title logo needs the game\'s Unreal Engine version, like UE5_7.');
+    args.push('--logo-assets', o.logoAssets);
+  }
   return args;
 }
 
@@ -193,7 +208,8 @@ function createStudio({ paths, dataDir, cloud, appKeys = [], secure = null, spaw
   async function startBuild(options, { onLog, onProgress }) {
     const s = readSettings();
     const args = buildArgs(options, { script: paths.script, msgTool: paths.msgTool, keyFile: s.keyFile, outDir, server: cloud.server() });
-    const env = { ...process.env, GAMESHELF_TOKEN: '', GAMESHELF_NODE: nodePath, GAMESHELF_SIGNER: paths.signer, ELECTRON_RUN_AS_NODE: '1', PYTHONIOENCODING: 'utf-8:backslashreplace', PYTHONUNBUFFERED: '1', PYTHONUTF8: '1', PYTHONDONTWRITEBYTECODE: '1' };
+    const env = { ...process.env, GAMESHELF_TOKEN: '', GAMESHELF_NODE: nodePath, GAMESHELF_SIGNER: paths.signer,
+      ...(paths.repak ? { GAMESHELF_REPAK: paths.repak } : {}), ...(paths.retoc ? { GAMESHELF_RETOC: paths.retoc } : {}), ELECTRON_RUN_AS_NODE: '1', PYTHONIOENCODING: 'utf-8:backslashreplace', PYTHONUNBUFFERED: '1', PYTHONUTF8: '1', PYTHONDONTWRITEBYTECODE: '1' };
     if (options.translate === 'provider') {
       const key = apiKey(options.provider);
       if (!key) throw new StudioError('Save your API key for that provider first.');

@@ -1794,6 +1794,14 @@ export const AR = {
   // Showcase, notifications, pack numbers and profiles
   "Can't be used:": "لا يمكن استخدامها:",
   "Copy the tags and line breaks exactly as in the English.": "انسخ الوسوم وفواصل الأسطر كما هي في الإنجليزية تمامًا.",
+  // Showcase, notifications, pack numbers and profiles
+  "Unreal Engine 5 extras": "إضافات Unreal Engine 5",
+  "Unreal Engine version": "إصدار Unreal Engine",
+  "Add Arabic as its own language (an \"ar\" culture, and an Arabic style in every row of the game's style tables)": "أضف العربية لغةً مستقلة (ثقافة \"ar\"، ونمط عربي في كل صف من جداول أنماط اللعبة)",
+  "GameShelf takes the style tables out of the game's containers itself. Or give the folder you took them out to with retoc to-legacy:": "يستخرج قيم شلف جداول الأنماط من حاويات اللعبة بنفسه. أو حدّد المجلد الذي استخرجتها إليه باستخدام retoc to-legacy:",
+  "Choose style tables folder": "اختر مجلد جداول الأنماط",
+  "Arabic title logo (شعار اللعبة بالعربي): your own logo, cooked in the Unreal Editor for the game's engine version, at its path inside the game (<Project>/Content/...).": "شعار اللعبة بالعربي: شعارك الخاص، مُعدّ في Unreal Editor لإصدار محرك اللعبة، في مساره داخل اللعبة (<Project>/Content/...).",
+  "Choose title logo folder": "اختر مجلد الشعار",
 };
 
 // Arabic counts have six forms: no items, one, two, three to ten, eleven to

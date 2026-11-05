@@ -36,7 +36,7 @@ import tempfile
 import zlib
 from struct import error as struct_error
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from . import bethesda, godotpck, loose, renpyc, retoc
 from . import locres as locres_format
@@ -162,6 +162,8 @@ def _xunity(path: Path) -> Source:
     return Source(rows, engine='unity')
 
 
+# An Unreal game's per-language text style tables (see uestyles.py).
+_STYLE_TABLE = re.compile(r'(?i)(?:^|/)(?:DT_[^/]*Styles?[^/]*|[^/]*TextStyles?[^/]*)\.uasset$')
 # An Unreal game's English text table inside its paks.
 _ENGLISH_LOCRES = re.compile(r'(?:^|/)Localization/Game/en(?:-us|-gb)?/Game\.locres$', re.I)
 _OUR_PAK = re.compile(r'ArabicLocalization', re.I)
@@ -206,8 +208,9 @@ def _unreal_paks(folder: Path) -> Source:
             found = (pak, sorted(english, key=len)[0])
     # UE5: the cooked packages are in IoStore containers; their file lists name the game's font packages,
     # and the odd game keeps its .locres there too.
-    iostore = {'containers': [], 'encrypted': [], 'font_packages': [], 'tool': None, 'keyed': False}
+    iostore = {'containers': [], 'encrypted': [], 'font_packages': [], 'style_tables': [], 'tool': None, 'keyed': False}
     in_container = None
+    container_files = {}  # path inside the game -> Chunk, for files fetched later (the .locmeta)
     retoc_tool = retoc.find_tool()
     try:
         have_key = bool(retoc.aes_key())
@@ -233,7 +236,9 @@ def _unreal_paks(folder: Path) -> Source:
         except retoc.RetocError:
             continue
         listing += [c.path for c in chunks]
+        container_files.update({c.path: c for c in chunks})
         iostore['font_packages'] += [c.path for c in chunks if retoc.FONT_PACKAGE.search(c.path)]
+        iostore['style_tables'] += [c.path for c in chunks if _STYLE_TABLE.search(c.path)]
         english = [c for c in chunks if _ENGLISH_LOCRES.search(c.path)]
         if english and not found and not in_container:
             in_container = sorted(english, key=lambda c: len(c.path))[0]
@@ -265,6 +270,20 @@ def _unreal_paks(folder: Path) -> Source:
                 raise SourceError(str(err)) from None
             origin = in_container.container.name
         source = _locres(target, inside)
+        # The target's .locmeta (Localization/Game/Game.locmeta): the languages the game offers, for adding Arabic as one.
+        meta_inside = str(PurePosixPath(inside).parent.parent / f'{PurePosixPath(inside).stem}.locmeta')
+        meta = None
+        if found:
+            got = _repak(tool, 'get', str(found[0]), meta_inside, binary=True)
+            meta = got.stdout if got.returncode == 0 and got.stdout else None
+        elif meta_inside in container_files:
+            try:
+                retoc.get_chunk(retoc_tool, container_files[meta_inside], Path(tmp) / 'Game.locmeta')
+                meta = (Path(tmp) / 'Game.locmeta').read_bytes()
+            except (retoc.RetocError, OSError):
+                meta = None
+        if meta:
+            source.extra['locmeta'] = (meta_inside, meta)
     version = None
     if paks:
         info = _repak(tool, 'info', str(paks[0]))

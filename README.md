@@ -403,6 +403,19 @@ Some games keep their text in archives only their own tools read (God of War's `
 - The game's own files are never written to while a recipe runs: the tool works on copies, and GameShelf swaps the results in at Play, keeping the originals to put back.
 - API: `GET /api/arabic/recipes/:game` (signed-in players: `{ recipe, signature }`), `GET /api/admin/recipes` (with `maskedKey`, `verified` and the server's pack `publicKeys`), `POST /api/admin/recipes` `{ game, recipe, signature, title?, container? }`, `POST /api/admin/recipes/batch` `{ items }` (up to 100, each checked on its own), `PUT /api/admin/recipes/:game` (the desktop app), `DELETE /api/admin/recipes/:game` (revoke), and `GET /api/admin/engines` (the registry). `POST /api/arabic/status` says `recipe: true` for games that have one, and `answered: 'key'` to a player whose request a key answered.
 
+### Arabic as its own language in Unreal Engine 5 games (Pack Studio)
+
+Under **Unreal Engine 5 extras**, an admin can give the game's engine version (for example `UE5_7`) and tick **Add Arabic as its own language**. The pack then also has:
+
+- the Arabic `.locres` under an `ar` culture, and `ar` in the game's `Game.locmeta`, the list of languages the game offers;
+- an `ar` style, a copy of the English one, in every row of the game's per-language text style tables (`DT_*Styles`, such as Phantom Blade Zero's `DT_PBZSettingsDescriptionStyles`, whose rows map `en-US`, `ja`, `zh-Hans` … to a text style). Each row's language count goes up by one and the `.uasset` header gets the new size. The patched table is packed as a real package inside `pakchunk99-ArabicLocalization_P.utoc/.ucas` (`localization/arabic_compiler/uestyles.py`).
+
+GameShelf takes the style tables out of the game's containers with retoc's `to-legacy`, or uses a folder an admin took them out to (**Choose style tables folder**). Released retoc can't read containers whose `.ucas` is split into partitions (`X_s1.ucas`, …), so build it with `scripts/patches/retoc-ucas-partitions.patch` and set `GAMESHELF_RETOC_EXE` to that `retoc.exe` before `npm run dist:win`.
+
+**Arabic title logo:** your own logo, cooked in the Unreal Editor for the game's engine version and kept at its path inside the game (`<Project>/Content/...`), goes into the same `.utoc/.ucas` (**Choose title logo folder**).
+
+Arabic that brings in text its English doesn't have (another team's credit such as «تعريب …», a Discord or other link, an @handle) is refused everywhere: from the AI, from admins and from players' fixes, so it never reaches the shared memory or a pack.
+
 ### AES Keys & Recipes (Admin Panel)
 
 **Admin Panel → AES Keys & Recipes** (إدارة مفاتيح التشفير ووصفات المحرك) lets an admin give an encrypted Unreal game's AES-256 key at any time, before anyone asks for its Arabic. GameShelf never looks for keys: use the key the game's publisher or modding community published.

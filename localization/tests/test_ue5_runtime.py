@@ -317,6 +317,62 @@ class IoStore(unittest.TestCase):
                                                              'PhantomBlade/Content/UI/Fonts/Body_Font.uexp']})
         self.assertTrue(any('cooked font packages' in line for line in logged))
 
+    @unittest.skipUnless(HAS_NODE, 'signing needs Node.js')
+    def test_arabic_as_its_own_language_patches_the_style_tables_and_packs_the_logo(self):
+        from arabic_compiler import uestyles
+
+        def row(styles):  # an unversioned row: a prefix, then the per-language map
+            return b'\x00\x03' + struct.pack('<ii', 0, len(styles)) + b''.join(uestyles.fstring(c) + v for c, v in styles)
+
+        uexp = row([('zh-Hans', b'ZH-STYLE'), ('en-US', b'EN-STYLE-1'), ('ja', b'JA')]) + row([('en-US', b'EN-STYLE-2'), ('ru', b'RU')])
+        header = bytearray(b'\xc1\x83\x2a\x9e' + b'\0' * 200)
+        struct.pack_into('<q', header, 60, len(header) + len(uexp))          # BulkDataStartOffset
+        struct.pack_into('<qq', header, 120, len(uexp), len(header))         # the export's SerialSize, SerialOffset
+        ui = self.tmp / 'ui'
+        table = ui / 'PhantomBlade' / 'Content' / 'UI' / 'DT_GameDescriptionStyles.uasset'
+        table.parent.mkdir(parents=True)
+        table.write_bytes(bytes(header))
+        table.with_suffix('.uexp').write_bytes(uexp)
+        logo = self.tmp / 'logo'
+        (logo / 'PhantomBlade' / 'Content' / 'UI' / 'Title').mkdir(parents=True)
+        for ext in ('.uasset', '.uexp', '.ubulk'):
+            (logo / 'PhantomBlade' / 'Content' / 'UI' / 'Title' / f'T_Logo_AR{ext}').write_bytes(b'logo ' + ext.encode())
+        meta = locres_format.write_locmeta(locres_format.LocMeta('en', 'en/Game.locres', ['en', 'ja']))
+        game = self.game({'PhantomBlade/Content/Localization/Game/en/Game.locres': english_locres().hex(),
+                          'PhantomBlade/Content/Localization/Game/Game.locmeta': meta.hex()}, [])
+        keys = self.tmp / 'keys'
+        subprocess.run(['node', str(REPO / 'scripts/localization-pack.js'), 'keygen', str(keys)], check=True, capture_output=True)
+        api = FakeApi()
+        self.addCleanup(api.close)
+        logged = []
+        with mock.patch.dict(os.environ, {'OPENAI_API_KEY': 'secret-key'}):
+            args = parse_args([str(game), '--id', 'pbz-ar', '--version', '1.0.0', '--steam-app-id', '2109880', '--key', str(keys / 'pack-signing.key'),
+                               '--out', str(self.tmp / 'out'), '--provider', 'openai', '--model', 'm', '--api-base', api.base,
+                               '--arabic-language', '--ui-assets', str(ui), '--logo-assets', str(logo), '--ue-version', 'UE5_7'])
+            pack = build(args, log=logged.append)
+        stage = self.tmp / 'out' / 'stage'
+        # The Arabic .locres is there for "ar" too, and "ar" is among the game's languages.
+        pak = stage / 'pak' / 'PhantomBlade' / 'Content' / 'Localization' / 'Game'
+        self.assertEqual((pak / 'ar' / 'Game.locres').read_bytes(), (pak / 'en' / 'Game.locres').read_bytes())
+        self.assertEqual(locres_format.read_locmeta((pak / 'Game.locmeta').read_bytes()).cultures, ['en', 'ja', 'ar'])
+        # Every row with an English style got the same style for Arabic, and the header knows the new size.
+        patched = stage / 'cooked' / 'PhantomBlade' / 'Content' / 'UI' / 'DT_GameDescriptionStyles.uasset'
+        data = patched.with_suffix('.uexp').read_bytes()
+        maps = uestyles.culture_maps(data)
+        self.assertEqual([[k[0] for k in m.keys] for m in maps], [['zh-Hans', 'en-US', 'ar', 'ja'], ['en-US', 'ar', 'ru']])
+        self.assertIn(uestyles.fstring('ar') + b'EN-STYLE-1', data)
+        size, offset = struct.unpack_from('<qq', patched.read_bytes(), 120)
+        self.assertEqual((size, offset), (len(data), 204))
+        self.assertEqual(struct.unpack_from('<q', patched.read_bytes(), 60)[0], 204 + len(data))
+        # The patched table and the logo are packages in the Arabic .utoc/.ucas, not an empty stand-in.
+        zen = json.loads((pack / 'payload' / 'pakchunk99-ArabicLocalization_P.utoc').read_bytes()[16:])
+        self.assertEqual(zen['version'], 'UE5_7')
+        self.assertIn('PhantomBlade/Content/UI/DT_GameDescriptionStyles.uasset', zen['files'])
+        self.assertIn('PhantomBlade/Content/UI/DT_GameDescriptionStyles.uexp', zen['files'])
+        self.assertIn('PhantomBlade/Content/UI/Title/T_Logo_AR.ubulk', zen['files'])
+        self.assertTrue(any('Added Arabic as a language' in line for line in logged))
+        self.assertTrue(any('Added an Arabic style to every row' in line for line in logged))
+
     def test_cooked_packages_need_their_uexp_and_a_known_engine_version(self):
         broken = self.tmp / 'broken'
         (broken / 'G' / 'Content').mkdir(parents=True)

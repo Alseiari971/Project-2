@@ -66,6 +66,7 @@ from . import retoc
 from . import runtime
 from . import remsg
 from . import swffont
+from . import uestyles
 from .fingerprint import build_table
 from . import reefont
 from .repak import GamePak, path_hashes, write_pak
@@ -177,6 +178,14 @@ def parse_args(argv=None):
     c.add_argument('--font-assets', help='unreal (UE5): a folder of cooked replacement font packages (.uasset with .uexp, at their paths '
                                          'inside the game, <Project>/Content/...), cooked for the game\'s engine version; they go into '
                                          'pakchunk99-ArabicLocalization_P.utoc/.ucas for the Zen loader')
+    c.add_argument('--arabic-language', action='store_true',
+                   help='unreal (UE5): add Arabic as its own language too: the Arabic .locres under the "ar" culture, "ar" in the '
+                        'game\'s .locmeta, and an "ar" style, copied from English, in every row of its per-language text style '
+                        'tables (DT_*Styles), packed into the .utoc/.ucas; needs --ue-version')
+    c.add_argument('--ui-assets', help='unreal (UE5): the game\'s style tables as legacy assets (from retoc to-legacy), when GameShelf '
+                                       'shouldn\'t take them out of the game\'s containers itself')
+    c.add_argument('--logo-assets', help='unreal (UE5): a folder of cooked replacements made in the Unreal Editor for the game\'s engine '
+                                         'version, such as an Arabic title logo texture (.uasset/.uexp/.ubulk at <Project>/Content/...)')
     c.add_argument('--ue-version', help='unreal (UE5): the game\'s engine version for retoc to-zen, e.g. UE5_4 (default: what the game\'s program says)')
     c.add_argument('--pak-list', help='unreal: the game\'s pak file list (from repak list, UnrealPak -List or FModel), to find its fonts; '
                                       'reengine: a list of the game\'s file names (such as REE.PAK.Tool\'s), whose .oft fonts get the Arabic font')
@@ -1104,6 +1113,9 @@ def build_unreal(source, translations: dict, args, payload: Path, stage_root: Pa
             shutil.copyfile(license_text, payload.parent / 'FONT-LICENSE.txt')
         log(f'Staged the {regular.stem} font as the game\'s {len(fonts)} font files: ' + ', '.join(f.name for f in fonts))
 
+    if getattr(args, 'arabic_language', False):
+        staged += stage_arabic_language(source, in_pak, target, stage, log)
+
     kind, exe = find_packer(args)
     if not exe:
         raise BuildError(f'The .locres is staged in {stage}, but no pak tool was found. Install repak '
@@ -1124,10 +1136,104 @@ def build_unreal(source, translations: dict, args, payload: Path, stage_root: Pa
         names = sorted({PurePosixPath(p).name for p in iostore['font_packages']})
         log(f'This game\'s fonts are cooked packages in its IoStore containers ({", ".join(names[:6])}{"..." if len(names) > 6 else ""}). '
             'For Arabic letters, cook replacements from the Arabic font with the game\'s Unreal Engine version and give them with --font-assets.')
+    # Cooked packages for the .utoc/.ucas: font replacements, patched style tables, a logo, all at their game paths.
+    roots = [Path(p) for p in (args.font_assets, getattr(args, 'logo_assets', None)) if p]
+    styles = patch_style_tables(args, iostore, stage_root, log) if getattr(args, 'arabic_language', False) else None
+    if styles:
+        roots.append(styles)
+    if len(roots) > 1 or styles:
+        merged = stage_root / 'cooked'
+        shutil.rmtree(merged, ignore_errors=True)
+        for root in roots:
+            for part in root.rglob('*'):
+                if part.is_file() and part.suffix.lower() in ('.uasset', '.uexp', '.ubulk', '.uptnl'):
+                    dest = merged / part.relative_to(root)
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(part, dest)
+        args.font_assets = str(merged)
+    elif roots:
+        args.font_assets = str(roots[0])
     if args.font_assets or iostore.get('containers'):
         # UE5 games with IoStore containers: the Arabic .pak goes with a .utoc and .ucas of its own name (the
-        # game's cooked font replacements in them, or empty), since those games only mount a .pak that has them.
+        # game's cooked replacements in them, or empty), since those games only mount a .pak that has them.
         build_zen_fonts(args, iostore, payload, stage_root, log)
+
+
+def stage_arabic_language(source, in_pak, target: Path, stage: Path, log) -> list:
+    """Arabic as its own language: the Arabic .locres again under the "ar" culture, and "ar" in the target's
+    .locmeta (its compiled cultures, which the game offers as languages). Returns what was staged, for UnrealPak."""
+    staged = []
+    ar_inside = in_pak.parent.parent / 'ar' / in_pak.name
+    ar_path = stage.joinpath(*ar_inside.parts)
+    ar_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(target, ar_path)
+    staged.append((ar_path, ar_inside))
+    meta = (source.extra or {}).get('locmeta')
+    if not meta:
+        log(f'Staged {ar_inside}. The game\'s .locmeta wasn\'t found, so it may not offer Arabic in its language menu.')
+        return staged
+    meta_inside, data = meta
+    try:
+        parsed = locres_format.read_locmeta(data)
+    except locres_format.LocResError as err:
+        raise BuildError(f'{meta_inside}: {err}') from None
+    if 'ar' not in parsed.cultures:
+        parsed.cultures.append('ar')
+    meta_rel = PurePosixPath(meta_inside.replace('\\', '/').lstrip('/'))
+    meta_path = stage.joinpath(*meta_rel.parts)
+    meta_path.parent.mkdir(parents=True, exist_ok=True)
+    meta_path.write_bytes(locres_format.write_locmeta(parsed))
+    staged.append((meta_path, meta_rel))
+    log(f'Added Arabic as a language: {ar_inside}, and "ar" in {meta_rel.name} ({", ".join(parsed.cultures)}).')
+    return staged
+
+
+def patch_style_tables(args, iostore: dict, stage_root: Path, log) -> Path | None:
+    """The game's per-language style tables with an "ar" style in every row (uestyles.py), as legacy assets for to-zen.
+    From --ui-assets, or taken out of the game's own containers with retoc's to-legacy."""
+    legacy = Path(args.ui_assets) if getattr(args, 'ui_assets', None) else None
+    if legacy is None:
+        tables = sorted(set(iostore.get('style_tables') or []))
+        tool = retoc.find_tool(args.retoc) or iostore.get('tool')
+        version = args.ue_version
+        containers = retoc.game_containers(Path(args.source))
+        if not tables or not tool or not containers:
+            if tables:
+                log('The game\'s style tables need retoc to be taken out of its containers; give them with --ui-assets instead.')
+            return None
+        if not version:
+            raise BuildError('Adding Arabic to the game\'s style tables needs the game\'s Unreal Engine version: give --ue-version (e.g. UE5_7).')
+        legacy = stage_root / 'ui-legacy'
+        shutil.rmtree(legacy, ignore_errors=True)
+        legacy.mkdir(parents=True)
+        paks = containers[0].parent
+        for table in tables:
+            name = PurePosixPath(table).stem
+            try:
+                result = retoc._run(tool, 'to-legacy', '--version', retoc.check_version(version), '--filter', name, str(paks), str(legacy), timeout=1800)
+            except retoc.RetocError as err:
+                raise BuildError(str(err)) from None
+            if result.returncode != 0:
+                log(f'retoc couldn\'t take out {name}: {(result.stderr or result.stdout).strip()[-300:]}')
+    out = stage_root / 'ui-patched'
+    shutil.rmtree(out, ignore_errors=True)
+    patched = []
+    for asset in sorted(legacy.rglob('*.uasset')):
+        rel = asset.relative_to(legacy)
+        if not uestyles.STYLE_TABLE.search(rel.as_posix()):
+            continue
+        try:
+            added = uestyles.patch_style_asset(asset, out, rel)
+        except uestyles.StyleError as err:
+            log(f'{rel.name}: {err}')
+            continue
+        if added:
+            patched.append(f'{rel.stem} ({added} styles)')
+    if not patched:
+        log('No per-language style table with an English style was found to add Arabic to.')
+        return None
+    log('Added an Arabic style to every row of: ' + ', '.join(patched) + '.')
+    return out
 
 
 # Programs in a game's folder that aren't built with its Unreal Engine, so they can't say its version.
