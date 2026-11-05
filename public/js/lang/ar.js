@@ -1802,6 +1802,8 @@ export const AR = {
   "Choose style tables folder": "اختر مجلد جداول الأنماط",
   "Arabic title logo (شعار اللعبة بالعربي): your own logo, cooked in the Unreal Editor for the game's engine version, at its path inside the game (<Project>/Content/...).": "شعار اللعبة بالعربي: شعارك الخاص، مُعدّ في Unreal Editor لإصدار محرك اللعبة، في مساره داخل اللعبة (<Project>/Content/...).",
   "Choose title logo folder": "اختر مجلد الشعار",
+  // Showcase, notifications, pack numbers and profiles
+  "Keep Arabic where the game puts English (for text that ends up against the far edge of the screen)": "أبقِ العربية حيث تضع اللعبة الإنجليزية (للنصوص التي تظهر عند الطرف البعيد من الشاشة)",
 };
 
 // Arabic counts have six forms: no items, one, two, three to ten, eleven to

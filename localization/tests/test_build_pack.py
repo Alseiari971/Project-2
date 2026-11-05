@@ -515,3 +515,15 @@ class AddedCreditTest(unittest.TestCase):
         self.assertEqual(problem_with('Thanks', 'شكرًا @modder_ar'), 'it adds a link or handle that isn\'t in the English')
         self.assertIsNone(problem_with('Visit https://example.com', 'زر https://example.com'))
         self.assertIsNone(problem_with('New Game', 'لعبة جديدة'))
+
+
+class LtrLayoutTest(unittest.TestCase):
+    """Arabic in a "left"-aligned Unreal text box stays where the game puts English, reading right to left."""
+
+    def test_each_arabic_paragraph_is_laid_out_left_to_right_and_read_right_to_left(self):
+        from arabic_compiler.packbuild import ltr_layout
+        self.assertEqual(ltr_layout('ضربات <Ability_Yellow>شا-تشي</>!'), '‎‫ضربات <Ability_Yellow>شا-تشي</>!‬')
+        # A line break ends a paragraph (and the embedding with it), so each paragraph gets its own.
+        self.assertEqual(ltr_layout('سطر\r\nسطر ثان'), '‎‫سطر‬\r\n‎‫سطر ثان‬')
+        self.assertEqual(ltr_layout('HDR'), 'HDR')  # nothing to do without Arabic
+        self.assertEqual(ltr_layout(''), '')

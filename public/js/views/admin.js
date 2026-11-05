@@ -946,6 +946,7 @@ async function studio(body) {
       <h2>${t('Unreal Engine 5 extras')}</h2>
       <div class="form-grid">
         <label>${t('Unreal Engine version')}<input class="input" name="ueVersion" value="${form.ueVersion || ''}" placeholder="UE5_7" dir="ltr"></label>
+        <label class="check-row"><input type="checkbox" name="ltrLayout" ${form.ltrLayout ? 'checked' : ''}> ${t('Keep Arabic where the game puts English (for text that ends up against the far edge of the screen)')}</label>
         <label class="check-row"><input type="checkbox" name="arabicLanguage" ${form.arabicLanguage ? 'checked' : ''}> ${t('Add Arabic as its own language (an "ar" culture, and an Arabic style in every row of the game\'s style tables)')}</label>
       </div>
       <p class="muted small">${t('GameShelf takes the style tables out of the game\'s containers itself. Or give the folder you took them out to with retoc to-legacy:')}</p>
@@ -977,6 +978,7 @@ async function studio(body) {
     const values = Object.fromEntries([...body.querySelectorAll('input[name], select[name]')].map((el) => [el.name, el.value.trim()]));
     for (const name of ['source', 'pakList', 'reviewed', 'uiAssets', 'logoAssets']) values[name] = form[name] || '';
     values.arabicLanguage = Boolean(body.querySelector('input[name="arabicLanguage"]')?.checked);
+    values.ltrLayout = Boolean(body.querySelector('input[name="ltrLayout"]')?.checked);
     return { ...form, ...values };
   };
   const remember = () => {

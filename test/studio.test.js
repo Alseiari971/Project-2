@@ -46,6 +46,7 @@ test('the Studio\'s choices become the pack builder\'s command line, and mistake
   // Unreal Engine 5 extras: Arabic as its own language and a cooked title logo, both needing the engine version.
   const ue5 = buildArgs({ ...base, translate: 'none', ueVersion: 'UE5_7', arabicLanguage: true, uiAssets: 'PBZ-ui', logoAssets: 'logo' }, where).join(' ');
   assert.ok(ue5.includes('--ue-version UE5_7 --arabic-language --ui-assets PBZ-ui --logo-assets logo'));
+  assert.ok(buildArgs({ ...base, translate: 'none', ltrLayout: true }, where).includes('--ltr-layout'));
   assert.throws(() => buildArgs({ ...base, arabicLanguage: true }, where), /Unreal Engine version/);
   assert.throws(() => buildArgs({ ...base, logoAssets: 'logo' }, where), /Unreal Engine version/);
   assert.throws(() => buildArgs({ ...base, ueVersion: '5.7; rm -rf' }, where), /looks like UE5_7/);

@@ -62,6 +62,7 @@ function buildArgs(options, { script, msgTool, keyFile, outDir, server }) {
     args.push('--arabic-language');
   }
   if (o.uiAssets) args.push('--ui-assets', o.uiAssets);
+  if (o.ltrLayout) args.push('--ltr-layout');
   if (o.logoAssets) {
     if (!o.ueVersion) throw new StudioError('A cooked title logo needs the game\'s Unreal Engine version, like UE5_7.');
     args.push('--logo-assets', o.logoAssets);

@@ -182,6 +182,9 @@ def parse_args(argv=None):
                    help='unreal (UE5): add Arabic as its own language too: the Arabic .locres under the "ar" culture, "ar" in the '
                         'game\'s .locmeta, and an "ar" style, copied from English, in every row of its per-language text style '
                         'tables (DT_*Styles), packed into the .utoc/.ucas; needs --ue-version')
+    c.add_argument('--ltr-layout', action='store_true',
+                   help='unreal: keep Arabic where the game puts English, for games whose text boxes line text up left (each '
+                        'line laid out left to right, the Arabic in it read right to left), rather than against the far edge')
     c.add_argument('--ui-assets', help='unreal (UE5): the game\'s style tables as legacy assets (from retoc to-legacy), when GameShelf '
                                        'shouldn\'t take them out of the game\'s containers itself')
     c.add_argument('--logo-assets', help='unreal (UE5): a folder of cooked replacements made in the Unreal Editor for the game\'s engine '
@@ -1090,6 +1093,9 @@ def build_unreal(source, translations: dict, args, payload: Path, stage_root: Pa
         raise BuildError('--locres-path must stay inside the game.')
     compiler = ArabicCompiler(max_line=args.max_line) if args.shape else None
     texts = {key: (compiler(arabic) if compiler else arabic) for key, arabic in translations.items()}
+    if getattr(args, 'ltr_layout', False):
+        texts = {key: ltr_layout(text) for key, text in texts.items()}
+        log('Arabic lines keep the place the game gives its English (laid out left to right, read right to left).')
     stage = stage_root / 'pak'
     shutil.rmtree(stage, ignore_errors=True)
     target = stage.joinpath(*in_pak.parts)
@@ -1157,6 +1163,23 @@ def build_unreal(source, translations: dict, args, payload: Path, stage_root: Pa
         # UE5 games with IoStore containers: the Arabic .pak goes with a .utoc and .ucas of its own name (the
         # game's cooked replacements in them, or empty), since those games only mount a .pak that has them.
         build_zen_fonts(args, iostore, payload, stage_root, log)
+
+
+# A paragraph laid out left to right (LRM), with the Arabic in it read right to left (RLE ... PDF).
+_ARABIC_LETTER = re.compile('[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]')
+_PARAGRAPH = re.compile(r'(\r\n|\r|\n|\\n|<br\s*/?>)')
+
+
+def ltr_layout(text: str) -> str:
+    """`text` with each Arabic paragraph laid out where the game puts English, for Unreal games whose text boxes
+    line text up "left": Unreal turns that into "right" for a right-to-left paragraph, so Arabic in a wide box
+    ends up against the box's far edge. A left-to-right mark makes the paragraph left to right, and a right-to-left
+    embedding keeps the Arabic (and its «!» and «،») reading right to left inside it. Line breaks end a paragraph, so
+    each one is wrapped on its own."""
+    if not isinstance(text, str) or not _ARABIC_LETTER.search(text):
+        return text
+    parts = _PARAGRAPH.split(text)
+    return ''.join(p if _PARAGRAPH.fullmatch(p) or not _ARABIC_LETTER.search(p) else f'\u200e\u202b{p}\u202c' for p in parts)
 
 
 def stage_arabic_language(source, in_pak, target: Path, stage: Path, log) -> list:
