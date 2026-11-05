@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const { createApp } = require('../server');
 const { openDatabase } = require('../src/db');
 const { createLocalProvider } = require('../src/games/local');
-const { createTranslationMemory, sha256, problemWith, matchBreaks } = require('../src/translation-memory');
+const { createTranslationMemory, sha256, problemWith, matchBreaks, unshapeArabic, examplesPrompt } = require('../src/translation-memory');
 const { createArabicGames } = require('../src/arabic-games');
 const { createPlans } = require('../src/plans');
 
@@ -238,4 +238,31 @@ test('a signed-in player asks for a game and sees it become ready; admins teach 
   const list = (await hamad('/api/admin/requests')).body.requests;
   assert.deepEqual(list.map((r) => [r.game, r.name, r.requests, r.status]), [[game, 'RE3 Demo', 1, 'ready']]);
   assert.equal((await app('/api/admin/requests')).status, 403);
+});
+
+test('approved Arabic becomes examples the AI follows for the rest of the game; pre-shaped Arabic is stored as plain letters', async () => {
+  const db = openDatabase(':memory:');
+  const openai = fakeOpenAI();
+  const memory = createTranslationMemory({ db, env: { OPENAI_API_KEY: 'k' }, fetch: openai.fetch });
+  const game = 'steam:4115450';
+  db.prepare("INSERT INTO users (id, username, display_name, password_hash) VALUES (1, 'admin', 'admin', 'x')").run();
+  // An admin's review, pasted from a tool that shaped it (presentation forms, in visual order).
+  memory.review(game, 'Parry the <Ability_Yellow>Red-flash</> attack', 'ﻡﻮﺠﻬﻟﺍ </>ﺮﻤﺣﻷﺍ<Ability_Yellow> ّﺪُﺻ');
+  memory.review(game, 'Open the door', 'افتح الباب');
+  const stored = db.prepare('SELECT english, arabic FROM reviewed_examples WHERE game = ? ORDER BY english').all(game);
+  assert.equal(stored.length, 2);
+  assert.ok(!/[ﭐ-﷿ﹰ-﻿]/.test(stored[1].arabic), 'no presentation forms kept');
+  assert.equal(unshapeArabic('اضغط E'), 'اضغط E'); // plain Arabic is left as it is
+  assert.equal(unshapeArabic('ﻡﻮﺠﻬﻠﻟ E ﻂﻐﺿﺍ'), 'اضغط E للهجوم');
+
+  // The next batch with "parry" in it is shown the matching example, not the unrelated one.
+  await memory.translate({ id: 1 }, game, [{ hash: sha256('Parry twice in a row'), english: 'Parry twice in a row' }]);
+  const system = openai.calls.at(-1).body.messages[0].content;
+  assert.match(system, /Approved translations from this game/);
+  assert.match(system, /EN: "Parry the <Ability_Yellow>Red-flash<\/> attack"/);
+  assert.doesNotMatch(system, /Open the door/);
+  // Another game's examples are never used.
+  await memory.translate({ id: 1 }, 'steam:1', [{ hash: sha256('Parry'), english: 'Parry' }]);
+  assert.doesNotMatch(openai.calls.at(-1).body.messages[0].content, /Approved translations/);
+  assert.equal(examplesPrompt([], ['x']), '');
 });

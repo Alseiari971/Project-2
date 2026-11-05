@@ -9,7 +9,7 @@
 //   later build has it; a game whose approved Arabic is in the catalog then
 //   needs a new signed version (src/submissions.js, prepareUpdate), which the
 //   admin's desktop app makes in one click.
-const { GAME_RE, problemWith, matchBreaks, sha256 } = require('./translation-memory');
+const { GAME_RE, problemWith, matchBreaks, unshapeArabic, sha256 } = require('./translation-memory');
 
 const MAX_LINE = 2000;
 const MAX_NOTE = 500;
@@ -91,7 +91,7 @@ function createCommunity({ db, translations, arabicGames = null, submissions = n
     const game = String(body.game || '');
     checkGame(game);
     const english = text(body.english, MAX_LINE);
-    const suggestion = matchBreaks(english, text(body.suggestion, MAX_LINE));
+    const suggestion = matchBreaks(english, unshapeArabic(text(body.suggestion, MAX_LINE)));
     const current = text(body.current, MAX_LINE);
     if (!english) throw new CommunityError('Say which English line it is.');
     if (!suggestion) throw new CommunityError('Write the Arabic you suggest.');

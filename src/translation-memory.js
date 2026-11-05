@@ -98,6 +98,25 @@ const MAX_GLOSSARY_TERMS = 300;
 const MAX_GLOSSARY_SAMPLES = 40;
 const escapeRe = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+// Arabic presentation forms (U+FB50-U+FDFF, U+FE70-U+FEFF): text shaped for engines that can't join letters,
+// usually stored in visual order. Kept in the memory, it would be wrong for every engine that can.
+const PRESENTATION_FORMS = /[\uFB50-\uFDFF\uFE70-\uFEFF]/;
+
+/**
+ * Pre-shaped Arabic (presentation forms, in visual order) back to plain letters in reading order. Each line is
+ * cut into units (a tag, a placeholder, a run of Latin letters and digits, or one other character), the units
+ * are put in reverse order, and each letter goes back to its plain form; tags and Latin runs keep their own order.
+ * Text without presentation forms is returned as it is.
+ */
+const UNIT = /<[^<>]*>|\{[^{}]*\}|%\d*\$?[a-zA-Z]|[A-Za-z0-9](?:[A-Za-z0-9.,:%+_'-]|\s(?=[A-Za-z0-9]))*|[\s\S]/g;
+function unshapeArabic(text) {
+  if (typeof text !== 'string' || !PRESENTATION_FORMS.test(text)) return text;
+  return text.split(/(\r\n|\r|\n)/).map((part) => {
+    if (/^(\r\n|\r|\n)$/.test(part)) return part;
+    return (part.match(UNIT) || []).reverse().map((unit) => (PRESENTATION_FORMS.test(unit) ? unit.normalize('NFKC') : unit)).join('');
+  }).join('');
+}
+
 /** A glossary kept to its shape: { terms: { English: Arabic }, player: { gender, name } }. */
 function cleanGlossary(data) {
   const out = { terms: {}, player: { gender: 'unknown', name: '' } };
@@ -129,6 +148,28 @@ function glossaryPrompt(glossary, lines) {
   else if (gender === 'masculine') out += `\nThe player character is male${who}: when a line speaks to the player ("you"), use masculine Arabic forms (أنتَ، تستطيع، اذهب).`;
   else out += '\nThe player character\'s gender isn\'t known: when a line speaks to the player ("you"), use masculine Arabic forms, the usual default, consistently.';
   return out;
+}
+
+const words = (text) => new Set(String(text).toLowerCase().replace(/<[^>]*>|\{[^}]*\}/g, ' ').match(/[a-z][a-z'-]{2,}/g) || []);
+
+/**
+ * The approved examples (an admin's review, a player's fix an admin approved) that share the most words
+ * with this batch, as a few lines for the AI to follow: [{ english, arabic }] -> prompt text.
+ */
+function examplesPrompt(examples, lines, limit = 8) {
+  if (!examples?.length) return '';
+  const wanted = words(lines.join(' '));
+  const scored = examples
+    .map((e) => {
+      const shared = [...words(e.english)].filter((w) => wanted.has(w)).length;
+      return { ...e, score: shared };
+    })
+    .filter((e) => e.score > 0 && e.english.length <= 400)
+    .sort((a, b) => b.score - a.score || a.english.length - b.english.length)
+    .slice(0, limit);
+  if (!scored.length) return '';
+  return `\nApproved translations from this game (follow their wording, names, tone and tag placement):\n${scored
+    .map((e) => `EN: ${JSON.stringify(e.english)}\nAR: ${JSON.stringify(e.arabic)}`).join('\n')}`;
 }
 
 class TranslationLimit extends Error {}
@@ -318,8 +359,9 @@ function createTranslationMemory({ db, env = process.env, fetch = globalThis.fet
         while (next < batches.length) {
           const lines = batches[next++].map((t, i) => [i, t.english, t.hash]);
           const known = glossary(game);
-          const { good, failed: bad } = await gate.run(priority, () => batch(lines.map(([i, english]) => [i, english]), String(context).slice(0, 300),
-            known ? glossaryPrompt(known, lines.map(([, english]) => english)) : ''));
+          const englishLines = lines.map(([, english]) => english);
+          const extra = (known ? glossaryPrompt(known, englishLines) : '') + examplesPrompt(examplesOf.all(game), englishLines);
+          const { good, failed: bad } = await gate.run(priority, () => batch(lines.map(([i, english]) => [i, english]), String(context).slice(0, 300), extra));
           const chars = lines.reduce((sum, [, english]) => sum + english.length, 0);
           addUsage.run(user.id, day, lines.length, chars);
           used.lines += lines.length;
@@ -349,12 +391,33 @@ function createTranslationMemory({ db, env = process.env, fetch = globalThis.fet
    */
   const saveReviewed = db.prepare(`INSERT INTO translation_memory (game, line_hash, arabic, origin, model) VALUES (?, ?, ?, 'reviewed', NULL)
     ON CONFLICT (game, line_hash) DO UPDATE SET arabic = excluded.arabic, origin = 'reviewed', model = NULL`);
+  const saveExample = db.prepare(`INSERT INTO reviewed_examples (game, line_hash, english, arabic) VALUES (?, ?, ?, ?)
+    ON CONFLICT (game, line_hash) DO UPDATE SET english = excluded.english, arabic = excluded.arabic, updated_at = datetime('now')`);
+  const examplesOf = db.prepare('SELECT english, arabic FROM reviewed_examples WHERE game = ? ORDER BY updated_at DESC LIMIT 2000');
+  // Once, on a server that had reviewed lines before examples were kept: their English from the games' submissions.
+  try {
+    const none = !db.prepare('SELECT 1 FROM reviewed_examples LIMIT 1').get();
+    const reviewed = db.prepare("SELECT game, line_hash, arabic FROM translation_memory WHERE origin = 'reviewed'").all();
+    if (none && reviewed.length) {
+      const wanted = new Map(reviewed.map((r) => [`${r.game} ${r.line_hash}`, r.arabic]));
+      for (const sub of db.prepare('SELECT game, lines FROM arabic_submissions').iterate()) {
+        for (const line of JSON.parse(sub.lines || '[]')) {
+          const arabic = wanted.get(`${sub.game} ${line.hash}`);
+          if (arabic && typeof line.english === 'string') saveExample.run(sub.game, line.hash, line.english, arabic);
+        }
+      }
+    }
+  } catch {
+    // An older database without submissions: nothing to copy.
+  }
   function review(game, english, arabic) {
     checkGame(game);
-    arabic = matchBreaks(english, arabic);
+    arabic = matchBreaks(english, unshapeArabic(arabic));
     const problem = problemWith(english, arabic);
     if (problem) throw new TypeError(`That Arabic can't be used: ${problem}.`);
-    saveReviewed.run(game, sha256(english), arabic);
+    const hash = sha256(english);
+    saveReviewed.run(game, hash, arabic);
+    saveExample.run(game, hash, english, arabic);
   }
 
   // ---- The game's glossary ----------------------------------------------------------
@@ -411,4 +474,4 @@ function createTranslationMemory({ db, env = process.env, fetch = globalThis.fet
   return { configured: Boolean(apiKey), lookup, translate, review, stored, model, glossary, ensureGlossary, setGlossary };
 }
 
-module.exports = { createTranslationMemory, createPriorityGate, problemWith, matchBreaks, sha256, TranslationLimit, GAME_RE, cleanGlossary, glossaryPrompt, GLOSSARY_PROMPT };
+module.exports = { createTranslationMemory, createPriorityGate, problemWith, matchBreaks, unshapeArabic, examplesPrompt, sha256, TranslationLimit, GAME_RE, cleanGlossary, glossaryPrompt, GLOSSARY_PROMPT };

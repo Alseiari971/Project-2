@@ -206,6 +206,17 @@ function openDatabase(file = process.env.DB_FILE || path.join(__dirname, '..', '
       PRIMARY KEY (game, line_hash)
     );
 
+    -- GameShelf's own approved Arabic with its English (an admin's review, or a player's fix an admin
+    -- approved): shown to the AI as examples of the game's style when more of it is translated.
+    CREATE TABLE IF NOT EXISTS reviewed_examples (
+      game       TEXT NOT NULL,
+      line_hash  TEXT NOT NULL,
+      english    TEXT NOT NULL,
+      arabic     TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (game, line_hash)
+    );
+
     -- Lines and characters each user had machine-translated, per day, for the limits.
     CREATE TABLE IF NOT EXISTS translation_usage (
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
