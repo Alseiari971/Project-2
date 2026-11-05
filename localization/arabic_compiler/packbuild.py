@@ -1220,30 +1220,35 @@ def color_names(english: dict, texts: dict, style: str, speakers: bool = False) 
         if 2 <= len(en) <= 40 and en[:1].isupper() and '<' not in ar and _ARABIC_LETTER.search(ar) and len(ar) <= 40:
             names.append((en, ar))
     names = sorted(set(names), key=lambda n: -len(n[1]))
+    # Each name's two patterns are made once: the English one (is the character named in this line?) and the Arabic one.
+    compiled = [(en_name, ar_name, re.compile(rf'(?<![\w]){re.escape(en_name)}(?![\w])'),
+                 re.compile(rf'(?<![{_ARABIC_WORD_CHAR}])([وفبلك]?){re.escape(ar_name)}(?![{_ARABIC_WORD_CHAR}])'))
+                for en_name, ar_name in names]
+    label_names = {ar for _, ar in names}
     out = dict(texts)
     count = 0
     for key, ar in texts.items():
         if _NAME_KEY.search(key):
-            if speakers and any(ar.strip() == n[1] for n in names):
+            if speakers and ar.strip() in label_names:
                 out[key] = f'<{style}>{ar.strip()}</>'
                 count += 1
             continue
         en = english.get(key, '')
         text = ar
-        for en_name, ar_name in names:
-            if not re.search(rf'(?<![\w]){re.escape(en_name)}(?![\w])', en) or ar_name not in text:
+        for en_name, ar_name, en_pattern, ar_pattern in compiled:
+            # Cheap checks first: both names have to be in their lines at all.
+            if ar_name not in text or en_name not in en or not en_pattern.search(en):
                 continue
             styled = [m.span() for m in _TAGGED.finditer(text)]
-            pattern = re.compile(rf'(?<![{_ARABIC_WORD_CHAR}])([وفبلك]?){re.escape(ar_name)}(?![{_ARABIC_WORD_CHAR}])')
 
-            def wrap(m):
+            def wrap(m, ar_name=ar_name, styled=styled):
                 nonlocal count
                 if any(a <= m.start() < b for a, b in styled):
                     return m.group(0)
                 count += 1
                 return f'{m.group(1)}<{style}>{ar_name}</>'
 
-            text = pattern.sub(wrap, text)
+            text = ar_pattern.sub(wrap, text)
         out[key] = text
     return out, count
 
