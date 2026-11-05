@@ -1787,6 +1787,10 @@ export const AR = {
   "Backup ready": "النسخة الاحتياطية جاهزة",
   // Showcase, notifications, pack numbers and profiles
   "Translating…": "يترجم…",
+  // Showcase, notifications, pack numbers and profiles
+  "No signing key chosen on this PC yet. Choose GameShelf's pack-signing.key: it stays on this PC and is never uploaded.": "لم يُختر مفتاح توقيع على هذا الحاسوب بعد. اختر pack-signing.key الخاص بـ GameShelf: يبقى على هذا الحاسوب ولا يُرفع أبدًا.",
+  "This key isn't the one players' apps check with, so they won't accept what it signs. Choose GameShelf's pack-signing.key.": "هذا ليس المفتاح الذي تتحقق به تطبيقات اللاعبين، فلن تقبل ما يوقّعه. اختر pack-signing.key الخاص بـ GameShelf.",
+  "Choose another key": "اختر مفتاحًا آخر",
 };
 
 // Arabic counts have six forms: no items, one, two, three to ten, eleven to

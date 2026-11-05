@@ -2237,6 +2237,7 @@ h1 .supporter-badge { font-size: 12px; }
 .signer-panel h2 { display: flex; align-items: center; gap: 8px; }
 .signer-state { display: flex; align-items: center; gap: 8px; margin: 4px 0 6px; font-weight: 600; }
 .signer-state.ok { color: #3fcf8e; }
+.signer-state.warn { color: #ffcf5c; }
 .signer-form { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .signer-form .input { flex: 1 1 260px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .signer-file { cursor: pointer; }

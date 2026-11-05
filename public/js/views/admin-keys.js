@@ -135,11 +135,34 @@ export async function keysTab(body, params = new URLSearchParams()) {
 
   // ---- The signer ----
   const signerBox = document.getElementById('signer');
+  // In the desktop app: the Pack Studio's pack-signing.key on this PC, chosen here or in the Pack Studio.
+  async function showAppSigner() {
+    const s = await desktop.studio?.settings?.().catch(() => null);
+    const ready = Boolean(s?.keyFile && s.keyOk && s.keyMatchesApp);
+    const note = !s?.keyFile
+      ? t('No signing key chosen on this PC yet. Choose GameShelf\'s pack-signing.key: it stays on this PC and is never uploaded.')
+      : !s.keyOk ? t('That file isn\'t a signing key.')
+        : !s.keyMatchesApp ? t('This key isn\'t the one players\' apps check with, so they won\'t accept what it signs. Choose GameShelf\'s pack-signing.key.')
+          : t('Signed in this app with the Pack Studio\'s key (pack-signing.key on this PC). It never leaves this PC.');
+    mount(signerBox, html`
+      <h2>${icon('shield')} ${t('Signer')}</h2>
+      <p class="signer-state ${ready ? 'ok' : 'warn'}">${ready ? icon('check') : icon('info')} ${note}</p>
+      ${s?.keyFile ? html`<p class="muted small" dir="ltr">${s.keyFile}</p>` : ''}
+      <div class="row-actions"><button class="btn btn-sm ${ready ? '' : 'btn-accent'}" type="button" id="signer-pick">${icon('upload')} ${ready ? t('Choose another key') : t('Choose pack-signing.key')}</button></div>`);
+    document.getElementById('signer-pick').addEventListener('click', async () => {
+      try {
+        const chosen = await desktop.studio.pick('key');
+        if (!chosen) return;
+        await desktop.studio.saveSettings({ keyFile: chosen });
+        await showAppSigner();
+      } catch (err) {
+        toast(errorText(err), { error: true });
+      }
+    });
+  }
   const showSigner = () => {
     if (desktop?.attachRecipe) {
-      mount(signerBox, html`
-        <h2>${icon('shield')} ${t('Signer')}</h2>
-        <p class="signer-state ok">${icon('check')} ${t('Signed in this app with the Pack Studio\'s key (pack-signing.key on this PC). It never leaves this PC.')}</p>`);
+      showAppSigner();
       return;
     }
     mount(signerBox, signer
