@@ -182,6 +182,12 @@ def parse_args(argv=None):
                    help='unreal (UE5): add Arabic as its own language too: the Arabic .locres under the "ar" culture, "ar" in the '
                         'game\'s .locmeta, and an "ar" style, copied from English, in every row of its per-language text style '
                         'tables (DT_*Styles), packed into the .utoc/.ucas; needs --ue-version')
+    c.add_argument('--color-names', metavar='STYLE',
+                   help='unreal: colour character names in the lines with one of the game\'s own rich text styles, e.g. '
+                        'Character_Yellow_Decorator2 (only where the English line names the character)')
+    c.add_argument('--color-speakers', action='store_true',
+                   help='unreal, with --color-names: colour the character entries themselves too (the speaker\'s name above a '
+                        'subtitle); only for games that show it as styled text, or the tag shows as text')
     c.add_argument('--ltr-layout', action='store_true',
                    help='unreal: keep Arabic where the game puts English, for games whose text boxes line text up left (each '
                         'line laid out left to right, the Arabic in it read right to left), rather than against the far edge')
@@ -1093,6 +1099,13 @@ def build_unreal(source, translations: dict, args, payload: Path, stage_root: Pa
         raise BuildError('--locres-path must stay inside the game.')
     compiler = ArabicCompiler(max_line=args.max_line) if args.shape else None
     texts = {key: (compiler(arabic) if compiler else arabic) for key, arabic in translations.items()}
+    if getattr(args, 'color_names', None):
+        if compiler:
+            log('Names aren\'t coloured in shaped text (--shape).')
+        else:
+            english = {row.key: row.source for row in source.rows if row.key}
+            texts, coloured = color_names(english, texts, args.color_names, speakers=getattr(args, 'color_speakers', False))
+            log(f'Coloured {coloured} character names in the lines with the game\'s {args.color_names} style.')
     if getattr(args, 'ltr_layout', False):
         texts = {key: ltr_layout(text) for key, text in texts.items()}
         log('Arabic lines keep the place the game gives its English (laid out left to right, read right to left).')
@@ -1180,6 +1193,59 @@ def ltr_layout(text: str) -> str:
         return text
     parts = _PARAGRAPH.split(text)
     return ''.join(p if _PARAGRAPH.fullmatch(p) or not _ARABIC_LETTER.search(p) else f'\u200e\u202b{p}\u202c' for p in parts)
+
+
+# The game's character names: Unreal text entries like Character_Main_1 ("Soul") or BossName_000.
+_NAME_KEY = re.compile(r'(?:^|/)(?:Character|NPC|Npc|Speaker|BossName)_[\w-]*$')
+_TAGGED = re.compile(r'<[^<>/]+>.*?</>', re.S)
+_ARABIC_WORD_CHAR = '\u0621-\u064A\u0660-\u0669\u0671-\u06D3'
+_STYLE_NAME = re.compile(r'^[A-Za-z][\w.]{0,60}$')
+
+
+def color_names(english: dict, texts: dict, style: str, speakers: bool = False) -> tuple:
+    """`texts` with the game's character names wrapped in one of its own rich text styles (<style>name</>).
+    Names come from the game's character entries (Character_*, NPC_*, Speaker_*, BossName_*): their English and
+    Arabic. A name is coloured in a line only where that line's English names the character, so the common word
+    under a name («الروح», "the soul") stays plain elsewhere; a letter joined in front of it (و، ف، ب، ل، ك) stays
+    outside the colour, and text that's already styled is left alone. With `speakers`, the character entries
+    themselves (the speaker's name above a subtitle) are coloured too. Returns (texts, how many names were coloured)."""
+    if not _STYLE_NAME.match(style or ''):
+        raise BuildError(f'"{style}" isn\'t a rich text style name (like Character_Yellow_Decorator2).')
+    names = []
+    for key, en in english.items():
+        ar = texts.get(key)
+        if not ar or not _NAME_KEY.search(key):
+            continue
+        en, ar = en.strip(), ar.strip()
+        if 2 <= len(en) <= 40 and en[:1].isupper() and '<' not in ar and _ARABIC_LETTER.search(ar) and len(ar) <= 40:
+            names.append((en, ar))
+    names = sorted(set(names), key=lambda n: -len(n[1]))
+    out = dict(texts)
+    count = 0
+    for key, ar in texts.items():
+        if _NAME_KEY.search(key):
+            if speakers and any(ar.strip() == n[1] for n in names):
+                out[key] = f'<{style}>{ar.strip()}</>'
+                count += 1
+            continue
+        en = english.get(key, '')
+        text = ar
+        for en_name, ar_name in names:
+            if not re.search(rf'(?<![\w]){re.escape(en_name)}(?![\w])', en) or ar_name not in text:
+                continue
+            styled = [m.span() for m in _TAGGED.finditer(text)]
+            pattern = re.compile(rf'(?<![{_ARABIC_WORD_CHAR}])([وفبلك]?){re.escape(ar_name)}(?![{_ARABIC_WORD_CHAR}])')
+
+            def wrap(m):
+                nonlocal count
+                if any(a <= m.start() < b for a, b in styled):
+                    return m.group(0)
+                count += 1
+                return f'{m.group(1)}<{style}>{ar_name}</>'
+
+            text = pattern.sub(wrap, text)
+        out[key] = text
+    return out, count
 
 
 def stage_arabic_language(source, in_pak, target: Path, stage: Path, log) -> list:

@@ -47,6 +47,9 @@ test('the Studio\'s choices become the pack builder\'s command line, and mistake
   const ue5 = buildArgs({ ...base, translate: 'none', ueVersion: 'UE5_7', arabicLanguage: true, uiAssets: 'PBZ-ui', logoAssets: 'logo' }, where).join(' ');
   assert.ok(ue5.includes('--ue-version UE5_7 --arabic-language --ui-assets PBZ-ui --logo-assets logo'));
   assert.ok(buildArgs({ ...base, translate: 'none', ltrLayout: true }, where).includes('--ltr-layout'));
+  assert.ok(buildArgs({ ...base, translate: 'none', colorNames: 'Character_Yellow_Decorator2', colorSpeakers: true }, where).join(' ')
+    .includes('--color-names Character_Yellow_Decorator2 --color-speakers'));
+  assert.throws(() => buildArgs({ ...base, colorNames: '<b>' }, where), /text styles/);
   assert.throws(() => buildArgs({ ...base, arabicLanguage: true }, where), /Unreal Engine version/);
   assert.throws(() => buildArgs({ ...base, logoAssets: 'logo' }, where), /Unreal Engine version/);
   assert.throws(() => buildArgs({ ...base, ueVersion: '5.7; rm -rf' }, where), /looks like UE5_7/);

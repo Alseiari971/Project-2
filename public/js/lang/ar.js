@@ -1804,6 +1804,14 @@ export const AR = {
   "Choose title logo folder": "اختر مجلد الشعار",
   // Showcase, notifications, pack numbers and profiles
   "Keep Arabic where the game puts English (for text that ends up against the far edge of the screen)": "أبقِ العربية حيث تضع اللعبة الإنجليزية (للنصوص التي تظهر عند الطرف البعيد من الشاشة)",
+  // Showcase, notifications, pack numbers and profiles
+  "Colour character names": "لوّن أسماء الشخصيات",
+  "Also colour the speaker's name above subtitles (turn off if tags show as text)": "لوّن أيضًا اسم المتحدث فوق الترجمة (أوقفه إن ظهرت الوسوم كنص)",
+  "Leave names as they are": "اترك الأسماء كما هي",
+  "Blue": "أزرق",
+  "Red": "أحمر",
+  "Green": "أخضر",
+  "Purple": "بنفسجي",
 };
 
 // Arabic counts have six forms: no items, one, two, three to ten, eleven to

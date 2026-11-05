@@ -527,3 +527,24 @@ class LtrLayoutTest(unittest.TestCase):
         self.assertEqual(ltr_layout('سطر\r\nسطر ثان'), '‎‫سطر‬\r\n‎‫سطر ثان‬')
         self.assertEqual(ltr_layout('HDR'), 'HDR')  # nothing to do without Arabic
         self.assertEqual(ltr_layout(''), '')
+
+
+class ColorNamesTest(unittest.TestCase):
+    """Character names get one of the game's colour styles, only where the English line names the character."""
+
+    def test_names_are_coloured_where_the_english_names_them(self):
+        from arabic_compiler.packbuild import color_names, BuildError
+        en = {'D/Character_Main_1': 'Soul', 'D/Character_Main_2': 'Zhuo Shang', 'D/Dlg_1': 'Soul, we train every day.',
+              'D/Dlg_2': 'My soul is tired.', 'D/Dlg_3': 'Ask Zhuo Shang about <Bold>Wulin</>.', 'D/Dlg_4': 'Zhuo Shang!'}
+        ar = {'D/Character_Main_1': 'الروح', 'D/Character_Main_2': 'زوو شانغ', 'D/Dlg_1': 'يا الروح، نتدرب كل يوم.',
+              'D/Dlg_2': 'الروح متعبة.', 'D/Dlg_3': 'اسأل وزوو شانغ عن <Bold>وولين</>.', 'D/Dlg_4': '<Bold>زوو شانغ</>!'}
+        out, n = color_names(en, ar, 'Character_Yellow_Decorator2')
+        self.assertEqual(out['D/Dlg_1'], 'يا <Character_Yellow_Decorator2>الروح</>، نتدرب كل يوم.')
+        self.assertEqual(out['D/Dlg_2'], 'الروح متعبة.')  # "soul" the word, not the character
+        self.assertEqual(out['D/Dlg_3'], 'اسأل و<Character_Yellow_Decorator2>زوو شانغ</> عن <Bold>وولين</>.')  # the و stays outside
+        self.assertEqual(out['D/Dlg_4'], '<Bold>زوو شانغ</>!')  # already styled: left as it is
+        self.assertEqual(out['D/Character_Main_1'], 'الروح')  # the speaker label only with speakers=True
+        self.assertEqual(n, 2)
+        self.assertEqual(color_names(en, ar, 'Blue', speakers=True)[0]['D/Character_Main_1'], '<Blue>الروح</>')
+        with self.assertRaises(BuildError):
+            color_names(en, ar, '<b>')

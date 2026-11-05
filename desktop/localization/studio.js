@@ -63,6 +63,11 @@ function buildArgs(options, { script, msgTool, keyFile, outDir, server }) {
   }
   if (o.uiAssets) args.push('--ui-assets', o.uiAssets);
   if (o.ltrLayout) args.push('--ltr-layout');
+  if (o.colorNames) {
+    if (!/^[A-Za-z][\w.]{0,60}$/.test(String(o.colorNames))) throw new StudioError('Pick one of the game\'s text styles for names.');
+    args.push('--color-names', String(o.colorNames));
+    if (o.colorSpeakers) args.push('--color-speakers');
+  }
   if (o.logoAssets) {
     if (!o.ueVersion) throw new StudioError('A cooked title logo needs the game\'s Unreal Engine version, like UE5_7.');
     args.push('--logo-assets', o.logoAssets);
