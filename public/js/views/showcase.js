@@ -1,7 +1,7 @@
 // The public showcase (#/welcome, and #/ for visitors who aren't signed in):
 // what GameShelf does for a player, in a player's words. It never names the
 // tools or file formats behind it; those stay GameShelf's own.
-import { html, bdi, api, mount, state } from '../lib.js';
+import { html, bdi, api, mount, state, onLeave } from '../lib.js';
 import { icon } from '../icons.js';
 import { t, locale, isArabic } from '../i18n.js';
 
@@ -33,6 +33,57 @@ function segmented(name, options, value, label) {
     <button type="button" role="radio" aria-checked="${o.id === value}" class="${o.id === value ? 'on' : ''}" data-${name}="${o.id}">${o.label}</button>`)}</div>`;
 }
 
+// The demo plays in three steps, like the real app: a game's page with the
+// Arabic switch, a zoom into the game, then its English subtitle scrambling
+// into Arabic. The subtitle controls open once the game is on screen.
+const GAME = { title: 'Ashen Crossing', genre: 'Adventure', year: '2026' };
+const STEPS_ON = ['Checking the game…', 'Installing Arabic…', 'Backup ready'];
+// What the line looks like mid-change: hex like a hash, with Arabic letters.
+const NOISE = '0123456789abcdef#%&$@ابتثجحخدذرزسشصضطظعغفقكلمنهوي';
+const reducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+const wait = (ms) => new Promise((r) => setTimeout(r, reducedMotion() ? Math.min(ms, 120) : ms));
+
+function sceneArt() {
+  return html`<span class="scene-sun"></span><span class="scene-far"></span><span class="scene-near"></span><span class="scene-bridge"></span>`;
+}
+
+function gamePage() {
+  return html`
+    <div class="mock-page" id="mock-page">
+      <div class="mock-hero">${sceneArt()}<span class="mock-hero-shade"></span></div>
+      <div class="mock-page-body">
+        <span class="mock-cover" aria-hidden="true">${sceneArt()}</span>
+        <div class="mock-info">
+          <span class="mock-example">${t('Example game')}</span>
+          <h3 class="mock-title" dir="ltr">${GAME.title}</h3>
+          <p class="mock-meta">${t(GAME.genre)} · <span dir="ltr">${GAME.year}</span></p>
+          <div class="mock-actions">
+            <button type="button" class="mock-play" id="mock-play" tabindex="-1">${icon('play')}<span>${t('Play')}</span></button>
+            <button type="button" class="arabic-toggle mode-native" id="mock-toggle" role="switch" aria-checked="false">
+              <span class="arabic-mark" aria-hidden="true">ع</span>
+              <span class="arabic-label"><strong>${t('Arabic subtitles')}</strong><small id="mock-toggle-note">${t('Ready on GameShelf')}</small></span>
+              <span class="switch" aria-hidden="true"><span></span></span>
+            </button>
+          </div>
+          <p class="mock-hint" id="mock-hint">${icon('up')}<span>${t('Try it: turn Arabic on')}</span></p>
+        </div>
+      </div>
+    </div>`;
+}
+
+function gameScene(demo) {
+  return html`
+    <div class="scene is-entering" id="mock-scene" role="img" aria-label="${t('A scene from a game, with its subtitle at the bottom')}">
+      ${sceneArt()}
+      <div class="scene-hud"><span class="arabic-pill on" id="mock-pill"><span class="arabic-mark sm">ع</span>${t('Arabic on')}</span></div>
+      <button type="button" class="mock-replay" id="mock-replay" hidden>${icon('refresh')}<span>${t('Replay')}</span></button>
+      <div id="demo-sub"><div class="demo-sub mode-en" data-scale="${demo.size}">
+        <span class="demo-speaker" dir="ltr">${LINE.speaker.en}</span>
+        <p class="demo-line en" lang="en" dir="ltr" id="morph-line">${LINE.en}</p>
+      </div></div>
+    </div>`;
+}
+
 function appWindow(demo) {
   const controls = html`<div class="win-ctl" aria-hidden="true"><span>—</span><span>▢</span><span>✕</span></div>`;
   return html`
@@ -43,25 +94,64 @@ function appWindow(demo) {
       </div>
       <div class="mock-body">
         <nav class="mock-side" aria-hidden="true">
-          <span class="on">${icon('solid-home')}${t('Home')}</span>
-          <span>${icon('solid-library')}${t('Library')}</span>
+          <span>${icon('solid-home')}${t('Home')}</span>
+          <span class="on">${icon('solid-library')}${t('Library')}</span>
           <span>${icon('star')}${t('Arabic requests')}</span>
           <span>${icon('solid-users')}${t('Friends')}</span>
         </nav>
-        <div class="mock-main">
-          <div class="scene" role="img" aria-label="${t('A scene from a game, with its subtitle at the bottom')}">
-            <span class="scene-sun"></span><span class="scene-far"></span><span class="scene-near"></span><span class="scene-bridge"></span>
-            <div class="scene-hud"><span class="arabic-pill ${demo.mode === 'en' ? '' : 'on'}"><span class="arabic-mark sm">ع</span>${demo.mode === 'en' ? t('Arabic off') : t('Arabic on')}</span></div>
-            <div id="demo-sub">${subtitle(demo)}</div>
-          </div>
-        </div>
+        <div class="mock-main" id="mock-main">${gamePage()}</div>
       </div>
     </figure>
-    <div class="demo-controls">
-      ${segmented('mode', [{ id: 'en', label: t('English') }, { id: 'ar', label: 'العربية' }, { id: 'dual', label: t('Dual (EN + AR)') }], demo.mode, t('Subtitles'))}
-      ${segmented('font', FONTS.map((f) => ({ id: f.id, label: f.name })), demo.font, t('Font'))}
-      ${segmented('size', SIZES.map((s) => ({ id: String(s), label: `${s}%` })), String(demo.size), t('Size'))}
-    </div>`;
+    <p class="sr-only" aria-live="polite" id="mock-status"></p>
+    <div class="demo-controls is-locked" id="demo-controls">${demoControls(demo)}</div>`;
+}
+
+function demoControls(demo) {
+  return html`
+    ${segmented('mode', [{ id: 'en', label: t('English') }, { id: 'ar', label: 'العربية' }, { id: 'dual', label: t('Dual (EN + AR)') }], demo.mode, t('Subtitles'))}
+    ${segmented('font', FONTS.map((f) => ({ id: f.id, label: f.name })), demo.font, t('Font'))}
+    ${segmented('size', SIZES.map((s) => ({ id: String(s), label: `${s}%` })), String(demo.size), t('Size'))}`;
+}
+
+/** Turns `from` into `to` a few letters at a time, through hash-like noise. */
+function scramble(el, from, to, ms, alive) {
+  return new Promise((resolve) => {
+    if (reducedMotion()) {
+      el.textContent = to;
+      return resolve();
+    }
+    const t0 = performance.now();
+    const noise = () => NOISE[Math.floor(Math.random() * NOISE.length)];
+    let last = 0;
+    const frame = (now) => {
+      if (!alive()) return resolve();
+      const p = Math.min(1, (now - t0) / ms);
+      if (now - last > 45 || p === 1) {
+        last = now;
+        // First the English breaks up, then the Arabic settles in from the start of the line.
+        const length = Math.round(from.length + (to.length - from.length) * Math.min(1, p * 1.6));
+        const settled = Math.floor(Math.max(0, (p - 0.35) / 0.65) * to.length);
+        let text = '';
+        for (let i = 0; i < length; i++) {
+          if (i < settled) text += to[i] ?? '';
+          else if (p < 0.35 && i < from.length && Math.random() < 1 - p * 2.6) text += from[i];
+          else text += (to[i] === ' ' && p > 0.35) ? ' ' : noise();
+        }
+        el.textContent = text;
+        if (p > 0.35 && el.dir !== 'rtl') {
+          el.dir = 'rtl';
+          el.lang = 'ar';
+          el.classList.add('is-morphing');
+        }
+      }
+      if (p < 1) requestAnimationFrame(frame);
+      else {
+        el.textContent = to;
+        resolve();
+      }
+    };
+    requestAnimationFrame(frame);
+  });
 }
 
 const FEATURES = [
@@ -124,7 +214,7 @@ export async function showcaseView(app) {
 
       <section class="sc-demo" aria-labelledby="sc-demo-title">
         <h2 id="sc-demo-title" class="sc-h2">${t('See it in a game')}</h2>
-        <p class="muted">${t('Switch the subtitles between English, Arabic, or both at once, and try the fonts and sizes.')}</p>
+        <p class="muted">${t('Turn Arabic on for a game, the way you will in GameShelf, then switch the subtitles between English, Arabic or both, and try the fonts and sizes.')}</p>
         <div id="sc-window">${appWindow(demo)}</div>
       </section>
 
@@ -163,15 +253,86 @@ export async function showcaseView(app) {
       </section>
     </div>`);
 
-  // The demo: modes, fonts and sizes switch at once.
+  // The demo: flip Arabic on, watch it go into the game, then try modes, fonts and sizes.
   const win = document.getElementById('sc-window');
+  let run = 0; // each play-through; a replay or leaving the page stops the one before
+  onLeave(() => { run++; });
+  const status = (text) => {
+    const el = document.getElementById('mock-status');
+    if (el) el.textContent = text;
+  };
+  const drawSubtitle = () => {
+    const slot = document.getElementById('demo-sub');
+    if (slot) mount(slot, subtitle(demo));
+    mount(document.getElementById('demo-controls'), demoControls(demo));
+  };
+
+  async function turnOn() {
+    const mine = ++run;
+    const alive = () => mine === run && document.body.contains(win);
+    const toggle = document.getElementById('mock-toggle');
+    const note = document.getElementById('mock-toggle-note');
+    document.getElementById('mock-hint')?.remove();
+    toggle.disabled = true;
+    toggle.classList.add('is-busy');
+    toggle.setAttribute('aria-checked', 'true');
+    for (const [i, step] of STEPS_ON.entries()) {
+      note.textContent = t(step);
+      status(t(step));
+      toggle.style.setProperty('--progress', `${Math.round(((i + 1) / STEPS_ON.length) * 100)}%`);
+      await wait(650);
+      if (!alive()) return;
+    }
+    toggle.classList.remove('is-busy');
+    toggle.classList.add('is-on');
+    note.textContent = t('On');
+    document.getElementById('mock-play').classList.add('is-ready');
+    await wait(700);
+    if (!alive()) return;
+
+    // Into the game.
+    document.getElementById('mock-page').classList.add('is-leaving');
+    await wait(450);
+    if (!alive()) return;
+    mount(document.getElementById('mock-main'), gameScene(demo));
+    status(t('In the game: the English subtitle turns into Arabic.'));
+    await wait(1300);
+    if (!alive()) return;
+    const line = document.getElementById('morph-line');
+    const speaker = document.querySelector('#demo-sub .demo-speaker');
+    speaker.classList.add('is-fading');
+    await scramble(line, LINE.en, LINE.ar, 1700, alive);
+    if (!alive()) return;
+    await wait(500);
+    if (!alive()) return;
+    demo.mode = 'dual';
+    drawSubtitle();
+    document.getElementById('mock-scene')?.classList.remove('is-entering');
+    document.getElementById('demo-controls').classList.remove('is-locked');
+    document.getElementById('mock-replay').hidden = false;
+    status(t('Arabic is on. Try the subtitle modes, fonts and sizes below.'));
+  }
+
+  function replay() {
+    run++;
+    Object.assign(demo, { mode: 'dual', font: 'cairo', size: 125 });
+    mount(win, appWindow(demo));
+  }
+
   win.addEventListener('click', (e) => {
+    if (e.target.closest('#mock-toggle')) return turnOn();
+    if (e.target.closest('#mock-replay')) return replay();
     const b = e.target.closest('[data-mode], [data-font], [data-size]');
-    if (!b) return;
+    if (!b || document.getElementById('demo-controls').classList.contains('is-locked')) return;
     if (b.dataset.mode) demo.mode = b.dataset.mode;
     if (b.dataset.font) demo.font = b.dataset.font;
     if (b.dataset.size) demo.size = Number(b.dataset.size);
-    mount(win, appWindow(demo));
+    const pill = document.getElementById('mock-pill');
+    if (pill) {
+      pill.classList.toggle('on', demo.mode !== 'en');
+      mount(pill, html`<span class="arabic-mark sm">ع</span>${demo.mode === 'en' ? t('Arabic off') : t('Arabic on')}`);
+    }
+    drawSubtitle();
   });
 
   // The live catalog, from GameShelf's server.

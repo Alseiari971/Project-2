@@ -1739,7 +1739,6 @@ export const AR = {
   "Keeps working through Steam updates": "تحديث تلقائي مع تحديثات Steam",
   "Safe, with an instant restore": "آمن 100% مع نسخ احتياطي فوري",
   "See it in a game": "شاهدها داخل اللعبة",
-  "Switch the subtitles between English, Arabic, or both at once, and try the fonts and sizes.": "بدّل الترجمة بين الإنجليزية والعربية أو الاثنتين معاً، وجرّب الخطوط والأحجام.",
   "Made for players who want Arabic": "مصمم للاعبين الذين يريدون العربية",
   "Games with Arabic now": "ألعاب معرّبة الآن",
   "How it works": "طريقة العمل",
@@ -1776,6 +1775,16 @@ export const AR = {
   "Signs in with a code on new browsers and PCs": "يسجل الدخول برمز على المتصفحات والأجهزة الجديدة",
   "Give 1 to 5 stars.": "أعطِ من نجمة إلى 5 نجوم.",
   "Only players who have this game's Arabic can rate it.": "التقييم متاح فقط للاعبين الذين ثبّتوا عربية هذه اللعبة.",
+  // Showcase, notifications, pack numbers and profiles
+  "Example game": "لعبة للتجربة",
+  "Try it: turn Arabic on": "جرّبها: فعّل العربية",
+  "Replay": "أعد العرض",
+  "Turn Arabic on for a game, the way you will in GameShelf, then switch the subtitles between English, Arabic or both, and try the fonts and sizes.": "فعّل العربية للعبة كما ستفعل في قيم شلف، ثم بدّل الترجمة بين الإنجليزية والعربية أو الاثنتين معاً، وجرّب الخطوط والأحجام.",
+  "In the game: the English subtitle turns into Arabic.": "داخل اللعبة: الترجمة الإنجليزية تتحول إلى العربية.",
+  "Arabic is on. Try the subtitle modes, fonts and sizes below.": "العربية مفعّلة. جرّب أوضاع الترجمة والخطوط والأحجام في الأسفل.",
+  "Checking the game…": "يفحص اللعبة…",
+  "Installing Arabic…": "يثبّت العربية…",
+  "Backup ready": "النسخة الاحتياطية جاهزة",
 };
 
 // Arabic counts have six forms: no items, one, two, three to ten, eleven to
