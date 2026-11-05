@@ -151,7 +151,7 @@ def get_chunk(tool: str, chunk: Chunk, out: Path) -> bytes:
     return Path(out).read_bytes()
 
 
-def engine_version(program: Path | None, limit: int = 512 * 1024 * 1024) -> str | None:
+def engine_version(program: Path | None, limit: int = 2048 * 1024 * 1024) -> str | None:
     """'UE5_4' for a game whose program says "++UE5+Release-5.4", read in chunks; None when it doesn't say."""
     if not program or not Path(program).is_file():
         return None

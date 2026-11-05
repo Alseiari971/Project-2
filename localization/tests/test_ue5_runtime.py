@@ -18,6 +18,7 @@ from unittest import mock
 from arabic_compiler import locres as locres_format
 from arabic_compiler import retoc, runtime
 from arabic_compiler.packbuild import BuildError, build, parse_args
+from arabic_compiler import packbuild
 from arabic_compiler.sources import SourceError, read_source
 from test_build_pack import HAS_NODE, REPO, FakeApi, node_read_pack
 
@@ -154,6 +155,30 @@ class IoStore(unittest.TestCase):
         self.assertEqual(retoc.check_version('UE5_4'), 'UE5_4')
         with self.assertRaises(retoc.RetocError):
             retoc.check_version('5.4; rm -rf')
+
+    def test_the_version_is_found_when_the_games_binaries_folder_has_only_helper_tools(self):
+        # Like Phantom Blade Zero: Binaries/Win64 holds a 7-Zip tool and helpers, and the engine's
+        # own UnrealCEFSubProcess.exe is the program that says which Unreal Engine the game uses.
+        game = self.tmp / 'PBZ'
+        win64 = game / 'ProjectPBZ' / 'Binaries' / 'Win64'
+        win64.mkdir(parents=True)
+        (win64 / '8za_v2.exe').write_bytes(b'MZ' + b'\0' * 5000)
+        (win64 / 'CheckEnv.exe').write_bytes(b'MZ' + b'\0' * 500)
+        (win64 / 'crashpad_handler.exe').write_bytes(b'MZ' + b'\0' * 3000)
+        cef = game / 'Engine' / 'Binaries' / 'ThirdParty' / 'CEF3' / 'Win64'
+        cef.mkdir(parents=True)
+        (cef / 'libcef_helper.exe').write_bytes(b'MZ ++UE5+Release-5.0')  # not the engine's: ignored
+        engine = game / 'Engine' / 'Binaries' / 'Win64'
+        engine.mkdir(parents=True)
+        (engine / 'UnrealCEFSubProcess.exe').write_bytes(b'MZ' + '++UE5+Release-5.4-CL-0'.encode('utf-16-le') + b'\0' * 10)
+        names = [p.name for p in packbuild.unreal_programs(game)]
+        self.assertNotIn('8za_v2.exe', names)
+        self.assertNotIn('libcef_helper.exe', names)
+        self.assertEqual(packbuild.game_engine_version(game), 'UE5_4')
+        # The game's own -Shipping program comes first when there is one.
+        (win64 / 'ProjectPBZ-Win64-Shipping.exe').write_bytes(b'MZ ++UE5+Release-5.5-CL-1')
+        self.assertEqual(packbuild.unreal_programs(game)[0].name, 'ProjectPBZ-Win64-Shipping.exe')
+        self.assertEqual(packbuild.game_engine_version(game), 'UE5_5')
 
     def test_a_locres_kept_in_a_container_is_read_from_it_and_font_packages_are_listed(self):
         game = self.game({'PhantomBlade/Content/Movies/intro.bk2': '00'}, [

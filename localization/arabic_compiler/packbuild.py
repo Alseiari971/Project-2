@@ -1130,13 +1130,46 @@ def build_unreal(source, translations: dict, args, payload: Path, stage_root: Pa
         build_zen_fonts(args, iostore, payload, stage_root, log)
 
 
-def shipping_program(folder: Path) -> Path | None:
-    """An Unreal game's program (<Project>/Binaries/Win64/*-Shipping.exe, or its biggest .exe there)."""
+# Programs in a game's folder that aren't built with its Unreal Engine, so they can't say its version.
+_NOT_UNREAL = re.compile(r'^(crashpad_handler|crashreportclient\w*|7z\w*|8za\w*|checkenv|vc_?redist\w*|dxsetup|dotnet\w*|'
+                         r'easyanticheat\w*|start_protected_game|eosbootstrapper|unins\d*|cefsharp\w*|steamerrorreporter\w*)\.exe$', re.I)
+
+
+def unreal_programs(folder: Path, limit: int = 8) -> list:
+    """The programs of an Unreal game most likely to carry its engine version, best first: the game itself
+    (<Project>/Binaries/*/*-Shipping.exe, or its biggest program), then the engine's own (UnrealCEFSubProcess.exe
+    is built with the same engine). Some games keep only helper tools in Binaries/Win64, so the whole folder is looked through."""
     root = Path(folder)
     if not root.is_dir():
-        return None
-    programs = sorted(root.glob('*/Binaries/Win64/*.exe'), key=lambda p: (not p.name.lower().endswith('-shipping.exe'), -p.stat().st_size))
+        return []
+    found = []
+    for path in root.rglob('*.exe'):
+        parts = [p.lower() for p in path.relative_to(root).parts]
+        if 'thirdparty' in parts or _NOT_UNREAL.match(path.name):
+            continue
+        try:
+            size = path.stat().st_size
+        except OSError:
+            continue
+        name = path.name.lower()
+        rank = 0 if name.endswith('-shipping.exe') else 1 if 'binaries' in parts else 2 if name == 'unrealcefsubprocess.exe' else 3
+        found.append((rank, -size, path))
+    return [path for _, _, path in sorted(found)[:limit]]
+
+
+def shipping_program(folder: Path) -> Path | None:
+    """An Unreal game's program (see unreal_programs)."""
+    programs = unreal_programs(folder, limit=1)
     return programs[0] if programs else None
+
+
+def game_engine_version(folder: Path) -> str | None:
+    """'UE5_4' from the first of the game's programs that says which Unreal Engine it was built with."""
+    for program in unreal_programs(folder):
+        version = retoc.engine_version(program)
+        if version:
+            return version
+    return None
 
 
 def build_zen_fonts(args, iostore: dict, payload: Path, stage_root: Path, log):
@@ -1147,12 +1180,16 @@ def build_zen_fonts(args, iostore: dict, payload: Path, stage_root: Path, log):
         if args.font_assets and not assets:
             raise BuildError(f'{args.font_assets} has no cooked .uasset files.')
         tool = retoc.find_tool(args.retoc) or iostore.get('tool')
-        version = args.ue_version or retoc.engine_version(shipping_program(Path(args.source)))
-        if not args.font_assets and (not tool or not version):
-            missing = 'retoc (github.com/trumank/retoc)' if not tool else 'the game\'s Unreal Engine version (--ue-version)'
-            log(f'This game has IoStore containers, but without {missing} the Arabic .pak goes in alone; '
-                'UE5 games that only mount a .pak with its own .utoc and .ucas won\'t load it.')
-            return
+        version = args.ue_version or game_engine_version(Path(args.source))
+        if not tool or not version:
+            # A UE5 game skips a .pak that comes without its own .utoc and .ucas, so a pack without them
+            # would say Arabic is on while the game stays in English.
+            if not tool:
+                raise BuildError('This Unreal Engine 5 game loads its Arabic only with a .utoc and .ucas beside the .pak, and making them '
+                                 'needs retoc (github.com/trumank/retoc), which this copy of GameShelf doesn\'t have.')
+            raise BuildError('This Unreal Engine 5 game loads its Arabic only with a .utoc and .ucas beside the .pak, and GameShelf '
+                             'couldn\'t tell which Unreal Engine version the game uses from its programs. Give it with --ue-version (e.g. UE5_4).')
+        log(f'The game uses Unreal Engine {version.replace("UE", "").replace("_", ".")}.')
         if not tool:
             raise BuildError('Putting cooked font packages into an IoStore container needs retoc (github.com/trumank/retoc): give --retoc.')
         if not version:
