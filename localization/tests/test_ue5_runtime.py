@@ -737,3 +737,20 @@ class RuntimePacks(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class LocMetaTest(unittest.TestCase):
+    """Arabic goes into the game's own list of languages, and never replaces it."""
+
+    def test_arabic_is_added_to_the_list_and_nothing_else_changes(self):
+        meta = locres_format.write_locmeta(locres_format.LocMeta('en-US', 'en-US/Game.locres', ['en-US', 'ja', 'zh-Hans']))
+        added = locres_format.add_locmeta_culture(meta + b'NEWER-FIELDS', 'ar')
+        self.assertTrue(added.endswith(b'NEWER-FIELDS'))  # what a newer .locmeta has after the list stays
+        self.assertEqual(locres_format.read_locmeta(added).cultures, ['en-US', 'ja', 'zh-Hans', 'ar'])
+        self.assertEqual(locres_format.add_locmeta_culture(added, 'ar'), added)  # once only
+
+    def test_a_file_without_a_list_of_languages_is_left_alone(self):
+        empty = locres_format.write_locmeta(locres_format.LocMeta('en-US', 'en-US/Game.locres', []))
+        self.assertIsNone(locres_format.add_locmeta_culture(empty, 'ar'))
+        version0 = locres_format.LOCMETA_MAGIC + b'\x00' + empty[17:]
+        self.assertIsNone(locres_format.add_locmeta_culture(version0, 'ar'))

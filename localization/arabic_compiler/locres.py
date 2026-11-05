@@ -221,6 +221,29 @@ def read_locmeta(data: bytes) -> LocMeta:
     return LocMeta(native, native_locres, cultures, version)
 
 
+def add_locmeta_culture(data: bytes, culture: str) -> bytes | None:
+    """`data` with `culture` added to its compiled cultures, every other byte kept as it was (a newer .locmeta may
+    have more after the list). None when the file has no list of cultures to add to (version 0, or an empty one):
+    writing one with only Arabic in it would leave the game's own languages out."""
+    if data[:16] != LOCMETA_MAGIC:
+        raise LocResError('That isn\'t an Unreal .locmeta file.')
+    r = _Reader(data)
+    r.take(16)
+    if r.u8() < 1:
+        return None
+    r.string()
+    r.string()
+    count_at = r.at
+    count = r.i32()
+    cultures = [r.string() for _ in range(count)] if 0 <= count <= 1000 else None
+    if not cultures:
+        return None
+    if culture in cultures:
+        return data
+    end = r.at
+    return data[:count_at] + struct.pack('<i', count + 1) + data[count_at + 4:end] + _string(culture) + data[end:]
+
+
 def write_locmeta(meta: LocMeta) -> bytes:
     out = LOCMETA_MAGIC + struct.pack('<B', max(meta.version, 1)) + _string(meta.native_culture) + _string(meta.native_locres)
     out += struct.pack('<i', len(meta.cultures)) + b''.join(_string(c) for c in meta.cultures)

@@ -1174,17 +1174,20 @@ def stage_arabic_language(source, in_pak, target: Path, stage: Path, log) -> lis
         return staged
     meta_inside, data = meta
     try:
-        parsed = locres_format.read_locmeta(data)
+        patched = locres_format.add_locmeta_culture(data, 'ar')
     except locres_format.LocResError as err:
         raise BuildError(f'{meta_inside}: {err}') from None
-    if 'ar' not in parsed.cultures:
-        parsed.cultures.append('ar')
     meta_rel = PurePosixPath(meta_inside.replace('\\', '/').lstrip('/'))
+    if patched is None:
+        # No list of the game's languages to add Arabic to: leave the game's own file as it is.
+        log(f'Staged {ar_inside}. {meta_rel.name} has no list of the game\'s languages, so it was left as it is.')
+        return staged
     meta_path = stage.joinpath(*meta_rel.parts)
     meta_path.parent.mkdir(parents=True, exist_ok=True)
-    meta_path.write_bytes(locres_format.write_locmeta(parsed))
+    meta_path.write_bytes(patched)
     staged.append((meta_path, meta_rel))
-    log(f'Added Arabic as a language: {ar_inside}, and "ar" in {meta_rel.name} ({", ".join(parsed.cultures)}).')
+    log(f'Added Arabic as a language: {ar_inside}, and "ar" in {meta_rel.name} '
+        f'({", ".join(locres_format.read_locmeta(patched).cultures)}).')
     return staged
 
 
