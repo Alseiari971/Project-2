@@ -5,8 +5,7 @@
   try {
     choice = localStorage.getItem('gs-lang');
   } catch (e) {}
-  var langs = navigator.languages || [navigator.language];
-  var arabic = choice === 'ar' || (choice !== 'en' && langs.some(function (l) { return /^ar\b/i.test(l || ''); }));
+  var arabic = choice !== 'en'; // Arabic until the visitor picks English
   document.documentElement.lang = arabic ? 'ar' : 'en';
   document.documentElement.dir = arabic ? 'rtl' : 'ltr';
 })();

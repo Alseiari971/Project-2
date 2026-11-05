@@ -88,6 +88,17 @@ const LATE_COLUMNS = {
     // 'iostore' (UE5 .utoc/.ucas) or 'pak' (UE4 .pak), for an Unreal key recipe.
     container: "TEXT NOT NULL DEFAULT ''",
   },
+  // The numbers shown with a game's Arabic (src/pack-stats.js), kept from the source tables.
+  arabic_games: {
+    strings_count: 'INTEGER NOT NULL DEFAULT 0',
+    downloads_count: 'INTEGER NOT NULL DEFAULT 0',
+    rating_sum: 'INTEGER NOT NULL DEFAULT 0',
+    rating_count: 'INTEGER NOT NULL DEFAULT 0',
+  },
+  // The Steam avatar of a linked account, shown when the player has no picture of their own.
+  users: {
+    steam_avatar: "TEXT NOT NULL DEFAULT ''",
+  },
   // A request an admin's recipe or key answered ('key' or 'recipe'), and when.
   arabic_requests: {
     ready_kind: "TEXT NOT NULL DEFAULT ''",
@@ -459,6 +470,25 @@ function openDatabase(file = process.env.DB_FILE || path.join(__dirname, '..', '
     CREATE TABLE IF NOT EXISTS games (
       id   TEXT PRIMARY KEY,
       name TEXT NOT NULL
+    );
+    -- The bell in the header (src/notifications.js): what happened for each player.
+    CREATE TABLE IF NOT EXISTS notifications (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      kind       TEXT NOT NULL,
+      data       TEXT NOT NULL DEFAULT '{}',
+      link       TEXT NOT NULL DEFAULT '#/',
+      read_at    INTEGER,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS notifications_user ON notifications (user_id, created_at);
+    -- Players' stars for a game's Arabic (only players who have it can rate).
+    CREATE TABLE IF NOT EXISTS pack_ratings (
+      game       TEXT NOT NULL,
+      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      stars      INTEGER NOT NULL CHECK (stars BETWEEN 1 AND 5),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (game, user_id)
     );
     -- Old ids (IGDB slugs) that turned out to be a game already saved under another id.
     CREATE TABLE IF NOT EXISTS game_aliases (

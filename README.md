@@ -2,6 +2,8 @@
 
 Look up any game in the world, see where to buy it, and keep a public list of the games you've played.
 
+**Two experiences, one site.** Visitors who aren't signed in land on the **showcase** (`#/` and `#/welcome`): what GameShelf does for a player, in Arabic first with an English switch, with a working subtitle demo (English, Arabic or both; Cairo, Tajawal or Amiri; 100–150%), the games whose Arabic is out with their real numbers, how it works and a FAQ. «تصفح المكتبة / Open Web App» in the top bar opens the platform at `#/catalog`. Signed in (and always in the desktop app) `#/` is the platform itself; the footer's «عن المنصة» goes back to the showcase. `public/index.html` carries the same pitch as plain text inside `<main>`, with Open Graph and Twitter tags, for search engines and link previews. The showcase describes features only, never the tools or file formats behind them: keep it that way when editing `public/js/views/showcase.js` or the static copy.
+
 - **Every game:** search and browse every game on Steam, plus games elsewhere from [Wikidata](https://www.wikidata.org), with Arabic titles and each game's engine. No keys needed.
 - **Arabic packs are always free:** every finished pack is free for everyone. An optional [GameShelf Supporter](#gameshelf-supporter-memberships) membership pays for the cloud AI that makes new ones.
 - **Where to buy:** each game page has "Where to buy" links to the real stores (Steam, Epic, GOG, PlayStation Store, Xbox, Nintendo eShop, itch.io, App Store, Google Play).
@@ -9,6 +11,9 @@ Look up any game in the world, see where to buy it, and keep a public list of th
 - **Accounts with GameShelf Guard:** sign up with a username, email, password and nationality (shown as a flag on your profile). Guard asks for a 6-digit code from an authenticator app or by email whenever you sign in on a new browser or PC, with 8 one-time recovery codes. Security settings list everywhere you're signed in. See [Accounts, Guard, friends and support](#accounts-guard-friends-and-support).
 - **Steam, verified:** link your Steam account with Steam's own sign-in, then import your games and hours played. Nobody can import or claim someone else's Steam account.
 - **Friends & Activity:** add friends by friend code or @username, and see who's online and what they're playing, including a «يلعب بالعربية» badge when the game runs with GameShelf's Arabic.
+- **Notifications:** the bell in the top bar: friend requests and accepted requests, Support's replies, and Arabic going live for a game you asked or voted for.
+- **Arabic numbers on every pack:** lines in Arabic, downloads and players' star rating (only players who have a game's Arabic can rate it), on game pages and the showcase.
+- **Profiles:** your Steam avatar once Steam is linked, your friend code to copy, games you've played in Arabic, your Arabic requests and votes, and badges: «مؤسس» (the first 1,000 accounts, `FOUNDER_ACCOUNTS`), «حساب Steam موثق» and «حارس GameShelf».
 - **Support tickets:** players open tickets (account, Steam linking, an Arabic patch, a game request); admins answer them in the Admin Panel.
 - **Game launcher look:** a sidebar with your games, a search pop-up (Ctrl+K or `/`), a Top 10 poster row, a Library page with grid and list views, and a bottom tab bar on phones.
 - **A home page that changes with the seasons:** a full-width spotlight plays each game's silent 6-second Steam preview loop behind its logo, rotating through six games. The season sets the colors, a moving decoration and its own sections:
@@ -471,6 +476,8 @@ src/mailer.js        sending email over SMTP (SMTP_URL), no extra packages
 src/steam-openid.js  linking Steam with Steam's own sign-in, checked with Valve
 src/friends.js       friend codes, requests, blocks and presence
 src/support.js       support tickets
+src/notifications.js the bell: per-player notifications (kept 100 each), worded by the browser in the player's language
+src/pack-stats.js    each game's Arabic numbers (lines, downloads, ratings), worked out again from the source tables when they change
 src/social-api.js    routes for Steam linking, friends, presence and support
 src/countries.js     the nationality list (public/js/countries.js is the browser's copy)
 src/plans.js         GameShelf Supporter: plans, compute quota, boosts, prepaid codes
@@ -494,7 +501,9 @@ public/fonts/        the Manrope and Alexandria fonts (SIL Open Font License), S
 public/js/friends.js the Friends & Activity drawer; country-picker.js the nationality picker and flags
 public/js/i18n.js    English and Arabic: t() for phrases, tn() for counts; lang/ar.js has the Arabic
 public/js/boot.js    sets the page's language and direction before it's drawn
-public/js/main.js    navigation and page routing
+public/js/main.js    navigation and page routing (the showcase at #/ for visitors, the platform at #/catalog)
+public/js/views/showcase.js the public showcase (#/welcome)
+public/js/notifications.js the bell
 public/js/admin-signer.js the Admin Panel's in-browser Ed25519 signer (WebCrypto, with an RFC 8032 fallback) and key recipes
 public/js/palette.js the search pop-up
 public/js/preview.js hover previews; discover.js the discovery queue; art-color.js the page tint
@@ -562,6 +571,10 @@ The website talks to the server only through this JSON API, so a phone app can r
 | GET | `/api/auth/steam/link` | Redirects to Steam's sign-in (`POST` returns `{ url }`, for the desktop app) |
 | GET | `/api/auth/steam/return` | Where Steam sends the player back; links after Valve confirms it |
 | GET · DELETE | `/api/me/steam` | The linked Steam account; unlink it |
+| GET | `/api/notifications` | `{ items: [{ id, kind, data, link, createdAt, read }], unread }` (signed in) |
+| POST | `/api/notifications/read` | `{ id }` for one, `{}` for all; returns `{ unread }` |
+| POST | `/api/arabic/ratings` | `{ game: "steam:<id>", stars: 1–5 }`, only with that game's Arabic; returns the game's `stats` |
+| GET | `/api/showcase` | Games whose Arabic is out, with `strings`, `downloads`, `rating`, and the `totals` |
 | GET | `/api/friends` | `{ code, friends (with presence), incoming, outgoing, blocked, online }` |
 | GET | `/api/friends/find?q=` | A player by friend code or `@username` |
 | POST | `/api/friends/request` · `accept` · `decline` · `remove` · `block` · `unblock` | `{ username }` or `{ code }` |

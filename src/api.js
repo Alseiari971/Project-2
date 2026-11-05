@@ -29,6 +29,8 @@ const { ROLES, adminNames, bootstrapAdmins } = require('./roles');
 const { readBody, RegistryError, MAX_PACK_BYTES } = require('./pack-registry');
 const { SubmissionError } = require('./submissions');
 const { RecipeError } = require('./engine-recipes');
+const { createNotifications } = require('./notifications');
+const { createPackStats, StatsError } = require('./pack-stats');
 const { CommunityError } = require('./community');
 const { TranslationLimit, GAME_RE: GAME_KEY_RE } = require('./translation-memory');
 const { GENRES, findGenre } = require('./games/genres');
@@ -57,6 +59,15 @@ function suggestStatus({ playtime, recentPlaytime }) {
   return 'want';
 }
 
+// The first accounts on GameShelf are its founders (FOUNDER_ACCOUNTS, 1000 by default).
+const FOUNDERS = Number(process.env.FOUNDER_ACCOUNTS) > 0 ? Number(process.env.FOUNDER_ACCOUNTS) : 1000;
+/** Badges for the account itself: founder, a verified Steam account, GameShelf Guard on. */
+const accountBadges = (u) => [
+  u.id <= FOUNDERS ? 'founder' : null,
+  u.steam_id ? 'steam' : null,
+  u.twofa_method ? 'guard' : null,
+].filter(Boolean);
+
 const publicUser = (u) => ({
   username: u.username,
   displayName: u.display_name,
@@ -67,7 +78,8 @@ const publicUser = (u) => ({
   nationality: u.nationality || null,
   // A Steam account proved with Steam's own sign-in (the ID itself isn't public).
   steamVerified: Boolean(u.steam_id),
-  avatarUrl: u.avatar_version ? `/api/users/${encodeURIComponent(u.username)}/avatar?v=${u.avatar_version}` : null,
+  // Their own picture, else their linked Steam account's avatar.
+  avatarUrl: u.avatar_version ? `/api/users/${encodeURIComponent(u.username)}/avatar?v=${u.avatar_version}` : (u.steam_avatar || null),
   avatarFrame: u.avatar_frame,
   accent: u.accent,
   background: u.background,
@@ -121,8 +133,10 @@ function createApi({
   steamOpenId = createSteamOpenId({ db, fetchImpl, steam, now }),
   plans = createPlans({ db, now }),
   billing = createBilling({ db, plans, now }),
-  friends = createFriends({ db, now, plans }),
-  support = createSupport({ db, games, plans }),
+  notifications = createNotifications({ db, now }),
+  packStats = createPackStats({ db, translations }),
+  friends = createFriends({ db, now, plans, notifications }),
+  support = createSupport({ db, games, plans, notifications }),
 }) {
   bootstrapAdmins(db);
   const api = express.Router();
@@ -385,8 +399,16 @@ function createApi({
     }
 
     const mine = req.user && q.libraryEntry.get(req.user.id, game.id);
+    // The Arabic's numbers (lines, downloads, stars) and whether this player can rate it.
+    const arabicKey = game.steamAppId ? `steam:${game.steamAppId}` : `game:${game.id}`;
+    let arabicStats = null;
+    try {
+      arabicStats = packStats.forGame(arabicKey, req.user?.id ?? null);
+    } catch {}
     res.json({
       ...game,
+      arabicKey,
+      arabicStats,
       similar,
       community: {
         count: q.playerCount.get(game.id).n,
@@ -633,8 +655,23 @@ function createApi({
     const library = q.library.all(user.id).map(libraryEntry);
     const showcases = JSON.parse(user.showcases);
     const stats = profile.statsFor(library);
+    const own = req.user?.id === user.id;
     res.json({
       user: { ...publicUser(user), supporter: plans.isSupporter(user.id) },
+      // Earned for the account itself, and the player's Arabic: games they have it in, requests they made or voted for.
+      account: {
+        badges: accountBadges(user),
+        arabic: {
+          games: db.prepare(`SELECT COUNT(DISTINCT game) AS n FROM (
+            SELECT CASE WHEN p.steam_app_id IS NOT NULL THEN 'steam:' || p.steam_app_id ELSE 'game:' || p.game_id END AS game
+              FROM pack_downloads d JOIN localization_packs p ON p.id = d.pack_id WHERE d.user_id = ?
+            UNION SELECT s.game FROM pack_downloads d JOIN arabic_sets s ON s.id = d.pack_id WHERE d.user_id = ?
+            UNION SELECT game FROM arabic_submissions WHERE submitted_by = ?)`).get(user.id, user.id, user.id).n,
+          requests: db.prepare('SELECT COUNT(*) AS n FROM arabic_requests WHERE asker = ?').get(`user:${user.id}`).n,
+        },
+        // The friend code is for its owner to share.
+        friendCode: own ? user.friend_code || null : null,
+      },
       background: profile.resolveBackground(user.background, library),
       stats,
       progression: profile.progression(stats, {
@@ -814,6 +851,73 @@ function createApi({
   api.post('/admin/fixes/:id/approve', requireAdmin, communityRoute(async (req) => community.approveFix(req.params.id, req.user, req.body?.arabic)));
   api.post('/admin/fixes/:id/reject', requireAdmin, communityRoute(async (req) => community.rejectFix(req.params.id, req.user)));
 
+  // ---- Arabic's numbers, the bell, and the showcase ----
+
+  /** "steam:<id>" or "game:<id>" for a catalog entry or a set's game ({ steamAppId } or { gameId / gameSlug }). */
+  const keyOf = (g) => (g?.steamAppId ? `steam:${Number(g.steamAppId)}` : g?.gameId || g?.gameSlug ? `game:${g.gameId || g.gameSlug}` : null);
+  const refreshStats = (game) => {
+    try {
+      if (game) packStats.refresh(game);
+    } catch {}
+  };
+  // The game's page on the site, for links in notifications.
+  const pageOfKey = (game) => {
+    const [kind, id] = String(game).split(':');
+    if (kind === 'game') return id;
+    return db.prepare('SELECT id FROM games WHERE steam_appid = ?').get(Number(id))?.id || null;
+  };
+  /** Arabic for `game` is out: everyone who asked for it (or voted) hears it in the bell. */
+  function announceArabic(game, title = '') {
+    if (!game) return;
+    refreshStats(game);
+    const name = title || db.prepare('SELECT name FROM arabic_games WHERE game = ?').get(game)?.name || db.prepare('SELECT MAX(name) AS name FROM arabic_requests WHERE game = ?').get(game)?.name || game;
+    const page = pageOfKey(game);
+    for (const { asker } of db.prepare('SELECT asker FROM arabic_requests WHERE game = ?').all(game)) {
+      const id = Number(/^user:(\d+)$/.exec(asker)?.[1]);
+      if (id) notifications.add(id, 'arabic-ready', { game: name }, page ? `#/game/${encodeURIComponent(page)}` : '#/arabic');
+    }
+  }
+
+  // The bell: { items, unread }; reading marks one ({ id }) or all of them.
+  api.get('/notifications', requireUser, (req, res) => res.json(notifications.list(req.user.id, req.query.limit)));
+  api.post('/notifications/read', requireUser, (req, res) => res.json(notifications.markRead(req.user.id, req.body?.id ?? null)));
+
+  // A player who has a game's Arabic gives it 1 to 5 stars: { game, stars }.
+  const rateLimiter = rateLimit({ windowMs: 60 * 1000, max: 20, by: 'user' });
+  api.post('/arabic/ratings', requireUser, rateLimiter, (req, res) => {
+    try {
+      res.json({ stats: packStats.rate(req.user, String(req.body?.game || ''), req.body?.stars) });
+    } catch (err) {
+      if (err instanceof StatsError) return res.status(err.status).json({ error: err.message });
+      throw err;
+    }
+  });
+
+  // The public showcase (#/welcome): games whose Arabic is out, with their numbers, and the totals.
+  api.get('/showcase', asyncRoute(async (_req, res) => {
+    const live = packStats.live(12);
+    const steamIds = live.filter((g) => g.game.startsWith('steam:')).map((g) => ({ appid: Number(g.game.slice(6)), name: g.name || '' }));
+    const matched = steamIds.length && games.matchSteamGames ? await games.matchSteamGames(steamIds).catch(() => []) : [];
+    if (matched.length) await games.addSteamArt(matched.filter(Boolean)).catch(() => {});
+    const byApp = new Map(matched.filter(Boolean).map((g) => [g.steamAppId, g]));
+    const items = live.map((g) => {
+      const page = g.game.startsWith('steam:') ? byApp.get(Number(g.game.slice(6))) : null;
+      return {
+        game: g.game,
+        id: page?.id || (g.game.startsWith('game:') ? g.game.slice(5) : null),
+        name: page?.name || g.name || g.game,
+        image: page?.image || null,
+        poster: page?.poster || null,
+        strings: g.strings, downloads: g.downloads, rating: g.rating, ratings: g.ratings,
+      };
+    }).filter((g) => g.id);
+    const totals = db.prepare(`SELECT COUNT(*) AS games, COALESCE(SUM(strings_count), 0) AS strings, COALESCE(SUM(downloads_count), 0) AS downloads FROM arabic_games
+      WHERE strings_count > 0 OR downloads_count > 0`).get();
+    totals.games = Math.max(totals.games, live.length);
+    res.set('Cache-Control', 'public, max-age=300');
+    res.json({ games: items, totals });
+  }));
+
   // ---- Engine recipes, for games whose text is packed (see src/engine-recipes.js) ----
 
   const recipeRoute = (fn) => (req, res) => {
@@ -851,6 +955,7 @@ function createApi({
     for (const id of ids) {
       const u = db.prepare('SELECT username, email, email_verified FROM users WHERE id = ?').get(id);
       if (u?.email && u.email_verified) guard.notify(u.email, 'arabic-ready', { username: u.username, game: title || game, page: page ? `game/${encodeURIComponent(page)}` : 'arabic' });
+      notifications.add(id, 'arabic-ready', { game: title || game }, page ? `#/game/${encodeURIComponent(page)}` : '#/arabic');
     }
     return ids.length;
   };
@@ -896,6 +1001,9 @@ function createApi({
   api.get('/localization/sets/:id/download', requireUser, (req, res) => {
     const found = submissions?.download(req.params.id, req.user.id);
     if (!found) return res.status(404).json({ error: 'That Arabic pack isn\'t in the catalog.' });
+    try {
+      refreshStats(keyOf(JSON.parse(found.set).game));
+    } catch {}
     res.json({ set: found.set, signature: found.signature });
   });
 
@@ -940,6 +1048,7 @@ function createApi({
       throw new SubmissionError('That isn\'t a signed Arabic set.');
     }
     const pack = submissions.approve(req.params.id, { set: body?.set, signature: body?.signature }, req.user);
+    announceArabic(keyOf(pack), pack?.title);
     res.status(201);
     return { pack };
   }));
@@ -955,6 +1064,7 @@ function createApi({
       throw new SubmissionError('That isn\'t a signed Arabic set.');
     }
     const pack = submissions.publishUpdate(String(req.params.game), { set: body?.set, signature: body?.signature }, req.user);
+    refreshStats(String(req.params.game));
     res.status(201);
     return { pack };
   }));
@@ -964,6 +1074,7 @@ function createApi({
   api.get('/localization/packs/:id/download', requireUser, (req, res) => {
     const found = packs?.download(req.params.id, req.user.id);
     if (!found) return res.status(404).json({ error: 'That Arabic pack isn\'t in the catalog.' });
+    refreshStats(keyOf(found.entry));
     res.set({ 'Content-Type': 'application/zip', 'X-Pack-Version': found.entry.version, 'X-Pack-Sha256': found.entry.sha256 });
     res.sendFile(found.path, { headers: { 'Content-Disposition': `attachment; filename="${found.entry.id}-${found.entry.version}.zip"` } }, (err) => {
       if (err && !res.headersSent) res.status(404).json({ error: 'That Arabic pack isn\'t in the catalog.' });
@@ -1123,7 +1234,9 @@ function createApi({
     if (!packs) return res.status(503).json({ error: 'The pack catalog isn\'t set up on this server.' });
     try {
       const zip = await readBody(req, MAX_PACK_BYTES);
-      res.status(201).json({ pack: await packs.publish(zip, { userId: req.user.id }) });
+      const pack = await packs.publish(zip, { userId: req.user.id });
+      announceArabic(keyOf(pack), pack?.title);
+      res.status(201).json({ pack });
     } catch (err) {
       if (err instanceof RegistryError) return res.status(err.status).json({ error: err.message });
       throw err;

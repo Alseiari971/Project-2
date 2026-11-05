@@ -137,6 +137,39 @@ async function wireTrailer(video) {
   }
 }
 
+const n = (v) => Number(v || 0).toLocaleString(locale);
+/**
+ * The Arabic's numbers: how many lines are in Arabic, how many times it was
+ * downloaded, and players' stars. Players who have the Arabic can rate it.
+ */
+function arabicStatsStrip(game) {
+  const s = game.arabicStats;
+  if (!s || !(s.strings || s.downloads || s.ratings)) return '';
+  const stars = (value) => html`${[1, 2, 3, 4, 5].map((i) => html`<button type="button" class="rate-star ${i <= value ? 'on' : ''}" data-rate="${i}" aria-label="${t('{n} out of 5 stars', { n: i })}" ${s.canRate ? '' : 'disabled'}>★</button>`)}`;
+  return html`<div class="arabic-stats" aria-label="${t('Arabic for this game')}">
+    <span class="arabic-mark sm" aria-hidden="true">ع</span>
+    ${s.strings ? html`<span><strong dir="ltr">${n(s.strings)}</strong> ${t('lines')}</span>` : ''}
+    ${s.downloads ? html`<span><strong dir="ltr">${n(s.downloads)}</strong> ${t('downloads')}</span>` : ''}
+    <span class="rating">${s.rating ? html`<strong dir="ltr">★ ${s.rating.toFixed(1)}</strong> <span class="muted small">(${n(s.ratings)})</span>` : html`<span class="muted small">${t('No ratings yet')}</span>`}</span>
+    ${s.canRate ? html`<span class="rate-box" title="${t('Rate this game\'s Arabic')}">${stars(s.mine || 0)}</span>` : ''}
+  </div>`;
+}
+
+function wireRating(root, game) {
+  root.querySelector('#arabic-stats')?.addEventListener('click', async (e) => {
+    const star = e.target.closest('[data-rate]');
+    if (!star || star.disabled) return;
+    try {
+      const { stats } = await api('/arabic/ratings', { method: 'POST', body: { game: game.arabicKey, stars: Number(star.dataset.rate) } });
+      game.arabicStats = stats;
+      mount(root.querySelector('#arabic-stats'), arabicStatsStrip(game));
+      toast(t('Thanks! You gave this game\'s Arabic {n} stars.', { n: star.dataset.rate }));
+    } catch (err) {
+      toast(err.message, { error: true });
+    }
+  });
+}
+
 /**
  * The game's description: in Arabic when the page is and there's Arabic, else
  * English. Text from Wikipedia (CC BY-SA 4.0) says so and links the article.
@@ -338,6 +371,7 @@ export async function gameView(app, id, params) {
             <h1>${bdi(game.name)}</h1>
             ${game.nameAr && game.nameAr !== game.name ? html`<p class="gp-name-ar" lang="ar" dir="rtl">${game.nameAr}</p>` : ''}
             ${game.engine ? html`<span class="engine-badge" title="${t('Game engine (from Wikidata)')}">${icon('sliders')} ${game.engineLabel || game.engine}</span>` : ''}
+            <div id="arabic-stats">${arabicStatsStrip(game)}</div>
             <div class="gp-meta">
               <div class="tag-row">${game.genres.slice(0, 4).map((g) => html`<a class="tag" href="#/browse?genre=${encodeURIComponent(g)}">${t(g)}</a>`)}</div>
               <span class="gp-facts">${facts.join(' · ')}</span>
@@ -411,6 +445,7 @@ export async function gameView(app, id, params) {
   enableRows(app);
   app.__media = game.media || [];
   wireMedia(app);
+  wireRating(app, game);
   // "Show all languages" lives inside a section that is redrawn when Steam data arrives.
   app.querySelector('.gp-side').addEventListener('click', (e) => {
     const deals = e.target.closest('[data-more-deals]');

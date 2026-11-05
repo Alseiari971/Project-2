@@ -23,13 +23,18 @@ import { supportView } from './views/support.js';
 import { initFriends, wireFriendsButton } from './friends.js';
 import { flagBadge, supporterBadge } from './country-picker.js';
 import { pricingView } from './views/pricing.js';
+import { wireBell } from './notifications.js';
+import { showcaseView } from './views/showcase.js';
 
-const app = document.getElementById('app');
+let app = document.getElementById('app');
 const SIDEBAR_GAMES = 12;
 // Set by the desktop app (desktop/preload.js); undefined on the website.
 const desktop = window.gameshelfDesktop;
 
 let current = { section: 'home', gameId: null };
+// Visitors who aren't signed in land on the showcase at #/; the platform's home is #/catalog for them.
+const showsShowcase = () => !state.user && !desktop;
+const homeHref = () => (showsShowcase() ? '#/catalog' : '#/');
 
 // ---- Top bar ----------------------------------------------------------------------
 
@@ -48,6 +53,7 @@ function renderTopbar() {
   mount(document.querySelector('.topbar .logo-word'), lang === 'ar' ? html`قيم <span>شلف</span>` : html`Game<span>Shelf</span>`);
   mount(document.querySelector('.footer'), html`
     <p>${th("Arabic packs are free for everyone. Buy buttons go straight to the store. {legal}", { legal: html`<a href="#/legal">${t('About & legal')}</a>` })} · <a href="#/support">${t('Support')}</a></p>
+    <p><a href="#/welcome">${t('About GameShelf')}</a> · <a href="/download/windows">${t('Download for Windows')}</a></p>
     <p id="data-credit"></p>
     <p>${t('Game names, art and trademarks belong to their owners. Not affiliated with Valve or any publisher.')}</p>`);
   document.getElementById('go-back').addEventListener('click', () => history.back());
@@ -86,10 +92,13 @@ function renderAccount() {
   // Switches to the other language, named in that language.
   const other = LANGUAGES.find((l) => l.id !== lang);
   const language = html`<button type="button" class="lang-btn" id="lang-btn" lang="${other.id}" title="${other.name}">${icon('globe')}<span>${other.name}</span></button>`;
+  const bell = state.user
+    ? html`<div class="bell" id="bell"><button type="button" class="friends-btn bell-btn" id="bell-btn" aria-haspopup="true" aria-expanded="false" aria-label="${t('Notifications')}" title="${t('Notifications')}">${icon('bell')}<span class="friends-count bell-count" hidden></span></button><div class="bell-panel" id="bell-panel" hidden></div></div>`
+    : '';
   const friendsButton = state.user
     ? html`<button type="button" class="friends-btn" id="friends-btn" aria-controls="friends-drawer" aria-expanded="false" aria-label="${t('Friends & Activity')}" title="${t('Friends & Activity')}">${icon('users')}<span class="friends-count" hidden></span></button>`
     : '';
-  mount(document.getElementById('nav-right'), html`${language}${settings}${friendsButton}${state.user
+  mount(document.getElementById('nav-right'), html`${language}${settings}${bell}${friendsButton}${state.user
     ? html`
       <div class="menu">
         <button class="menu-button" type="button" id="menu-button" aria-haspopup="true" aria-expanded="false" aria-label="${t('Account menu')}">
@@ -107,9 +116,10 @@ function renderAccount() {
           <button type="button" id="logout">${t('Log out')}</button>
         </div>
       </div>`
-    : html`<a class="nav-login" href="#/login">${t('Log in')}</a><a class="pill-btn pill-light" href="#/register">${t('Join free')}</a>`}`);
+    : html`${desktop ? '' : html`<a class="pill-btn pill-accent open-app-btn" href="#/catalog">${t('Open Web App')}</a>`}<a class="nav-login" href="#/login">${t('Log in')}</a><a class="pill-btn pill-light" href="#/register">${t('Join free')}</a>`}`);
   document.getElementById('lang-btn').addEventListener('click', () => setLang(other.id));
   wireFriendsButton();
+  wireBell();
 
   const button = document.getElementById('menu-button');
   const list = document.getElementById('menu-list');
@@ -124,8 +134,10 @@ function renderAccount() {
     state.user = null;
     state.library = [];
     initFriends();
-    location.hash = '#/';
     renderChrome();
+    // Signed out, #/ is the showcase: draw it even when the page was already #/.
+    if (['', '#', '#/'].includes(location.hash)) route();
+    else location.hash = '#/';
   });
 }
 
@@ -144,7 +156,7 @@ function renderSidebar() {
   const games = state.library.slice(0, SIDEBAR_GAMES);
   mount(document.getElementById('sidebar'), html`
     <nav class="side-main">
-      ${link('#/', 'Home', 'solid-home', 'home')}
+      ${link(homeHref(), 'Home', 'solid-home', 'home')}
       ${link('#/browse', 'Browse', 'solid-browse', 'browse')}
       ${link(state.user ? '#/library' : '#/login', 'Library', 'solid-library', 'library')}
       ${link('#/community', 'Community', 'solid-users', 'community')}
@@ -162,7 +174,7 @@ function renderSidebar() {
             ? games.map((g) => html`
                 <a class="side-game ${g.gameId === gameId ? 'active' : ''}" href="${gameHref(g.gameId)}" title="${g.name}">
                   ${g.image ? html`<img src="${g.image}" alt="" loading="lazy" referrerpolicy="no-referrer">` : html`<span class="side-game-blank"></span>`}
-                  <span>${bdi(g.name)}</span>
+                  <span dir="auto">${g.name}</span>
                 </a>`)
             : html`<p class="side-note">${t('Games you add show up here.')}</p>`}
           ${state.library.length > SIDEBAR_GAMES ? html`<a class="side-more" href="#/library">${t('See all {n}', { n: state.library.length })}</a>` : ''}
@@ -181,7 +193,7 @@ function renderTabbar() {
   const tab = (href, label, iconName, key) => html`
     <a href="${href}" class="${section === key ? 'active' : ''}">${icon(iconName)}<span>${t(label)}</span></a>`;
   mount(document.getElementById('tabbar'), html`
-    ${tab('#/', 'Home', 'solid-home', 'home')}
+    ${tab(homeHref(), 'Home', 'solid-home', 'home')}
     ${tab('#/browse', 'Browse', 'solid-browse', 'browse')}
     ${tab(state.user ? '#/library' : '#/login', 'Library', 'solid-library', 'library')}
     ${tab('#/community', 'Community', 'solid-users', 'community')}
@@ -198,12 +210,17 @@ function renderChrome() {
 
 async function route() {
   runCleanups();
+  // Each page gets a fresh #app, so listeners a page put on it never pile up on later visits
+  // (a second visit to Arabic requests used to count one click twice).
+  const fresh = app.cloneNode(false);
+  app.replaceWith(fresh);
+  app = fresh;
   const [path, queryString = ''] = location.hash.slice(1).split('?');
   const params = new URLSearchParams(queryString);
   const parts = (path || '/').split('/').filter(Boolean).map(decodeURIComponent);
   const isMe = parts[0] === 'u' && state.user && parts[1]?.toLowerCase() === state.user.username.toLowerCase();
   current = {
-    section: { undefined: 'home', browse: 'browse', library: 'library', community: 'community', import: 'import', admin: 'admin', arabic: 'arabic', pricing: 'pricing', support: 'support', settings: 'settings', u: isMe ? 'library' : 'community' }[parts[0]] || '',
+    section: { undefined: 'home', catalog: 'home', browse: 'browse', library: 'library', community: 'community', import: 'import', admin: 'admin', arabic: 'arabic', pricing: 'pricing', support: 'support', settings: 'settings', u: isMe ? 'library' : 'community' }[parts[0]] || '',
     gameId: parts[0] === 'game' ? parts[1] : null,
   };
 
@@ -211,11 +228,18 @@ async function route() {
   renderSidebar();
   renderTabbar();
   window.scrollTo(0, 0);
-  mount(app, skeleton({ undefined: 'home', game: 'game' }[parts[0]] || 'page'));
+  const showcase = parts[0] === 'welcome' || (parts[0] === undefined && showsShowcase());
+  document.body.classList.toggle('is-showcase', showcase);
+  if (!showcase) mount(app, skeleton({ undefined: 'home', catalog: 'home', game: 'game' }[parts[0]] || 'page'));
 
   try {
     switch (parts[0]) {
-      case undefined: await homeView(app); break;
+      case undefined:
+        if (showcase) await showcaseView(app);
+        else await homeView(app);
+        break;
+      case 'welcome': await showcaseView(app); break;
+      case 'catalog': await homeView(app); break;
       case 'browse': await browseView(app, params); break;
       case 'game': await gameView(app, parts[1], params); break;
       case 'installed':

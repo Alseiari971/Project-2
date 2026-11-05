@@ -54,7 +54,7 @@ function normalizeCode(text) {
 
 const clean = (text, max) => String(text ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, max);
 
-function createFriends({ db, now = () => Date.now(), plans = null }) {
+function createFriends({ db, now = () => Date.now(), plans = null, notifications = null }) {
   const pair = (a, b) => (a < b ? [a, b] : [b, a]);
   const q = {
     byName: db.prepare('SELECT * FROM users WHERE username = ?'),
@@ -94,7 +94,7 @@ function createFriends({ db, now = () => Date.now(), plans = null }) {
     nationality: u.nationality || null,
     supporter: Boolean(plans?.isSupporter(u.id)),
     accent: u.accent,
-    avatarUrl: u.avatar_version ? `/api/users/${encodeURIComponent(u.username)}/avatar?v=${u.avatar_version}` : null,
+    avatarUrl: u.avatar_version ? `/api/users/${encodeURIComponent(u.username)}/avatar?v=${u.avatar_version}` : (u.steam_avatar || null),
   });
 
   /** What a presence row means now: { status, game, arabic, since, lastSeen }. */
@@ -132,6 +132,9 @@ function createFriends({ db, now = () => Date.now(), plans = null }) {
     q.addFriend.run(...pair(a.id, b.id));
   }
 
+  // The bell (src/notifications.js): who sent a request, or accepted one.
+  const tell = (to, kind, from) => notifications?.add(to.id, kind, { username: from.username, name: from.display_name || from.username }, `#/u/${encodeURIComponent(from.username)}`);
+
   /** Sends a request (or accepts theirs, when they sent one first). Returns { relation }. */
   function request(me, target) {
     const other = findTarget(target);
@@ -142,10 +145,12 @@ function createFriends({ db, now = () => Date.now(), plans = null }) {
     if (rel === 'friends' || rel === 'outgoing') return { relation: rel, user: summary(other) };
     if (rel === 'incoming') {
       befriend(me, other);
+      tell(other, 'friend-accepted', me);
       return { relation: 'friends', user: summary(other) };
     }
     if (q.pending.get(me.id).n >= MAX_PENDING) throw new FriendError('You have too many friend requests waiting. Cancel some first.', 429);
     q.addRequest.run(me.id, other.id);
+    tell(other, 'friend-request', me);
     return { relation: 'outgoing', user: summary(other) };
   }
 
@@ -153,6 +158,7 @@ function createFriends({ db, now = () => Date.now(), plans = null }) {
     const other = findTarget(target);
     if (!q.request.get(other.id, me.id)) throw new FriendError('There\'s no friend request from that player.', 404);
     befriend(me, other);
+    tell(other, 'friend-accepted', me);
     return { relation: 'friends', user: summary(other) };
   }
 

@@ -47,8 +47,8 @@ function createSteamOpenId({ db, fetchImpl = fetch, steam = null, now = () => Da
     useState: db.prepare('UPDATE steam_link_states SET used = 1 WHERE state_hash = ? AND used = 0'),
     oldStates: db.prepare('DELETE FROM steam_link_states WHERE expires_at < ?'),
     owner: db.prepare('SELECT id, username FROM users WHERE steam_id = ?'),
-    link: db.prepare("UPDATE users SET steam_id = ?, steam_name = ?, steam_linked_at = datetime('now') WHERE id = ?"),
-    unlink: db.prepare("UPDATE users SET steam_id = NULL, steam_name = '', steam_linked_at = NULL WHERE id = ?"),
+    link: db.prepare("UPDATE users SET steam_id = ?, steam_name = ?, steam_avatar = ?, steam_linked_at = datetime('now') WHERE id = ?"),
+    unlink: db.prepare("UPDATE users SET steam_id = NULL, steam_name = '', steam_avatar = '', steam_linked_at = NULL WHERE id = ?"),
     user: db.prepare('SELECT * FROM users WHERE id = ?'),
   };
 
@@ -110,11 +110,13 @@ function createSteamOpenId({ db, fetchImpl = fetch, steam = null, now = () => Da
     return claimed[1];
   }
 
-  async function personaName(steamId) {
+  // The linked account's public name and avatar (the avatar shows when the player has no picture of their own).
+  async function persona(steamId) {
     try {
-      return (await steam?.playerName?.(steamId)) || '';
+      if (steam?.playerSummary) return await steam.playerSummary(steamId);
+      return { name: (await steam?.playerName?.(steamId)) || '', avatar: '' };
     } catch {
-      return '';
+      return { name: '', avatar: '' };
     }
   }
 
@@ -124,7 +126,8 @@ function createSteamOpenId({ db, fetchImpl = fetch, steam = null, now = () => Da
     const current = q.user.get(userId);
     if (current.steam_id && current.steam_id !== steamId) throw new SteamLinkError('This GameShelf account is linked to another Steam account. Unlink it first.', 409);
     try {
-      q.link.run(steamId, (await personaName(steamId)).slice(0, 64), userId);
+      const p = await persona(steamId);
+      q.link.run(steamId, String(p.name || '').slice(0, 64), String(p.avatar || '').slice(0, 300), userId);
     } catch (err) {
       // Two links racing for the same Steam account: the unique index keeps one.
       if (/UNIQUE/.test(err.message)) throw new SteamLinkError('That Steam account is already linked to another GameShelf account.', 409);

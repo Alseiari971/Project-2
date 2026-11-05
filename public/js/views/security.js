@@ -5,6 +5,8 @@ import { html, bdi, th, api, mount, state, refreshMe, toast, onLeave } from '../
 import { t, locale } from '../i18n.js';
 import { icon } from '../icons.js';
 import { countryPicker, wireCountryPicker, flagBadge } from '../country-picker.js';
+import { avatar } from '../components.js';
+import { accountStrip, wireAccountStrip } from './profile.js';
 import qrcode from '../vendor/qrcode.mjs';
 
 const desktop = window.gameshelfDesktop;
@@ -38,7 +40,7 @@ function codesBlock(codes) {
       <p><strong>${t('Save these recovery codes somewhere safe.')}</strong> ${t('Each one signs you in once if you lose your phone or email. They won\'t be shown again.')}</p>
       <ol class="code-grid" dir="ltr">${codes.map((c) => html`<li><code>${c}</code></li>`)}</ol>
       <div class="row-actions">
-        <button type="button" class="btn btn-sm" data-copy="${codes.join('\n')}">${icon('check')} ${t('Copy codes')}</button>
+        <button type="button" class="btn btn-sm" data-copy="${codes.join('\n')}">${icon('copy')} ${t('Copy all')}</button>
         <button type="button" class="btn btn-sm" data-download="${codes.join('\r\n')}">${icon('download')} ${t('Download .txt')}</button>
       </div>
     </div>`;
@@ -50,6 +52,8 @@ export async function securityView(app, params) {
     return;
   }
   let sec = await api('/me/security');
+  // The profile header: your picture, name, flag, friend code, Arabic numbers and badges.
+  const me = await api(`/users/${encodeURIComponent(state.user.username)}`).catch(() => null);
   let local = null;
   if (desktop?.localSteamAccount) local = await desktop.localSteamAccount().catch(() => null);
   let steamWatch = null;
@@ -68,6 +72,14 @@ export async function securityView(app, params) {
           <h1>${t('Security')}</h1>
           <p class="muted">${t('Keep your GameShelf account yours: Guard codes at sign-in, a linked Steam account, and where you\'re signed in.')}</p>
         </header>
+        ${me ? html`<section class="panel settings-card profile-card">
+          ${avatar(me.user, 'lg')}
+          <div class="profile-card-id">
+            <strong class="profile-card-name">${bdi(me.user.displayName)} ${flagBadge(me.user.nationality)}</strong>
+            <a class="muted small" href="#/u/${encodeURIComponent(me.user.username)}" dir="ltr">@${me.user.username}</a>
+            ${accountStrip(me.account)}
+          </div>
+        </section>` : ''}
 
         <section class="panel settings-card" id="sec-account">
           <h2>${t('Account')}</h2>
@@ -108,8 +120,9 @@ export async function securityView(app, params) {
             <div>
               <h2>${t('GameShelf Guard')}</h2>
               <p class="muted small">${g.method
-                ? t('On, with {method}. New browsers and PCs need a code to sign in. {n} recovery codes left.', { method: methodName(g.method), n: g.backupCodesLeft })
+                ? t('On, with {method}. New browsers and PCs need a code to sign in.', { method: methodName(g.method) })
                 : t('Off. Anyone with your password can sign in. Turn Guard on so new browsers and PCs need a code too.')}</p>
+              ${g.method ? html`<p class="codes-left small">${t('Recovery codes left:')} <span class="chip ${g.backupCodesLeft > 2 ? 'chip-good' : 'chip-warn'}" dir="ltr">${g.backupCodesLeft} / 8</span></p>` : ''}
             </div>
             <span class="chip ${g.method ? 'chip-good' : 'chip-warn'}">${g.method ? t('On') : t('Off')}</span>
           </div>
@@ -280,6 +293,7 @@ export async function securityView(app, params) {
   }
 
   function wire() {
+    wireAccountStrip(app);
     app.querySelectorAll('[data-copy]').forEach((b) => b.addEventListener('click', async () => {
       await navigator.clipboard.writeText(b.dataset.copy).then(() => toast(t('Copied.')), () => toast(t('Couldn\'t copy. Select the codes and copy them yourself.'), { error: true }));
     }));

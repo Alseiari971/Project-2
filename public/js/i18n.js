@@ -18,12 +18,8 @@ function saved() {
   }
 }
 
-/** "ar" or "en": the visitor's choice, or their browser's language the first time. */
-export const lang = (() => {
-  const choice = saved();
-  if (choice === 'ar' || choice === 'en') return choice;
-  return (navigator.languages || [navigator.language]).some((l) => /^ar\b/i.test(l || '')) ? 'ar' : 'en';
-})();
+/** "ar" or "en": the visitor's choice; Arabic until they pick one. */
+export const lang = saved() === 'en' ? 'en' : 'ar';
 export const isArabic = lang === 'ar';
 // Arabic text with Western digits (2026, 7.0), as Gulf apps and the game stores show them.
 export const locale = isArabic ? 'ar-u-nu-latn' : 'en';

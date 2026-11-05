@@ -326,6 +326,45 @@ test('support: tickets with a thread, the admin queue with who sent them, replie
   assert.equal((await layla('/api/support/tickets', { method: 'POST', body: { category: 'other', subject: 'One too many', message: 'This should be refused.' } })).status, 429);
 });
 
+test('the bell: friend requests, accepted requests and support replies; profiles show badges and the Steam avatar', async () => {
+  await startApp({ ADMIN_USERS: 'hamad' });
+  const admin = await signedUp('hamad');
+  const nadia = await signedUp('nadia', 'KW');
+  const omar = await signedUp('omar', 'QA');
+
+  await omar('/api/friends/request', { method: 'POST', body: { target: '@nadia' } });
+  let bell = (await nadia('/api/notifications')).body;
+  assert.deepEqual(bell.items.map((n) => [n.kind, n.data.username, n.link]), [['friend-request', 'omar', '#/u/omar']]);
+  assert.equal(bell.unread, 1);
+  // Asking again within the hour doesn't ring twice.
+  await omar('/api/friends/remove', { method: 'POST', body: { target: '@nadia' } });
+  await omar('/api/friends/request', { method: 'POST', body: { target: '@nadia' } });
+  assert.equal((await nadia('/api/notifications')).body.items.length, 1);
+  await nadia('/api/friends/accept', { method: 'POST', body: { target: '@omar' } });
+  bell = (await omar('/api/notifications')).body;
+  assert.deepEqual(bell.items.map((n) => [n.kind, n.data.username]), [['friend-accepted', 'nadia']]);
+  // Reading one; the other player's can't be touched.
+  assert.deepEqual((await nadia('/api/notifications/read', { method: 'POST', body: { id: bell.items[0].id } })).body, { unread: 1 });
+  assert.deepEqual((await omar('/api/notifications/read', { method: 'POST', body: { id: bell.items[0].id } })).body, { unread: 0 });
+
+  const ticket = (await nadia('/api/support/tickets', { method: 'POST', body: { category: 'other', subject: 'Where is my badge', message: 'I linked Steam but see nothing.' } })).body.ticket;
+  await admin(`/api/admin/support/${ticket.id}/messages`, { method: 'POST', body: { body: 'It shows once Steam confirms.' } });
+  const reply = (await nadia('/api/notifications')).body.items[0];
+  assert.deepEqual([reply.kind, reply.data.subject, reply.link], ['support-reply', 'Where is my badge', `#/support/${ticket.id}`]);
+
+  // Profiles: badges for the account, Arabic numbers, and the friend code only for its owner.
+  const mine = (await nadia('/api/users/nadia')).body.account;
+  assert.deepEqual(mine.badges, ['founder']);
+  assert.deepEqual(mine.arabic, { games: 0, requests: 0 });
+  assert.match(mine.friendCode, /^GS-/);
+  assert.equal((await omar('/api/users/nadia')).body.account.friendCode, null);
+  db.prepare("UPDATE users SET steam_id = '76561198000000001', steam_avatar = 'https://avatars.steamstatic.com/abc_full.jpg' WHERE username = 'nadia'").run();
+  const seen = (await omar('/api/users/nadia')).body;
+  assert.deepEqual(seen.account.badges, ['founder', 'steam']);
+  assert.equal(seen.user.avatarUrl, 'https://avatars.steamstatic.com/abc_full.jpg');
+  assert.equal((await omar('/api/friends')).body.friends[0].avatarUrl, 'https://avatars.steamstatic.com/abc_full.jpg');
+});
+
 test('the country lists on the server and in the browser are the same', async () => {
   const server = require('../src/countries');
   // A browser module (ES module syntax in a CommonJS package): loaded from its source.

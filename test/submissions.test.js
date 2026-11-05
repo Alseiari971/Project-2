@@ -145,3 +145,57 @@ test('a newer submission for a game replaces the one still waiting', () => {
   const [only] = submissions.list();
   assert.deepEqual([only.id, only.tier, only.total], [first.id, 'native-runtime', 2]);
 });
+
+test('once a game\'s Arabic is out: askers hear it in the bell, its numbers count up, and only its players rate it', async (t) => {
+  const { db, base } = await start(t);
+  const alice = await signedUp(base, 'alice');
+  const bob = await signedUp(base, 'bob');
+  const carol = await signedUp(base, 'carol');
+  const hamad = await signedUp(base, 'hamad');
+  const anon = await signedUp(base);
+  const game = 'steam:1173690';
+
+  // Before: nothing to show, and Bob asks for it.
+  assert.deepEqual((await anon('/api/showcase')).body, { games: [], totals: { games: 0, strings: 0, downloads: 0 } });
+  assert.equal((await bob('/api/arabic/requests', { method: 'POST', body: { game, name: 'RE3 Demo', reason: 'Please!' } })).status, 200);
+
+  const lines = [...new Set(ENGLISH)].map((english) => ({ hash: sha256(english), english }));
+  await alice('/api/translations/translate', { method: 'POST', body: { game, lines } });
+  await alice('/api/arabic/submissions', { method: 'POST', raw: JSON.stringify({ game, name: 'RE3 Demo', engine: 'reengine', lines: ENGLISH }) });
+  const [waiting] = (await hamad('/api/admin/submissions')).body.submissions;
+  const { set } = (await hamad(`/api/admin/submissions/${waiting.id}/set`)).body;
+  const signature = crypto.sign(null, Buffer.from(set), keys.privateKey).toString('base64');
+  assert.equal((await hamad(`/api/admin/submissions/${waiting.id}/approve`, { method: 'POST', raw: JSON.stringify({ set, signature }) })).status, 201);
+
+  // Bob asked, so the bell tells him; Carol didn't ask and hears nothing.
+  const bell = (await bob('/api/notifications')).body;
+  assert.equal(bell.unread, 1);
+  assert.deepEqual([bell.items[0].kind, bell.items[0].data, bell.items[0].read], ['arabic-ready', { game: 'RE3 Demo' }, false]);
+  assert.match(bell.items[0].link, /^#\/(game\/|arabic)/);
+  assert.equal((await carol('/api/notifications')).body.items.length, 0);
+  assert.equal((await anon('/api/notifications')).status, 401);
+  assert.deepEqual((await bob('/api/notifications/read', { method: 'POST', body: {} })).body, { unread: 0 });
+  assert.equal((await bob('/api/notifications')).body.items[0].read, true);
+
+  // Downloads count; strings are the set's lines.
+  const [entry] = (await anon('/api/localization/packs')).body.packs;
+  await alice(entry.downloadUrl);
+  await bob(entry.downloadUrl);
+  const row = db.prepare('SELECT strings_count, downloads_count FROM arabic_games WHERE game = ?').get(game);
+  assert.deepEqual([row.strings_count, row.downloads_count], [3, 2]);
+
+  // Ratings: 1 to 5 stars, only from a player who has the Arabic; again changes them.
+  assert.equal((await carol('/api/arabic/ratings', { method: 'POST', body: { game, stars: 5 } })).status, 403);
+  assert.equal((await bob('/api/arabic/ratings', { method: 'POST', body: { game, stars: 6 } })).status, 400);
+  assert.equal((await bob('/api/arabic/ratings', { method: 'POST', body: { game: 'nope', stars: 4 } })).status, 400);
+  assert.equal((await anon('/api/arabic/ratings', { method: 'POST', body: { game, stars: 4 } })).status, 401);
+  await bob('/api/arabic/ratings', { method: 'POST', body: { game, stars: 3 } });
+  const rated = (await alice('/api/arabic/ratings', { method: 'POST', body: { game, stars: 4 } })).body.stats;
+  assert.deepEqual(rated, { strings: 3, downloads: 2, rating: 3.5, ratings: 2, mine: 4, canRate: true });
+  const changed = (await bob('/api/arabic/ratings', { method: 'POST', body: { game, stars: 5 } })).body.stats;
+  assert.deepEqual([changed.rating, changed.ratings, changed.mine], [4.5, 2, 5]);
+
+  // The showcase's totals (the catalog's local provider has no Steam page for it, so no card).
+  const showcase = (await anon('/api/showcase')).body;
+  assert.deepEqual(showcase.totals, { games: 1, strings: 3, downloads: 2 });
+});

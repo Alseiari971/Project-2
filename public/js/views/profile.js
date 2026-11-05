@@ -1,4 +1,4 @@
-import { html, bdi, th, api, mount, state, STATUS_LABELS, timeAgo, parseDbTime, gameHref, profileHref, toast } from '../lib.js';
+import { html, bdi, th, api, mount, state, STATUS_LABELS, timeAgo, parseDbTime, gameHref, profileHref, toast, onLeave } from '../lib.js';
 import { avatar, libraryTile, levelBadge, statusBadge, emptyState, titleArt, stars, starValue, formatHours } from '../components.js';
 import { t, locale } from '../i18n.js';
 import { flagBadge, supporterBadge } from '../country-picker.js';
@@ -95,6 +95,41 @@ function commentItem(c, profileUser) {
     </li>`;
 }
 
+// Badges for the account itself (not its games): one of GameShelf's first players, a Steam account proved with
+// Steam's sign-in, GameShelf Guard on.
+const ACCOUNT_BADGES = {
+  founder: { label: 'Founder', note: 'One of the first players on GameShelf', icon: 'star' },
+  steam: { label: 'Steam verified', note: 'Linked with Steam\'s own sign-in', icon: 'check' },
+  guard: { label: 'GameShelf Guard', note: 'Signs in with a code on new browsers and PCs', icon: 'shield' },
+};
+
+/** The account's badges, its Arabic numbers and (on your own profile) your friend code to copy. */
+export function accountStrip(account) {
+  if (!account) return '';
+  return html`<div class="account-strip">
+    ${account.badges?.length ? html`<div class="account-badges">${account.badges.filter((b) => ACCOUNT_BADGES[b]).map((b) => html`
+      <span class="account-badge is-${b}" title="${t(ACCOUNT_BADGES[b].note)}">${icon(ACCOUNT_BADGES[b].icon)} ${t(ACCOUNT_BADGES[b].label)}</span>`)}</div>` : ''}
+    <div class="account-stats">
+      <span><strong dir="ltr">${Number(account.arabic?.games || 0).toLocaleString(locale)}</strong> ${t('games played in Arabic')}</span>
+      <span><strong dir="ltr">${Number(account.arabic?.requests || 0).toLocaleString(locale)}</strong> ${t('Arabic requests and votes')}</span>
+    </div>
+    ${account.friendCode ? html`<button type="button" class="code-chip copy-code" data-copy-code="${account.friendCode}" dir="ltr" title="${t('Copy your friend code')}"><code>${account.friendCode}</code>${icon('copy')}</button>` : ''}
+  </div>`;
+}
+
+/** Copying a friend code from an account strip. */
+export function wireAccountStrip(root) {
+  // Once per page element (pages that redraw themselves call this again).
+  if (root.dataset.accountStrip) return;
+  root.dataset.accountStrip = '1';
+  onLeave(() => delete root.dataset.accountStrip);
+  root.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-copy-code]');
+    if (!b) return;
+    await navigator.clipboard.writeText(b.dataset.copyCode).then(() => toast(t('Friend code copied.')), () => toast(t('Couldn\'t copy. Select the code and copy it yourself.'), { error: true }));
+  });
+}
+
 export async function profileView(app, username, params) {
   const data = await api(`/users/${encodeURIComponent(username)}`);
   const { user, stats, progression, library, showcases, background } = data;
@@ -135,10 +170,10 @@ export async function profileView(app, username, params) {
             <div class="profile-sub">
               <span>${bdi(`@${user.username}`)}</span>
               ${user.country ? html`<span>${user.country}</span>` : ''}
-              ${user.steamVerified ? html`<span class="steam-verified" title="${t('Linked with Steam\'s own sign-in')}">${icon('check')} ${t('Steam verified')}</span>` : ''}
               <span>${t('Joined {date}', { date: joined })}</span>
             </div>
             ${user.bio ? html`<p class="bio" dir="auto">${user.bio}</p>` : ''}
+            ${accountStrip(data.account)}
           </div>
           <div class="profile-level">
             <div class="level-row">${t('Level')} ${levelBadge(progression.level, 'lg')}</div>
@@ -225,6 +260,7 @@ export async function profileView(app, username, params) {
     </div>
   `);
 
+  wireAccountStrip(app);
   document.getElementById('share').addEventListener('click', async () => {
     const url = `${location.origin}/${profileHref(user.username)}`;
     try {

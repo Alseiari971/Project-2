@@ -53,6 +53,14 @@ function createSteamService(apiKey = process.env.STEAM_API_KEY, { fetchImpl = fe
       };
     },
 
+    /** A Steam account's public name and avatar ({ name, avatar }), or empty ones without a key. */
+    async playerSummary(steamId) {
+      if (!apiKey || !STEAM_ID_RE.test(String(steamId || ''))) return { name: '', avatar: '' };
+      const player = (await (await get(apiUrl('ISteamUser/GetPlayerSummaries/v2/', { steamids: steamId }))).json())?.response?.players?.[0];
+      const avatar = String(player?.avatarfull || player?.avatarmedium || '');
+      return { name: String(player?.personaname || ''), avatar: /^https:\/\/([\w-]+\.)*(steamstatic|steamcdn-a\.akamaihd)\.(com|net)\//.test(avatar) ? avatar : '' };
+    },
+
     /** A Steam account's public name (persona), or '' without a key. */
     async playerName(steamId) {
       if (!apiKey || !STEAM_ID_RE.test(String(steamId || ''))) return '';

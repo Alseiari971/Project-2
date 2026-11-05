@@ -23,7 +23,7 @@ class SupportError extends Error {
 
 const text = (value, max) => String(value ?? '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').trim().slice(0, max);
 
-function createSupport({ db, games = null, plans = null }) {
+function createSupport({ db, games = null, plans = null, notifications = null }) {
   const q = {
     insert: db.prepare('INSERT INTO support_tickets (user_id, category, subject, game_id, game_name) VALUES (?, ?, ?, ?, ?)'),
     addMessage: db.prepare('INSERT INTO support_messages (ticket_id, author_id, from_admin, body) VALUES (?, ?, ?, ?)'),
@@ -174,6 +174,7 @@ function createSupport({ db, games = null, plans = null }) {
     if (!message) throw new SupportError('Write a message first.');
     q.addMessage.run(t.id, admin.id, 1, message);
     q.setStatus.run(['resolved', 'closed'].includes(status) ? status : 'replied', t.id);
+    notifications?.add(t.user_id, 'support-reply', { subject: t.subject, ticket: t.id }, `#/support/${t.id}`);
     return adminGet(t.id);
   }
 
