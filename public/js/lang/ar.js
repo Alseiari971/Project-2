@@ -1785,6 +1785,8 @@ export const AR = {
   "Checking the game…": "يفحص اللعبة…",
   "Installing Arabic…": "يثبّت العربية…",
   "Backup ready": "النسخة الاحتياطية جاهزة",
+  // Showcase, notifications, pack numbers and profiles
+  "Translating…": "يترجم…",
 };
 
 // Arabic counts have six forms: no items, one, two, three to ten, eleven to

@@ -126,7 +126,7 @@ function scramble(el, from, to, ms, alive) {
     const frame = (now) => {
       if (!alive()) return resolve();
       const p = Math.min(1, (now - t0) / ms);
-      if (now - last > 45 || p === 1) {
+      if (now - last > 85 || p === 1) {
         last = now;
         // First the English breaks up, then the Arabic settles in from the start of the line.
         const length = Math.round(from.length + (to.length - from.length) * Math.min(1, p * 1.6));
@@ -280,30 +280,35 @@ export async function showcaseView(app) {
       note.textContent = t(step);
       status(t(step));
       toggle.style.setProperty('--progress', `${Math.round(((i + 1) / STEPS_ON.length) * 100)}%`);
-      await wait(650);
+      await wait(1300);
       if (!alive()) return;
     }
     toggle.classList.remove('is-busy');
     toggle.classList.add('is-on');
     note.textContent = t('On');
     document.getElementById('mock-play').classList.add('is-ready');
-    await wait(700);
+    await wait(1400);
     if (!alive()) return;
 
     // Into the game.
     document.getElementById('mock-page').classList.add('is-leaving');
-    await wait(450);
+    await wait(900);
     if (!alive()) return;
     mount(document.getElementById('mock-main'), gameScene(demo));
     status(t('In the game: the English subtitle turns into Arabic.'));
-    await wait(1300);
+    await wait(2400);
     if (!alive()) return;
+    const pill = document.getElementById('mock-pill');
+    pill.classList.add('is-working');
+    mount(pill, html`<span class="arabic-mark sm">ع</span>${t('Translating…')}`);
     const line = document.getElementById('morph-line');
     const speaker = document.querySelector('#demo-sub .demo-speaker');
     speaker.classList.add('is-fading');
-    await scramble(line, LINE.en, LINE.ar, 1700, alive);
+    await scramble(line, LINE.en, LINE.ar, 5200, alive);
     if (!alive()) return;
-    await wait(500);
+    pill.classList.remove('is-working');
+    mount(pill, html`<span class="arabic-mark sm">ع</span>${t('Arabic on')}`);
+    await wait(1200);
     if (!alive()) return;
     demo.mode = 'dual';
     drawSubtitle();

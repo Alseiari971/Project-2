@@ -2377,7 +2377,9 @@ body.is-showcase .footer { padding-bottom: 32px; }
 /* The demo's first step: a game's page in the app, with the Arabic switch */
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
 .mock-main { position: relative; }
-.mock-page { position: relative; height: 100%; min-height: 348px; border-radius: 12px; overflow: hidden; background: var(--panel); transition: transform 0.45s var(--ease), opacity 0.45s var(--ease), filter 0.45s; transform-origin: 50% 30%; }
+.mock-page { position: relative; height: 100%; min-height: 348px; border-radius: 12px; overflow: hidden; background: var(--panel); transition: transform 0.9s var(--ease), opacity 0.9s var(--ease), filter 0.9s; transform-origin: 50% 30%; }
+#mock-toggle.is-busy::after { transition: width 1.2s linear; }
+.arabic-pill.is-working .arabic-mark.sm { animation: play-pulse 1.2s ease-in-out infinite; }
 .mock-page.is-leaving { transform: scale(1.35); opacity: 0; filter: blur(4px); }
 .mock-hero { position: absolute; inset: 0 0 auto; height: 62%; overflow: hidden; background: linear-gradient(180deg, #1d2440 0%, #50366a 48%, #d3704a 78%, #f0a35c 100%); }
 .mock-hero-shade { inset: 0; background: linear-gradient(0deg, var(--panel) 0%, rgba(21, 22, 26, 0.55) 45%, rgba(21, 22, 26, 0.1) 100%); }
@@ -2399,7 +2401,7 @@ body.is-showcase .footer { padding-bottom: 32px; }
 @keyframes mock-bob { 50% { transform: translateY(-3px); } }
 
 /* Then the game: it comes in from the page, and its subtitle turns into Arabic */
-.scene.is-entering { animation: scene-in 0.55s var(--ease) both; }
+.scene.is-entering { animation: scene-in 0.9s var(--ease) both; }
 @keyframes scene-in { from { transform: scale(0.92); opacity: 0; filter: blur(6px); } to { transform: none; opacity: 1; filter: none; } }
 .demo-line.is-morphing { font-family: "Manrope", "GS Cairo", monospace; color: var(--accent); letter-spacing: 0.02em; }
 .demo-speaker.is-fading { opacity: 0; transition: opacity 0.3s; }
@@ -2470,4 +2472,4 @@ body.is-showcase .footer { padding-bottom: 32px; }
   .seg button { padding: 7px 10px; }
 }
 @media (max-width: 359px) { body.is-showcase .topbar .pill-light { display: none; } }
-@media (prefers-reduced-motion: reduce) { .sc-game img, .mock-page { transition: none; } .scene.is-entering, #mock-toggle, .mock-hint { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .sc-game img, .mock-page { transition: none; } .scene.is-entering, #mock-toggle, .mock-hint, .arabic-pill.is-working .arabic-mark.sm { animation: none; } }
