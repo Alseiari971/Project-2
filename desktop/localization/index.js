@@ -309,7 +309,15 @@ async function enableArabic({ root, packDir, stager, publicKey, allowUnsigned = 
   const pack = await readPack(packDir, { publicKey, allowUnsigned });
   let ours = await stager.status(root);
   if (ours?.status === 'enabled' && ours.pack.id === pack.manifest.id && ours.pack.version === pack.manifest.version) {
-    return { already: true, tier: null };
+    // Already in, by GameShelf's own record. But files can go missing without GameShelf (deleted by hand, a
+    // "verify game files", a pack removed while on): then the record is wrong, and the Arabic goes in again.
+    const missing = ((await stager.verify(root))?.changes || []).some((c) => c.what === 'missing');
+    if (!missing) return { already: true, tier: null };
+    const old = await stager.disable(root);
+    if (old.kept.length) {
+      throw new LocalizationError('Some of GameShelf\'s Arabic files for this game are missing, and the rest couldn\'t be taken out. Turn Arabic off for this game, then on again.', 'busy');
+    }
+    ours = null;
   }
   if (ours?.status === 'enabled' && ours.pack.id === pack.manifest.id) {
     // Another version of the same pack is in: take it out first. If anything of

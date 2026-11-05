@@ -186,6 +186,11 @@ test('Unreal: the patch pak is added in Content/Paks/~mods and removed cleanly',
   assert.deepEqual((await fs.readdir(path.join(paks, '~mods'))).sort(), ['pakchunk99-ArabicLocalization_P.pak']);
   assert.equal((await l10n.status(root)).status, 'enabled');
   assert.equal((await l10n.enable({ root, packDir, ...options })).already, true);
+  // Its file deleted behind GameShelf's back: "on" again puts it back instead of trusting the record.
+  await fs.rm(path.join(paks, '~mods'), { recursive: true });
+  const again = await l10n.enable({ root, packDir, ...options });
+  assert.notEqual(again.already, true);
+  assert.deepEqual(await fs.readdir(path.join(paks, '~mods')), ['pakchunk99-ArabicLocalization_P.pak']);
 
   const off = await l10n.disable({ root });
   assert.deepEqual(off.kept, []);
