@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const { createApp } = require('../server');
 const { openDatabase } = require('../src/db');
 const { createLocalProvider } = require('../src/games/local');
-const { createTranslationMemory, sha256, problemWith } = require('../src/translation-memory');
+const { createTranslationMemory, sha256, problemWith, matchBreaks } = require('../src/translation-memory');
 const { createArabicGames } = require('../src/arabic-games');
 const { createPlans } = require('../src/plans');
 
@@ -115,10 +115,17 @@ test('a wrong hash, or an answer that breaks a tag, is never stored', async (t) 
   // The broken answer was asked for again on its own, and the second one was kept.
   assert.equal(result.body.arabic[sha256(cue)], `عربي ${cue}`);
   assert.equal(openai.calls.length, 2);
-  assert.match(openai.calls[1].body.messages[1].content, /unusable because it changed <TIME 4.4, 8.44>/);
+  assert.match(openai.calls[1].body.messages[1].content, /unusable because it(?:'s missing| has an extra) <TIME 4\.4, 8\.44>/);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM translation_memory').get().n, 1);
 
-  assert.equal(problemWith('Hello, {0}!', 'مرحبًا!'), 'it changed {0}');
+  assert.equal(problemWith('Hello, {0}!', 'مرحبًا!'), 'it\'s missing {0}');
+  assert.equal(problemWith('Hello!', 'مرحبًا {0}!'), 'it has an extra {0}');
+  // Line breaks can't be seen in a message, so they're counted instead.
+  assert.equal(problemWith('One\r\nTwo', 'واحد اثنان'), 'the English has 1 line breaks and the Arabic has 0');
+  // A browser's text box turns \r\n into \n; an admin's edit gets the English's breaks back.
+  assert.equal(matchBreaks('One\r\nTwo', 'واحد\nاثنان'), 'واحد\r\nاثنان');
+  assert.equal(matchBreaks('One\nTwo', 'واحد\nاثنان'), 'واحد\nاثنان');
+  assert.equal(problemWith('One\r\nTwo', matchBreaks('One\r\nTwo', 'واحد\nاثنان')), null);
   assert.equal(problemWith('<COLOR FF0000>Run</COLOR>', '<COLOR FF0000>اهرب</COLOR>'), null);
   assert.equal(problemWith('Open the door', 'Open the door'), 'it isn\'t Arabic');
 });

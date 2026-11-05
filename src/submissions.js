@@ -17,7 +17,7 @@
 //
 // Only Arabic travels to players, never the game's files or its English.
 const crypto = require('node:crypto');
-const { GAME_RE, sha256 } = require('./translation-memory');
+const { GAME_RE, sha256, problemWith, matchBreaks } = require('./translation-memory');
 
 const ENGINES = {
   reengine: 're-patch', renpy: 'renpy-tl', godot: 'godot-override', unity: 'unity-bepinex', unreal: 'unreal-pak',
@@ -30,9 +30,11 @@ const FONT_TARGET_RE = /^[\w\-./ ]{1,240}$/;
 const SET_KIND = 'gameshelf-arabic-set';
 
 class SubmissionError extends Error {
-  constructor(message, status = 400) {
+  constructor(message, status = 400, details = null) {
     super(message);
     this.status = status;
+    // Extra facts for the page, e.g. which lines were refused and why.
+    this.details = details;
   }
 }
 
@@ -164,22 +166,31 @@ function createSubmissions({ db, translations, publicKeys = [] }) {
     return { submission: { ...summary(row), translated, fontStyle: q.fontStyle.get(row.game)?.font_style || null }, matching: lines.length, lines: lines.slice(start, start + size) };
   }
 
-  /** An admin's fixes: [{ hash, arabic }]. Each is checked against its English's tags first. */
+  /**
+   * An admin's fixes: [{ hash, arabic }]. All are checked against their English's tags
+   * first; if any can't be used, none are saved and each refused line is named (`problems`).
+   */
   function edit(id, edits) {
     const row = load(id);
     const byHash = new Map(JSON.parse(row.lines).map((l) => [l.hash, l]));
-    const saved = [];
+    const checked = [];
+    const problems = [];
     for (const { hash, arabic } of Array.isArray(edits) ? edits.slice(0, 1000) : []) {
       const line = byHash.get(String(hash));
       if (!line) continue;
-      try {
-        translations.review(row.game, line.english, String(arabic ?? '').trim());
-      } catch (err) {
-        throw new SubmissionError(`"${line.english.slice(0, 60)}": ${err.message}`);
-      }
-      saved.push(hash);
+      const text = matchBreaks(line.english, String(arabic ?? '').trim());
+      const problem = problemWith(line.english, text);
+      if (problem) problems.push({ hash: line.hash, english: line.english.slice(0, 80), problem });
+      else checked.push([line, text]);
     }
-    return { saved: saved.length };
+    if (problems.length) {
+      const first = problems[0];
+      throw new SubmissionError(problems.length === 1
+        ? `"${first.english.slice(0, 60)}": That Arabic can't be used: ${first.problem}.`
+        : `${problems.length} lines can't be used yet: they're marked in red. The first: "${first.english.slice(0, 60)}": ${first.problem}.`, 400, { problems });
+    }
+    for (const [line, text] of checked) translations.review(row.game, line.english, text);
+    return { saved: checked.length };
   }
 
   function reject(id, reviewer, note = '') {

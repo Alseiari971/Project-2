@@ -87,7 +87,13 @@ test('a player\'s submission waits; an admin fixes it, signs it and it goes in t
   const runHash = sha256('<COLOR FF0000>Run!</COLOR>');
   const bad = await hamad(`/api/admin/submissions/${waiting.id}/lines`, { method: 'PATCH', body: { edits: [{ hash: runHash, arabic: 'اهرب!' }] } });
   assert.equal(bad.status, 400);
-  assert.match(bad.body.error, /COLOR/);
+  assert.match(bad.body.error, /missing <COLOR FF0000>/);
+  // The page is told which line it was, so it can mark it.
+  assert.deepEqual(bad.body.problems.map((p) => p.hash), [runHash]);
+  // One bad line keeps the good ones in the same save from being saved half-way.
+  const mixed = await hamad(`/api/admin/submissions/${waiting.id}/lines`, { method: 'PATCH', body: { edits: [{ hash: sha256('Hey Captain.'), arabic: 'مرحبًا أيها القائد.' }, { hash: runHash, arabic: 'اهرب!' }] } });
+  assert.equal(mixed.status, 400);
+  assert.notEqual((await hamad(`/api/admin/submissions/${waiting.id}?q=captain`)).body.lines[0].arabic, 'مرحبًا أيها القائد.');
   await hamad(`/api/admin/submissions/${waiting.id}/lines`, { method: 'PATCH', body: { edits: [{ hash: runHash, arabic: '<COLOR FF0000>اهرب!</COLOR>' }] } });
 
   // Signing: the exact set from the server, signed with GameShelf's key. A stranger's key is refused.

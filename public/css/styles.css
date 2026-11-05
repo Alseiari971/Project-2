@@ -1643,6 +1643,9 @@ label { display: grid; gap: 8px; font-size: 13px; font-weight: 700; color: var(-
 .review-list { display: grid; border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
 .review-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--panel); }
 .review-row:last-child { border-bottom: 0; }
+.review-row.has-problem { background: color-mix(in srgb, var(--danger) 10%, var(--panel)); box-shadow: inset 3px 0 0 var(--danger); }
+.review-row.has-problem .review-ar { border-color: var(--danger); }
+.review-problem { grid-column: 1 / -1; margin: 0; color: var(--danger); font-size: 13px; font-weight: 600; }
 .review-en { align-self: center; font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .review-ar { min-height: 42px; resize: vertical; font: 15px/1.5 "Thmanyah Local", "Alexandria", sans-serif; }
 .font-list-form { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }

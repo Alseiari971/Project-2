@@ -112,6 +112,7 @@ export async function api(path, { method = 'GET', body } = {}) {
     // The server answers in English; t() turns its messages into Arabic.
     const err = new Error(data.error ? t(data.error) : t('Request failed ({status})', { status: res.status }));
     err.status = res.status;
+    err.data = data;
     throw err;
   }
   return data;

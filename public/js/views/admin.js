@@ -584,11 +584,26 @@ async function review(body, id) {
   const s = page.submission;
   const pending = s.status === 'pending';
 
+  const problems = new Map(); // hash → why the server refused that line's Arabic
   const rows = (lines) => lines.map((l) => html`
-    <div class="review-row">
+    <div class="review-row ${problems.has(l.hash) ? 'has-problem' : ''}" data-row="${l.hash}">
       <div class="review-en" dir="ltr">${l.english}</div>
       <textarea class="input review-ar" dir="rtl" lang="ar" data-hash="${l.hash}" rows="2" ${pending ? '' : 'readonly'} placeholder="${t('No Arabic yet')}">${ui.edits.get(l.hash) ?? l.arabic ?? ''}</textarea>
+      <p class="review-problem" dir="ltr" ${problems.has(l.hash) ? '' : 'hidden'}>${problems.get(l.hash) || ''}</p>
     </div>`);
+  // Marks the refused lines on the page (or clears the marks) and goes to the first one.
+  const markProblems = (list = []) => {
+    problems.clear();
+    for (const p of list) problems.set(p.hash, `${t('Can\'t be used:')} ${p.problem}. ${t('Copy the tags and line breaks exactly as in the English.')}`);
+    document.querySelectorAll('[data-row]').forEach((row) => {
+      const why = problems.get(row.dataset.row);
+      row.classList.toggle('has-problem', Boolean(why));
+      const note = row.querySelector('.review-problem');
+      note.hidden = !why;
+      note.textContent = why || '';
+    });
+    document.querySelector('.review-row.has-problem')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
 
   mount(body, html`
     <p><a href="#/admin?tab=approvals">${t('← Pending approvals')}</a></p>
@@ -681,6 +696,13 @@ async function review(body, id) {
     if (!area) return;
     ui.edits.set(area.dataset.hash, area.value);
     if (save) save.disabled = false;
+    // Edited again: its red mark goes until the next save checks it.
+    const row = area.closest('[data-row]');
+    if (row?.classList.contains('has-problem')) {
+      row.classList.remove('has-problem');
+      row.querySelector('.review-problem').hidden = true;
+      problems.delete(row.dataset.row);
+    }
   });
   more.addEventListener('click', async () => {
     ui.offset += 100;
@@ -702,8 +724,10 @@ async function review(body, id) {
       const edits = [...ui.edits].map(([hash, arabic]) => ({ hash, arabic }));
       const { saved } = await api(`/admin/submissions/${encodeURIComponent(id)}/lines`, { method: 'PATCH', body: { edits } });
       ui.edits.clear();
+      markProblems([]);
       toast(t('Saved {count} lines. Every player gets them.', { count: saved }));
     } catch (err) {
+      markProblems(err.data?.problems || []);
       toast(errorText(err), { error: true });
       save.disabled = false;
     }

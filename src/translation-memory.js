@@ -38,6 +38,8 @@ const EXTRA_TOKENS = [
   /<\/?[A-Z][A-Z_]*(?: [^<>\n]{1,80})?>/g, // RE Engine: <TIME 4.4, 8.44>, <PAGE>, <COLOR FF0000>
 ];
 
+const countBreaks = (text) => (text.match(/\r\n|\r|\n/g) || []).length;
+
 function tokens(text) {
   const counts = new Map();
   for (const pattern of [TOKENS, ...EXTRA_TOKENS]) {
@@ -46,13 +48,33 @@ function tokens(text) {
   return counts;
 }
 
+// How a tag or placeholder is named in a message; line breaks can't be seen, so they're named.
+const tokenName = (key) => ({ '\r\n': 'a line break', '\n': 'a line break', '\r': 'a line break', '\\n': 'a \\n line break' }[key] || key);
+
+/**
+ * The Arabic with the English's kind of line break: a text box in a browser turns every
+ * Windows line break (\r\n) into \n, so an admin's edit would otherwise never match the game's text.
+ */
+function matchBreaks(english, arabic) {
+  const text = String(arabic ?? '');
+  if (english.includes('\r\n')) return text.replace(/\r?\n/g, '\r\n');
+  if (english.includes('\r') && !english.includes('\n')) return text.replace(/\r?\n/g, '\r');
+  return text;
+}
+
 /** Why a translation can't be used, or null. */
 function problemWith(english, arabic) {
   if (typeof arabic !== 'string' || !arabic.trim()) return 'it came back empty';
   const want = tokens(english);
   const got = tokens(arabic);
   const keys = new Set([...want.keys(), ...got.keys()]);
-  for (const key of keys) if ((want.get(key) || 0) !== (got.get(key) || 0)) return `it changed ${key}`;
+  for (const key of keys) {
+    const had = want.get(key) || 0;
+    const has = got.get(key) || 0;
+    if (had === has) continue;
+    if (/^(\r\n|\r|\n)$/.test(key)) return `the English has ${countBreaks(english)} line breaks and the Arabic has ${countBreaks(arabic)}`;
+    return has < had ? `it's missing ${tokenName(key)}` : `it has an extra ${tokenName(key)}`;
+  }
   if (/[A-Za-z]/.test(english.replace(TOKENS, '')) && !/[؀-ۿ]/.test(arabic)) return 'it isn\'t Arabic';
   return null;
 }
@@ -329,6 +351,7 @@ function createTranslationMemory({ db, env = process.env, fetch = globalThis.fet
     ON CONFLICT (game, line_hash) DO UPDATE SET arabic = excluded.arabic, origin = 'reviewed', model = NULL`);
   function review(game, english, arabic) {
     checkGame(game);
+    arabic = matchBreaks(english, arabic);
     const problem = problemWith(english, arabic);
     if (problem) throw new TypeError(`That Arabic can't be used: ${problem}.`);
     saveReviewed.run(game, sha256(english), arabic);
@@ -388,4 +411,4 @@ function createTranslationMemory({ db, env = process.env, fetch = globalThis.fet
   return { configured: Boolean(apiKey), lookup, translate, review, stored, model, glossary, ensureGlossary, setGlossary };
 }
 
-module.exports = { createTranslationMemory, createPriorityGate, problemWith, sha256, TranslationLimit, GAME_RE, cleanGlossary, glossaryPrompt, GLOSSARY_PROMPT };
+module.exports = { createTranslationMemory, createPriorityGate, problemWith, matchBreaks, sha256, TranslationLimit, GAME_RE, cleanGlossary, glossaryPrompt, GLOSSARY_PROMPT };

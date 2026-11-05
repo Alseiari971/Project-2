@@ -1014,7 +1014,7 @@ function createApi({
     try {
       res.json(await fn(req, res));
     } catch (err) {
-      if (err instanceof SubmissionError || err instanceof RegistryError) return res.status(err.status).json({ error: err.message });
+      if (err instanceof SubmissionError || err instanceof RegistryError) return res.status(err.status).json({ error: err.message, ...(err.details || {}) });
       throw err;
     }
   });
