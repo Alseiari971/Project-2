@@ -192,11 +192,13 @@ a.tag:hover { background: #3a3c43; }
   border-bottom: 1px solid var(--border);
 }
 .topbar-left { display: flex; align-items: center; justify-content: space-between; padding-inline: 24px 16px; }
-.logo { display: inline-flex; align-items: center; gap: 9px; font-size: 20px; font-weight: 800; letter-spacing: -0.05em; }
-.logo .logo-word { color: var(--text); }
-.logo .logo-word span { color: var(--accent); }
-/* The G + ع mark (drawn from Hamad's sketch), in the page's accent. */
-.logo-mark { width: 30px; height: 30px; flex: none; fill: none; stroke: var(--accent); stroke-width: 52; stroke-linecap: round; stroke-linejoin: round; }
+.logo { display: inline-flex; align-items: center; gap: 8px; font-size: 20px; font-weight: 800; letter-spacing: -0.05em; }
+/* The wordmark: white, with its second word in silver so it doesn't compete with the lime badge. */
+.logo .logo-word { color: #ffffff; }
+.logo .logo-word span { color: #b8bbc3; }
+/* The G + ع mark (drawn from Hamad's sketch) in a lime squircle, like the app icon. */
+.logo-badge { display: grid; place-items: center; width: 28px; height: 28px; flex: none; border-radius: 7px; background: var(--accent); }
+.logo-badge svg { width: 28px; height: 28px; fill: none; stroke: #111215; stroke-width: 52; stroke-linecap: round; stroke-linejoin: round; }
 [dir="rtl"] .logo-word { letter-spacing: 0; font-family: "Thmanyah Local", "Alexandria", sans-serif; }
 .empty-art { width: 180px; height: auto; margin-bottom: 8px; }
 .history { display: flex; gap: 4px; }

@@ -508,7 +508,7 @@ test/                automated tests: npm test
 
 GameShelf's mark is a **G drawn with the Arabic letter ع**: the G's bowl runs into the ع's lower arm, its upper arm rises from the same point, and the G ends in an inward curl (drawn from Hamad's sketch, line weight 52 on a 512 grid). It's lime `#e7ff0c` on `#121316`, or dark on lime.
 
-- `public/brand/mark.svg`: the mark alone (`currentColor`), the master for everything below; the header inlines the same two paths beside «GameShelf», or «قيم شلف» on the Arabic site
+- `public/brand/mark.svg`: the mark alone (`currentColor`), the master for everything below; the header puts the same two paths, dark, in a 28 px lime squircle beside «GameShelf» (white "Game", silver "Shelf"), or «قيم شلف» on the Arabic site
 - `public/favicon.svg`: the mark alone, cropped to its edges so it fills the browser tab (line weight 58 for 16 px), lime in dark browser themes and dark in light ones
 - `public/brand/mark-lime-tile.svg`, `public/apple-touch-icon.png` (180 px), `public/og-image.png` (1200 × 630, link previews), `public/brand/discord-badge.png`: dark mark on lime
 - `desktop/icon.ico` (256, 64, 48, 32, 16: window, taskbar and installer), `desktop/icon.png` (512, macOS and Linux), `desktop/icons/tray-*.png` (16, 24, 32, lime and `-dark`, for a tray icon)
