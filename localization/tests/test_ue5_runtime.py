@@ -180,6 +180,44 @@ class IoStore(unittest.TestCase):
         self.assertEqual(packbuild.unreal_programs(game)[0].name, 'ProjectPBZ-Win64-Shipping.exe')
         self.assertEqual(packbuild.game_engine_version(game), 'UE5_5')
 
+    def test_a_hidden_version_is_matched_from_the_games_own_containers(self):
+        # Each engine version lays out an empty container its own way: (.utoc version, container header version).
+        layout = {'UE5_0': (5, None), 'UE5_1': (5, 1), 'UE5_2': (5, 2), 'UE5_3': (6, 3), 'UE5_4': (7, 3), 'UE5_5': (8, 4), 'UE5_6': (8, 4)}
+
+        def container(path, toc, header, encrypted=False):
+            utoc(path, [], encrypted=encrypted)
+            data = bytearray(path.read_bytes())
+            data[16] = toc
+            path.write_bytes(bytes(data))
+            ucas = retoc.CONTAINER_HEADER_SIGNATURE + struct.pack('<i', header) if header is not None else b'\xff' * 8
+            path.with_suffix('.ucas').write_bytes(ucas + b'\0' * 56)
+
+        def fake_to_zen(tool, legacy, out, version, log=print):
+            if version not in layout:
+                raise retoc.RetocError(f'unknown version {version}')
+            container(Path(out), *layout[version])
+            return [Path(out).with_suffix(e) for e in ('.utoc', '.ucas', '.pak')]
+
+        paks = self.tmp / 'Paks'
+        paks.mkdir()
+        container(paks / 'pakchunkMovies-Windows.utoc', 7, 3)
+        container(paks / 'Game-Windows.utoc', 9, None, encrypted=True)  # encrypted: not compared
+        with mock.patch.object(retoc, 'to_zen', fake_to_zen):
+            self.assertEqual(retoc.version_from_containers('retoc', retoc.game_containers(paks), self.tmp / 'probe', log=lambda *_: None), 'UE5_4')
+            # Two versions with the same layout are interchangeable for an empty container.
+            container(paks / 'pakchunkMovies-Windows.utoc', 8, 4)
+            self.assertIn(retoc.version_from_containers('retoc', retoc.game_containers(paks), self.tmp / 'probe2', log=lambda *_: None), ('UE5_5', 'UE5_6'))
+            # Nothing laid out like the game's, or game containers that disagree: no guess.
+            container(paks / 'pakchunkMovies-Windows.utoc', 9, 9)
+            self.assertIsNone(retoc.version_from_containers('retoc', retoc.game_containers(paks), self.tmp / 'probe3', log=lambda *_: None))
+            container(paks / 'pakchunkMovies-Windows.utoc', 7, 3)
+            container(paks / 'pakchunkUI-Windows.utoc', 8, 4)
+            self.assertIsNone(retoc.version_from_containers('retoc', retoc.game_containers(paks), self.tmp / 'probe4', log=lambda *_: None))
+            # Without a readable container header, layouts that differ only there can't be told apart.
+            (paks / 'pakchunkUI-Windows.utoc').unlink()
+            container(paks / 'pakchunkMovies-Windows.utoc', 5, None)
+            self.assertIsNone(retoc.version_from_containers('retoc', retoc.game_containers(paks), self.tmp / 'probe5', log=lambda *_: None))
+
     def test_a_locres_kept_in_a_container_is_read_from_it_and_font_packages_are_listed(self):
         game = self.game({'PhantomBlade/Content/Movies/intro.bk2': '00'}, [
             {'id': '0a' * 12, 'type': 'ExportBundleData', 'path': '../../../PhantomBlade/Content/UI/Fonts/Body_Font.uasset', 'hex': '00'},

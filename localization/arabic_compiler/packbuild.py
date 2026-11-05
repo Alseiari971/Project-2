@@ -1181,6 +1181,10 @@ def build_zen_fonts(args, iostore: dict, payload: Path, stage_root: Path, log):
             raise BuildError(f'{args.font_assets} has no cooked .uasset files.')
         tool = retoc.find_tool(args.retoc) or iostore.get('tool')
         version = args.ue_version or game_engine_version(Path(args.source))
+        if not version and tool and not assets:
+            # The program hides its version (copy protection often does): match the game's own containers instead.
+            # Only for an empty container: cooked font packages need the exact version, from --ue-version.
+            version = retoc.version_from_containers(tool, retoc.game_containers(Path(args.source)), stage_root / 'version-probe', log)
         if not tool or not version:
             # A UE5 game skips a .pak that comes without its own .utoc and .ucas, so a pack without them
             # would say Arabic is on while the game stays in English.

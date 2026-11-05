@@ -23,7 +23,11 @@ repak reads). This module:
   .pak (with the .locres and .ufont files) is packed first.
 
 Engine versions (for to-zen) come from the "++UE5+Release-5.x" string Unreal
-puts in every game's program, or from --ue-version.
+puts in every game's program, or from --ue-version. A game whose program hides
+that string (copy protection) is matched by format instead: an empty container
+is made with each UE5 version and the one laid out like the game's own
+containers (the .utoc version and the container header's version) is used
+(version_from_containers).
 """
 
 from __future__ import annotations
@@ -169,6 +173,64 @@ def engine_version(program: Path | None, limit: int = 2048 * 1024 * 1024) -> str
                 return f'UE{match.group("major").decode()}_{match.group("minor").decode()}'
             overlap = data[-64:]
     return None
+
+
+# FIoContainerHeader::Signature, at the start of a container's header chunk (in its .ucas) since UE 5.1.
+CONTAINER_HEADER_SIGNATURE = struct.pack('<I', 0x496F436E)
+UE5_VERSIONS = [f'UE5_{minor}' for minor in range(0, 8)]
+
+
+def container_format(utoc: Path) -> tuple:
+    """(the .utoc's version, the container header's version or None) of a container: what changes between engine versions."""
+    toc = toc_header(utoc).version
+    header = None
+    try:
+        with Path(utoc).with_suffix('.ucas').open('rb') as f:
+            head = f.read(8)
+        if len(head) == 8 and head[:4] == CONTAINER_HEADER_SIGNATURE:
+            (header,) = struct.unpack_from('<i', head, 4)
+    except OSError:
+        pass
+    return toc, header
+
+
+def version_from_containers(tool: str, containers: list, workdir: Path, log=print) -> str | None:
+    """The UE5 version whose empty container is laid out like the game's own, or None when the game's containers
+    don't agree, nothing matches, or more than one layout would fit. Only open containers are compared: an encrypted
+    one's .ucas can't be read."""
+    references = []
+    for utoc in sorted(containers, key=lambda p: Path(p).stat().st_size)[:12]:
+        try:
+            if toc_header(utoc).encrypted:
+                continue
+            references.append(container_format(utoc))
+        except (OSError, RetocError):
+            continue
+    tocs = {toc for toc, _ in references}
+    headers = {header for _, header in references if header is not None}
+    if len(tocs) != 1 or len(headers) > 1:
+        return None
+    want_toc, want_header = tocs.pop(), (headers.pop() if headers else None)
+    empty = Path(workdir) / 'empty'
+    empty.mkdir(parents=True, exist_ok=True)
+    matches = []
+    for version in UE5_VERSIONS:
+        out = Path(workdir) / version / 'probe.utoc'
+        out.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            to_zen(tool, empty, out, version, log=lambda *_: None)
+            toc, header = container_format(out)
+        except (OSError, RetocError):
+            continue  # a version this retoc doesn't know
+        if toc == want_toc and (want_header is None or header == want_header):
+            matches.append((version, header))
+    if not matches or (want_header is None and len({h for _, h in matches}) > 1):
+        return None
+    # Versions that lay out an empty container the same way are interchangeable for it.
+    chosen = matches[-1][0]
+    log(f'Matched the game\'s own containers (.utoc version {want_toc}'
+        + (f', container header version {want_header}' if want_header is not None else '') + f'): {chosen}.')
+    return chosen
 
 
 def check_version(value: str) -> str:
