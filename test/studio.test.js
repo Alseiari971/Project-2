@@ -56,6 +56,10 @@ test('the Studio\'s choices become the pack builder\'s command line, and mistake
   // The title logo as a PNG: the game's logo videos are made again from it (no engine version needed).
   assert.ok(buildArgs({ ...base, translate: 'none', logoImage: 'C:\\logos\\PBZ-ar.png' }, where).join(' ').includes('--logo-image C:\\logos\\PBZ-ar.png'));
   assert.throws(() => buildArgs({ ...base, logoImage: 'logo.jpg' }, where), /PNG/);
+  // Heavier Arabic for thin menus, and the credit under the copyright notice.
+  assert.ok(buildArgs({ ...base, translate: 'none', fontWeight: 'medium', credit: true }, where).join(' ').includes('--font-weight medium --credit'));
+  assert.ok(!buildArgs({ ...base, translate: 'none', fontWeight: 'regular' }, where).includes('--font-weight'));
+  assert.throws(() => buildArgs({ ...base, fontWeight: 'black; rm' }, where), /weight/);
 });
 
 test('a Studio build of an encrypted Unreal game gets the key from its signed recipe, in the environment only', async (t) => {

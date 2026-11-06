@@ -950,6 +950,11 @@ async function studio(body) {
           ${[['', 'Leave names as they are'], ['auto', 'A colour per character'], ['Character_Yellow_Decorator2', 'Gold'], ['Blue', 'Blue'], ['Character_Red_Decorator2', 'Red'],
             ['Character_Green_Decorator2', 'Green'], ['Character_Purple_Decorator2', 'Purple']].map(([value, label]) => html`<option value="${value}" ${(form.colorNames || '') === value ? 'selected' : ''}>${t(label)}</option>`)}
         </select></label>
+        <label>${t('Arabic text weight')}<select class="input" name="fontWeight">
+          ${[['regular', 'Regular'], ['medium', 'Medium (for menus that look thin)'], ['semibold', 'SemiBold']]
+            .map(([value, label]) => html`<option value="${value}" ${(form.fontWeight || 'regular') === value ? 'selected' : ''}>${t(label)}</option>`)}
+        </select></label>
+        <label class="check-row"><input type="checkbox" name="credit" ${form.credit ? 'checked' : ''}> ${t('Add «تعريب قيم شلف» under the game\'s copyright notice (main menu)')}</label>
         <label class="check-row"><input type="checkbox" name="colorSpeakers" ${form.colorSpeakers ? 'checked' : ''}> ${t('Also colour the speaker\'s name above subtitles (turn off if tags show as text)')}</label>
         <label class="check-row"><input type="checkbox" name="ltrLayout" ${form.ltrLayout ? 'checked' : ''}> ${t('Keep Arabic where the game puts English (for text that ends up against the far edge of the screen)')}</label>
         <label class="check-row"><input type="checkbox" name="arabicLanguage" ${form.arabicLanguage ? 'checked' : ''}> ${t('Add Arabic as its own language (an "ar" culture, and an Arabic style in every row of the game\'s style tables)')}</label>
@@ -987,6 +992,7 @@ async function studio(body) {
     values.arabicLanguage = Boolean(body.querySelector('input[name="arabicLanguage"]')?.checked);
     values.ltrLayout = Boolean(body.querySelector('input[name="ltrLayout"]')?.checked);
     values.colorSpeakers = Boolean(body.querySelector('input[name="colorSpeakers"]')?.checked);
+    values.credit = Boolean(body.querySelector('input[name="credit"]')?.checked);
     return { ...form, ...values };
   };
   const remember = () => {

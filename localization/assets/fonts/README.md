@@ -8,7 +8,7 @@ bundle is made from the chosen Regular face when the Unity Editor is given.
 
 | Style | Files | License |
 | --- | --- | --- |
-| `plex` (default) | `IBMPlexSansArabic-Regular.ttf`, `IBMPlexSansArabic-Bold.ttf` | `OFL.txt` |
+| `plex` (default) | `IBMPlexSansArabic-Regular.ttf`, `IBMPlexSansArabic-Bold.ttf` (and `-Medium`, `-SemiBold`, for Unreal games' title fonts and `--font-weight`) | `OFL.txt` |
 | `cairo` | `Cairo-Regular.ttf`, `Cairo-Bold.ttf` | `OFL-Cairo.txt` |
 | `naskh` | `NotoNaskhArabic-Regular.ttf`, `NotoNaskhArabic-Bold.ttf` | `OFL-NotoNaskhArabic.txt` |
 

@@ -104,6 +104,25 @@ API_KEY_ENV = {'openai': 'OPENAI_API_KEY', 'gemini': 'GEMINI_API_KEY'}
 # is a font file as it is (TTF or OTF), which Unreal streams from the pak.
 UNREAL_FONT = re.compile(r'([\w\-./]+?/Content/[\w\-./]*?\.(?:ufont|ttf|otf))\b', re.I)
 BOLD_NAME = re.compile(r'bold|black|heavy|semibold|demibold|extrabold', re.I)
+# IBM Plex Sans Arabic's in-between weights, for Unreal games' title fonts and --font-weight.
+PLEX_WEIGHTS = {'medium': FONTS / 'IBMPlexSansArabic-Medium.ttf', 'semibold': FONTS / 'IBMPlexSansArabic-SemiBold.ttf'}
+# A game's title and heading fonts (EN_AlverataCYRRegular_Title, TC_Title, ..._Medium): SemiBold, so menus stand out.
+TITLE_NAME = re.compile(r'title|heading|header|medium', re.I)
+
+
+def unreal_face(font_name: str, regular: Path, bold: Path, args) -> Path:
+    """The Arabic face that stands in for one of an Unreal game's font files: Bold for its bold fonts, SemiBold for its
+    titles and headings, and Regular (or the --font-weight asked for) for the rest. The in-between weights are IBM Plex
+    Sans Arabic's, so only with it (the default font style, and no --font of one's own)."""
+    if BOLD_NAME.search(font_name):
+        return bold
+    plex = not getattr(args, 'font', None) and (getattr(args, 'font_style', None) or 'plex') == 'plex'
+    if not plex:
+        return regular
+    if TITLE_NAME.search(font_name):
+        return PLEX_WEIGHTS['semibold']
+    weight = getattr(args, 'font_weight', None) or 'regular'
+    return PLEX_WEIGHTS.get(weight, regular)
 
 
 class BuildError(RuntimeError):
@@ -158,6 +177,11 @@ def parse_args(argv=None):
     c.add_argument('--font-style', choices=sorted(FONT_STYLES), default='plex',
                    help='the bundled Arabic font: plex (IBM Plex Sans Arabic, the default), cairo (Cairo, modern, for HUDs) '
                         'or naskh (Noto Naskh Arabic, classic, for story games)')
+    c.add_argument('--credit', action='store_true',
+                   help=f'unreal: add «{CREDIT}» on a line of its own under the game\'s copyright notice (on the main menu in most games)')
+    c.add_argument('--font-weight', choices=['regular', 'medium', 'semibold'], default='regular',
+                   help='unreal, with the plex font style: how heavy the Arabic is in the game\'s ordinary (not bold or title) fonts; '
+                        'medium or semibold for menus that look thin against dark scenes (titles are always semibold)')
     c.add_argument('--font', help='the Arabic font, .ttf or .otf (default: the --font-style, from localization/assets/fonts)')
     c.add_argument('--font-bold', help='its bold face (default: IBM Plex Sans Arabic Bold with the default font, else --font)')
     c.add_argument('--font-license', help='the font\'s license text, packed with it (the default font\'s OFL.txt goes in on its own)')
@@ -1108,6 +1132,15 @@ def build_unreal(source, translations: dict, args, payload: Path, stage_root: Pa
     if legal:
         texts = {key: text for key, text in texts.items() if key not in legal}
         log(f'Kept {len(legal)} copyright line{"s" if len(legal) != 1 else ""} in English (Arabic mixed into them draws over the English).')
+    if getattr(args, 'credit', False):
+        english = {row.key: row.source for row in source.rows if row.key}
+        notice = sorted(legal, key=lambda k: ('©' not in english[k], len(english[k]), k))
+        if notice:
+            # On a line of its own under the English notice: Arabic sharing a line with it is drawn over it.
+            texts[notice[0]] = english[notice[0]].rstrip() + '\r\n' + CREDIT
+            log(f'Added «{CREDIT}» under the copyright notice ({notice[0]}).')
+        else:
+            log(f'No copyright notice in the game\'s text to put «{CREDIT}» under, so it wasn\'t added.')
     if getattr(args, 'color_names', None):
         if compiler:
             log('Names aren\'t coloured in shaped text (--shape).')
@@ -1132,15 +1165,18 @@ def build_unreal(source, translations: dict, args, payload: Path, stage_root: Pa
     args.fonts_used = [f.as_posix() for f in fonts]
     if fonts:
         regular, bold, license_text = font_files(args)
+        faces = {}
         for font in fonts:
-            face = bold if BOLD_NAME.search(font.stem) else regular
+            face = unreal_face(font.stem, regular, bold, args)
+            faces.setdefault(face.stem, []).append(font.name)
             path = stage.joinpath(*font.parts)
             path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(face, path)
             staged.append((path, font))
         if license_text:
             shutil.copyfile(license_text, payload.parent / 'FONT-LICENSE.txt')
-        log(f'Staged the {regular.stem} font as the game\'s {len(fonts)} font files: ' + ', '.join(f.name for f in fonts))
+        log(f'Staged the Arabic font as the game\'s {len(fonts)} font files: '
+            + '; '.join(f'{stem} for {len(names)} ({", ".join(names[:4])}{", ..." if len(names) > 4 else ""})' for stem, names in faces.items()))
 
     if getattr(args, 'arabic_language', False):
         staged += stage_arabic_language(source, in_pak, target, stage, log)
@@ -1210,6 +1246,7 @@ def stage_logo(source, args, stage: Path, log) -> list:
         raise BuildError(f'Arabic title logo: {err}') from None
 
 
+CREDIT = 'تعريب قيم شلف'
 _LEGAL = re.compile(r'©|\(c\)\s*\d{4}|all rights reserved|trademarks? of', re.I)
 
 
@@ -1489,7 +1526,7 @@ def build_zen_fonts(args, iostore: dict, payload: Path, stage_root: Path, log):
         raise BuildError(str(err)) from None
     args.fonts_used = list(getattr(args, 'fonts_used', None) or []) + [a.as_posix() for a in assets]
     if assets:
-        log(f'Put {len(assets)} cooked font packages into {made[0].name} and {made[1].name} ({version}): ' + ', '.join(a.name for a in assets))
+        log(f'Put {len(assets)} cooked package{"s" if len(assets) != 1 else ""} into {made[0].name} and {made[1].name} ({version}): ' + ', '.join(a.name for a in assets))
     else:
         log(f'Made {made[0].name} and {made[1].name} ({version}) to go with the Arabic .pak.')
 

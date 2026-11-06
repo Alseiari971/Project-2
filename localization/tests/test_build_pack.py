@@ -529,6 +529,28 @@ class LtrLayoutTest(unittest.TestCase):
         self.assertEqual(ltr_layout(''), '')
 
 
+class UnrealFontWeightTest(unittest.TestCase):
+    def test_titles_get_semibold_bold_fonts_bold_and_the_rest_the_weight_asked_for(self):
+        from types import SimpleNamespace
+        from arabic_compiler.packbuild import PLEX_WEIGHTS, parse_args, unreal_face
+        regular, bold = Path('R.ttf'), Path('B.ttf')
+        args = SimpleNamespace(font=None, font_style='plex', font_weight='regular')
+        self.assertEqual(unreal_face('EN_Chaco-Bold', regular, bold, args), bold)
+        self.assertEqual(unreal_face('AdelleSansCYR-Semibold', regular, bold, args), bold)
+        self.assertEqual(unreal_face('EN_AlverataCYRRegular_Title', regular, bold, args), PLEX_WEIGHTS['semibold'])
+        self.assertEqual(unreal_face('EN_Chaco-Medium', regular, bold, args), PLEX_WEIGHTS['semibold'])
+        self.assertEqual(unreal_face('EN_Chaco-Light', regular, bold, args), regular)
+        args.font_weight = 'medium'
+        self.assertEqual(unreal_face('EN_Chaco-Light', regular, bold, args), PLEX_WEIGHTS['medium'])
+        # Other font styles and one's own font have no in-between weights.
+        self.assertEqual(unreal_face('TC_Title', regular, bold, SimpleNamespace(font=None, font_style='cairo', font_weight='medium')), regular)
+        self.assertEqual(unreal_face('TC_Title', regular, bold, SimpleNamespace(font='mine.ttf', font_style='plex', font_weight='medium')), regular)
+        for path in PLEX_WEIGHTS.values():
+            self.assertTrue(path.is_file(), path)
+        self.assertEqual(parse_args(['g', '--id', 'a', '--version', '1', '--steam-app-id', '1', '--key', 'k', '--out', 'o',
+                                     '--font-weight', 'semibold']).font_weight, 'semibold')
+
+
 class LegalLinesTest(unittest.TestCase):
     def test_copyright_notices_stay_in_english(self):
         from arabic_compiler.packbuild import legal_keys
@@ -536,6 +558,12 @@ class LegalLinesTest(unittest.TestCase):
                    'UI/Start': 'Start', 'UI/Copy': 'Copy the code', 'UI/TM': 'S-GAME is a trademark of Phantom World Limited'}
         texts = {key: 'نص' for key in english}
         self.assertEqual(legal_keys(english, texts), {'UI/Copyright', 'UI/Rights', 'UI/TM'})
+
+    def test_the_credit_goes_on_its_own_line_under_the_copyright_notice(self):
+        from arabic_compiler.packbuild import CREDIT, parse_args
+        args = parse_args(['g', '--id', 'a', '--version', '1', '--steam-app-id', '1', '--key', 'k', '--out', 'o', '--credit'])
+        self.assertTrue(args.credit)
+        self.assertEqual(CREDIT, 'تعريب قيم شلف')
 
 
 class ColorNamesTest(unittest.TestCase):

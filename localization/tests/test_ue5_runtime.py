@@ -290,6 +290,29 @@ class IoStore(unittest.TestCase):
         self.assertTrue(any('to go with the Arabic .pak' in line for line in logged))
 
     @unittest.skipUnless(HAS_NODE, 'signing needs Node.js')
+    def test_the_copyright_notice_stays_english_with_the_credit_under_it(self):
+        english = locres_format.write(locres_format.LocRes(3, [locres_format.Namespace('UI', [
+            locres_format.Entry('Start', 'Start the journey', 1),
+            locres_format.Entry('Copyright', '\u00a92026 Phantom World Limited. All rights reserved.', 2)])]))
+        game = self.game({'PhantomBlade/Content/Localization/Game/en/Game.locres': english.hex()},
+                         [{'id': '0b' * 12, 'type': 'ExportBundleData', 'path': '../../../PhantomBlade/Content/Maps/Town.umap', 'hex': '00'}])
+        keys = self.tmp / 'keys'
+        subprocess.run(['node', str(REPO / 'scripts/localization-pack.js'), 'keygen', str(keys)], check=True, capture_output=True)
+        api = FakeApi()
+        self.addCleanup(api.close)
+        logged = []
+        with mock.patch.dict(os.environ, {'OPENAI_API_KEY': 'secret-key'}):
+            args = parse_args([str(game), '--id', 'pbz-ar', '--version', '1.0.0', '--steam-app-id', '2109880', '--key', str(keys / 'pack-signing.key'),
+                               '--out', str(self.tmp / 'out'), '--provider', 'openai', '--model', 'm', '--api-base', api.base, '--credit', '--ltr-layout'])
+            build(args, log=logged.append)
+        staged = locres_format.read((self.tmp / 'out' / 'stage' / 'pak' / 'PhantomBlade' / 'Content' / 'Localization' / 'Game' / 'en' / 'Game.locres').read_bytes())
+        texts = {e.key: e.text for ns in staged.namespaces for e in ns.entries}
+        self.assertTrue(texts['Copyright'].startswith('\u00a92026 Phantom World Limited. All rights reserved.\r\n'))
+        self.assertTrue(texts['Copyright'].endswith(packbuild.CREDIT + '\u202c'))  # its own paragraph, laid out like the other Arabic
+        self.assertNotIn('Phantom', texts['Copyright'].split('\r\n')[1])
+        self.assertTrue(any('Kept 1 copyright line in English' in line for line in logged))
+
+    @unittest.skipUnless(HAS_NODE, 'signing needs Node.js')
     def test_cooked_font_packages_go_into_the_arabic_utoc_and_ucas_beside_the_pak(self):
         game = self.game({'PhantomBlade/Content/Localization/Game/en/Game.locres': english_locres().hex()},
                          [{'id': '0a' * 12, 'type': 'ExportBundleData', 'path': '../../../PhantomBlade/Content/UI/Fonts/Body_Font.uasset', 'hex': '00'}])

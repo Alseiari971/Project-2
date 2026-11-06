@@ -1802,6 +1802,11 @@ export const AR = {
   "Choose style tables folder": "اختر مجلد جداول الأنماط",
   "Arabic title logo: a PNG with a transparent background. Where the game's logo is a video (the intro and main menu), GameShelf makes it again with your logo, at the game's size, place and timing.": "شعار اللعبة بالعربي: صورة PNG بخلفية شفافة. حين يكون شعار اللعبة فيديو (في المقدمة والقائمة الرئيسية) يصنعه GameShelf من جديد بشعارك، بحجم اللعبة ومكان شعارها وتوقيته.",
   "Choose title logo image": "اختر صورة الشعار",
+  "Arabic text weight": "سماكة الخط العربي",
+  "Regular": "عادي",
+  "Medium (for menus that look thin)": "متوسط (للقوائم التي تبدو رفيعة)",
+  "SemiBold": "شبه عريض",
+  "Add «تعريب قيم شلف» under the game's copyright notice (main menu)": "أضف «تعريب قيم شلف» تحت سطر حقوق اللعبة (في القائمة الرئيسية)",
   "Or a logo texture you cooked in the Unreal Editor for the game's engine version, at its path inside the game (<Project>/Content/...):": "أو صورة شعار جهّزتها في Unreal Editor لإصدار محرك اللعبة، في مسارها داخل اللعبة (<Project>/Content/...):",
   "Choose title logo folder": "اختر مجلد الشعار",
   // Showcase, notifications, pack numbers and profiles

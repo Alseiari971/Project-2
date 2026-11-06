@@ -27,7 +27,7 @@ class StudioError extends Error {}
  * The builder's command line for a Studio build. `options`: { source, engine,
  * id, version, title, steamAppId, gameId, translate: 'shared' | 'provider' |
  * 'none', provider, model, pakList, reviewed, and for Unreal Engine 5: arabicLanguage, ueVersion, uiAssets,
- * logoAssets, logoImage }.
+ * logoAssets, logoImage, fontWeight, credit }.
  */
 function buildArgs(options, { script, msgTool, keyFile, outDir, server }) {
   const o = options || {};
@@ -68,6 +68,11 @@ function buildArgs(options, { script, msgTool, keyFile, outDir, server }) {
     args.push('--color-names', String(o.colorNames));
     if (o.colorSpeakers) args.push('--color-speakers');
   }
+  if (o.fontWeight && o.fontWeight !== 'regular') {
+    if (!['medium', 'semibold'].includes(o.fontWeight)) throw new StudioError('The Arabic text weight is regular, medium or semibold.');
+    args.push('--font-weight', o.fontWeight);
+  }
+  if (o.credit) args.push('--credit');
   // The Arabic title logo as a transparent PNG: games whose logo is a video pair get the pair made again from it.
   if (o.logoImage) {
     if (!/\.png$/i.test(String(o.logoImage))) throw new StudioError('The title logo is a PNG image (with a transparent background).');
