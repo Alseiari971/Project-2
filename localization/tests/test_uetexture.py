@@ -18,9 +18,9 @@ FFMPEG = uelogo.ffmpeg_exe()
 def texture_uexp(w: int, h: int, fmt: str = 'PF_DXT5', fill: int = 0x11, tail_size: tuple | None = None) -> bytes:
     data = bytes([fill]) * uetexture.data_length(fmt, w, h)
     name = fmt.encode() + b'\0'
-    tail = struct.pack('<i', 0) + struct.pack('<iii', *(tail_size or (w, h, 1))) + bytes(12)
+    tail = struct.pack('<iii', *(tail_size or (w, h, 1))) + bytes(12)
     return (b'\x05\x04\x09\x03' + bytes(73) + struct.pack('<iii', w, h, 1) + struct.pack('<i', len(name)) + name
-            + struct.pack('<ii', 0, 1) + data + tail)
+            + struct.pack('<iii', 0, 1, 0) + data + tail)
 
 
 def fstring(text: str) -> bytes:
@@ -100,6 +100,9 @@ class Textures(unittest.TestCase):
         again = uetexture.read_texture(new)
         self.assertEqual((again.width, again.height), (1024, 256))
         self.assertEqual(new[again.data_at:again.data_at + again.data_len], bytes([0x22]) * 262144)
+        # The pixels start 12 bytes after the format's name and end right before the mip's sizes, as in the game's.
+        self.assertEqual(again.data_at, uexp.index(b'PF_DXT5\0') + 8 + 12)
+        self.assertEqual(new[again.data_at + again.data_len:again.data_at + again.data_len + 12], struct.pack('<iii', 1024, 256, 1))
         with self.assertRaises(uetexture.TextureError):
             uetexture.write_texture(uexp, tex, bytes(10), 1024, 256)
 

@@ -11,8 +11,9 @@ changed in place, so nothing in either file moves:
 retoc's to-zen turns them back into packages for the game's .utoc/.ucas loader.
 
 A cooked texture's data (FTexturePlatformData) is: SizeX, SizeY, PackedData (int32 each), the pixel format's name
-(FString, "PF_DXT5"), then the mips; in these single-mip UI textures, 8 bytes, the pixels, and a 28-byte tail with the
-mip's SizeX, SizeY and SizeZ. That's checked before anything is changed, and anything else is refused.
+(FString, "PF_DXT5"), then the mips; in these single-mip UI textures, 12 bytes, the pixels, and a 24-byte tail with the
+mip's SizeX, SizeY and SizeZ. (Read 4 bytes early, a DXT5 picture still shows its shape but its colours come out as
+speckles: every block's colour endpoints, pure white in a white logo, are its last 4 bytes, ff ff 00 00.) That's checked before anything is changed, and anything else is refused.
 """
 
 from __future__ import annotations
@@ -28,7 +29,7 @@ from . import safe_exec
 _BLOCK = {'PF_DXT5': 16, 'PF_BC3': 16, 'PF_DXT1': 8, 'PF_BC1': 8}
 _PIXEL = {'PF_B8G8R8A8': 4, 'PF_R8G8B8A8': 4}
 _PF = re.compile(rb'(?<=[\x05-\x20]\x00\x00\x00)PF_[A-Z0-9_]{2,24}\x00')
-_TAIL = 28
+_TAIL = 24
 
 
 class TextureError(ValueError):
@@ -64,8 +65,8 @@ def read_texture(uexp: bytes) -> Texture:
     size_at = m.start() - 16
     w, h, _packed = struct.unpack_from('<iii', uexp, size_at)
     length = data_length(fmt, w, h)
-    data_at = m.end() + 8
-    mip_size_at = len(uexp) - _TAIL + 4
+    data_at = m.end() + 12
+    mip_size_at = len(uexp) - _TAIL
     if data_at + length != len(uexp) - _TAIL or struct.unpack_from('<iii', uexp, mip_size_at) != (w, h, 1):
         raise TextureError(f'This {w}x{h} {fmt} texture isn\'t laid out as a single mip in its .uexp '
                            '(it may have mipmaps or a separate .ubulk), so it wasn\'t changed.')
