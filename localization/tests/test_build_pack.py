@@ -557,6 +557,14 @@ class ColorNamesTest(unittest.TestCase):
         self.assertEqual(out['D/Character_Main_2'], '<Blue>زوو شانغ</>')  # the speaker label above subtitles
         self.assertEqual(out['D/BossName_000'], 'زوو شانغ')  # the health bar's plain label
         self.assertEqual(out['D/Quest_1'], 'اهزم\u00a0<Blue>زوو شانغ</>!')  # no "اهزمزوو"
+        # A title above a health bar names him too, but it's a plain label: nothing is coloured in it.
+        en['D/EnemyName_031'] = 'Zhuo Shang, Shadow Lord'
+        ar['D/EnemyName_031'] = 'زوو شانغ، سيد الظل'
+        en['D/BossNameDes_031'] = 'Zhuo Shang leads the Order.'
+        ar['D/BossNameDes_031'] = 'زوو شانغ يقود النظام.'
+        out, _ = color_names(en, ar, 'Blue', speakers=True)
+        self.assertEqual(out['D/EnemyName_031'], 'زوو شانغ، سيد الظل')
+        self.assertEqual(out['D/BossNameDes_031'], '<Blue>زوو شانغ</>\u00a0يقود النظام.')  # a description is a line
 
     def test_each_character_gets_a_colour_of_its_own(self):
         from arabic_compiler.packbuild import color_names

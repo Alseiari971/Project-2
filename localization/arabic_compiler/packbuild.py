@@ -1202,6 +1202,9 @@ _NAME_KEY = re.compile(r'(?:^|/)(?:Character|NPC|Npc|Speaker|BossName)_[\w-]*$')
 # The entries a subtitle shows as its speaker's name. Boss and enemy names label health bars, which are plain
 # text: a colour tag there would show as text, so those only get coloured inside lines.
 _SPEAKER_KEY = re.compile(r'(?:^|/)(?:Character|NPC|Npc|Speaker)_[\w-]*$')
+# Entries that name something (EnemyName_*, BossName_*, Item…Name, AbilityName…): labels such as the title above
+# a health bar, drawn as plain text, so nothing is coloured inside them. Descriptions (…NameDes…) are lines.
+_LABEL_KEY = re.compile(r'Name(?!Des)', re.I)
 _TAGGED = re.compile(r'<[^<>/]+>.*?</>', re.S)
 _ARABIC_WORD_CHAR = '\u0621-\u064A\u0660-\u0669\u0671-\u06D3'
 _STYLE_NAME = re.compile(r'^[A-Za-z][\w.]{0,60}$')
@@ -1250,6 +1253,8 @@ def color_names(english: dict, texts: dict, style: str, speakers: bool = False, 
             if speakers and _SPEAKER_KEY.search(key) and ar.strip() in label_names:
                 out[key] = f'<{style_of[ar.strip()]}>{ar.strip()}</>'
                 count += 1
+            continue
+        if _LABEL_KEY.search(key.rsplit('/', 1)[-1]):
             continue
         en = english.get(key, '')
         text = ar
