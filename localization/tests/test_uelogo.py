@@ -81,6 +81,15 @@ class WhichVideos(unittest.TestCase):
         self.assertEqual((w, h), (40, 40))
         self.assertEqual(x, 140)
 
+    def test_a_box_as_big_as_the_frame_never_makes_the_logo_bigger_than_the_video(self):
+        # Like Phantom Blade Zero's: the transparency track's smoke fills (and, measured coarsely, overshoots) the frame.
+        for logo in ((2172, 724), (300, 1000), (1920, 1080)):
+            x, y, w, h = uelogo.fit(logo, (0, 0, 1924, 1084), (1920, 1080))
+            self.assertTrue(0 <= x and 0 <= y and x + w <= 1920 and y + h <= 1080, (logo, x, y, w, h))
+            self.assertLessEqual(w, 1920 * 0.6)
+            self.assertLessEqual(h, 1080 * 0.5)
+        self.assertEqual(uelogo.fit((2172, 724), (0, 0, 1924, 1084), (1920, 1080)), (384, 348, 1152, 384))
+
     def test_only_a_png_is_taken(self):
         with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as f:
             f.write(b'GIF89a not a png')

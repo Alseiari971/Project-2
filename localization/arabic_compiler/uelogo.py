@@ -144,13 +144,19 @@ def png_size(png: Path) -> tuple:
 
 
 def fit(logo: tuple, box: tuple, frame: tuple) -> tuple:
-    """Where the logo goes: as big as fits the game's logo box, centred on it, inside the frame. (x, y, w, h)."""
-    x1, y1, x2, y2 = box
+    """Where the logo goes: as big as fits the game's logo box, centred on it, inside the frame. (x, y, w, h).
+    A box nearly as big as the frame is the logo with its smoke or ink around it, not the logo: then the logo
+    is at most 60% of the frame's width and half its height, still centred where the game's is."""
+    fw, fh = frame
+    x1, y1, x2, y2 = max(0, box[0]), max(0, box[1]), min(fw, box[2]), min(fh, box[3])
     bw, bh = max(2, x2 - x1), max(2, y2 - y1)
+    if bw > fw * 0.8 or bh > fh * 0.8:
+        bw, bh = min(bw, fw * 0.6), min(bh, fh * 0.5)
     s = min(bw / logo[0], bh / logo[1])
-    w, h = max(2, int(logo[0] * s) // 2 * 2), max(2, int(logo[1] * s) // 2 * 2)
-    x = int(min(max(0, (x1 + x2) / 2 - w / 2), frame[0] - w))
-    y = int(min(max(0, (y1 + y2) / 2 - h / 2), frame[1] - h))
+    w = max(2, min(int(logo[0] * s), fw) // 2 * 2)
+    h = max(2, min(int(logo[1] * s), fh) // 2 * 2)
+    x = int(min(max(0, (x1 + x2) / 2 - w / 2), fw - w))
+    y = int(min(max(0, (y1 + y2) / 2 - h / 2), fh - h))
     return x, y, w, h
 
 
@@ -218,5 +224,6 @@ def stage_logo_videos(logo: Path, listing, fetch, stage: Path, log) -> list:
             out_alpha = stage.joinpath(*PurePosixPath(alpha).parts)
             made = make_pair(ffmpeg, logo, game_rgb, game_alpha, out_rgb, out_alpha)
             staged += [(out_rgb, PurePosixPath(rgb)), (out_alpha, PurePosixPath(alpha))]
-            log(f'Arabic logo: {PurePosixPath(rgb).name} and {PurePosixPath(alpha).name} ({made["size"]}, {made["fps"]} fps).')
+            log(f'Arabic logo: {PurePosixPath(rgb).name} and {PurePosixPath(alpha).name} ({made["size"]}, {made["fps"]} fps, logo at {made["box"][0]},{made["box"][1]} '
+                f'{made["box"][2]}x{made["box"][3]}).')
     return staged
