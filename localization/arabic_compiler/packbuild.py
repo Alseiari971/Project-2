@@ -1104,6 +1104,10 @@ def build_unreal(source, translations: dict, args, payload: Path, stage_root: Pa
         raise BuildError('--locres-path must stay inside the game.')
     compiler = ArabicCompiler(max_line=args.max_line) if args.shape else None
     texts = {key: (compiler(arabic) if compiler else arabic) for key, arabic in translations.items()}
+    legal = legal_keys({row.key: row.source for row in source.rows if row.key}, texts)
+    if legal:
+        texts = {key: text for key, text in texts.items() if key not in legal}
+        log(f'Kept {len(legal)} copyright line{"s" if len(legal) != 1 else ""} in English (Arabic mixed into them draws over the English).')
     if getattr(args, 'color_names', None):
         if compiler:
             log('Names aren\'t coloured in shaped text (--shape).')
@@ -1204,6 +1208,15 @@ def stage_logo(source, args, stage: Path, log) -> list:
         return uelogo.stage_logo_videos(Path(args.logo_image), listing, fetch, stage, log, previews=stage.parent / 'logo-previews')
     except uelogo.LogoError as err:
         raise BuildError(f'Arabic title logo: {err}') from None
+
+
+_LEGAL = re.compile(r'©|\(c\)\s*\d{4}|all rights reserved|trademarks? of', re.I)
+
+
+def legal_keys(english: dict, texts: dict) -> set:
+    """The entries that are a copyright or trademark notice (©, "All rights reserved"): left in English, as games
+    usually leave them, since company names and dates mixed with Arabic on one line are drawn over each other."""
+    return {key for key in texts if _LEGAL.search(english.get(key) or '')}
 
 
 # A paragraph laid out left to right (LRM), with the Arabic in it read right to left (RLE ... PDF).

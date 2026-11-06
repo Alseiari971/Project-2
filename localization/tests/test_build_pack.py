@@ -529,6 +529,15 @@ class LtrLayoutTest(unittest.TestCase):
         self.assertEqual(ltr_layout(''), '')
 
 
+class LegalLinesTest(unittest.TestCase):
+    def test_copyright_notices_stay_in_english(self):
+        from arabic_compiler.packbuild import legal_keys
+        english = {'UI/Copyright': '©2026 Phantom World Limited. All rights reserved.', 'UI/Rights': 'All Rights Reserved',
+                   'UI/Start': 'Start', 'UI/Copy': 'Copy the code', 'UI/TM': 'S-GAME is a trademark of Phantom World Limited'}
+        texts = {key: 'نص' for key in english}
+        self.assertEqual(legal_keys(english, texts), {'UI/Copyright', 'UI/Rights', 'UI/TM'})
+
+
 class ColorNamesTest(unittest.TestCase):
     """Character names get one of the game's colour styles, only where the English line names the character."""
 
