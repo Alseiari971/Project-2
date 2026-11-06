@@ -213,8 +213,9 @@ def preview(ffmpeg: str, game_rgb: Path, game_alpha: Path, new_rgb: Path, new_al
     video = probe(ffmpeg, game_rgb)
     ph = max(2, round(960 * video.height / video.width / 2) * 2)
     pick = f'select=eq(n\\,{int(frame)}),setpts=PTS-STARTPTS'
-    half = lambda c, a, name: (f'[{c}:v]{pick},format=rgb24[{name}c];[{a}:v]{pick},format=rgb24[{name}a];'
-                               f'[{name}c][{name}a]alphamerge,scale=960:{ph},format=rgba[{name}l];'
+    # Both tracks scaled to the picture's size first: a game's two tracks needn't be the same size.
+    half = lambda c, a, name: (f'[{c}:v]{pick},scale=960:{ph},format=rgb24[{name}c];[{a}:v]{pick},scale=960:{ph},format=rgb24[{name}a];'
+                               f'[{name}c][{name}a]alphamerge,format=rgba[{name}l];'
                                f'color=c=0x30343a:s=960x{ph}:d=1,format=rgba[{name}b];[{name}b][{name}l]overlay=format=auto:shortest=1[{name}]')
     graph = f'{half(0, 1, "g")};{half(2, 3, "n")};[g][n]hstack=inputs=2,format=rgb24[v]'
     out.parent.mkdir(parents=True, exist_ok=True)
