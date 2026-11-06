@@ -67,6 +67,7 @@ from . import runtime
 from . import remsg
 from . import swffont
 from . import uelogo
+from . import uetexture
 from . import uestyles
 from .fingerprint import build_table
 from . import reefont
@@ -1208,7 +1209,10 @@ def build_unreal(source, translations: dict, args, payload: Path, stage_root: Pa
     styles = patch_style_tables(args, iostore, stage_root, log) if getattr(args, 'arabic_language', False) else None
     if styles:
         roots.append(styles)
-    if len(roots) > 1 or styles:
+    menu = stage_menu_logo(args, source, iostore, stage_root, log) if getattr(args, 'logo_image', None) else None
+    if menu:
+        roots.append(menu)
+    if len(roots) > 1 or styles or menu:
         merged = stage_root / 'cooked'
         shutil.rmtree(merged, ignore_errors=True)
         for root in roots:
@@ -1435,6 +1439,85 @@ def patch_style_tables(args, iostore: dict, stage_root: Path, log) -> Path | Non
         log('No per-language style table with an English style was found to add Arabic to.')
         return None
     log('Added an Arabic style to every row of: ' + ', '.join(patched) + '.')
+    return out
+
+
+# A menu's logo texture in English (T_Logo_V2_EN, PBZ_LOGO_English), and the menu widgets that may draw one.
+MENU_LOGO_TEXTURE = re.compile(r'(?i)/(?:T_)?[\w-]*logo[\w-]*?[_-](?:EN|English)\.uasset$')
+MENU_WIDGET = re.compile(r'(?i)/WB?_[\w-]*(?:StartMenu|MainMenu|TitleScreen|TitleMenu|FrontEnd)[\w-]*\.uasset$')
+
+
+def stage_menu_logo(args, source, iostore: dict, stage_root: Path, log) -> Path | None:
+    """The Arabic logo in the game's menu, where the menu draws an English logo texture (uetexture.py): the texture
+    and the menu widget, taken out of the game's containers with retoc's to-legacy and changed in place, as legacy
+    assets for to-zen. Returns their folder, or None when the game has no such menu logo."""
+    listing = [line.strip() for line in (source.pak_listing or '').splitlines()]
+    textures = sorted({PurePosixPath(p).stem: p for p in listing if MENU_LOGO_TEXTURE.search(p)}.items())
+    widgets = sorted({PurePosixPath(p).stem: p for p in listing if MENU_WIDGET.search(p)}.items())[:8]
+    if not textures or not widgets:
+        return None
+    tool = retoc.find_tool(args.retoc) or iostore.get('tool')
+    containers = retoc.game_containers(Path(args.source))
+    ffmpeg = uelogo.ffmpeg_exe()
+    if not tool or not containers or not args.ue_version or not ffmpeg:
+        log('The game\'s menu logo is a texture (' + ', '.join(n for n, _ in textures) + '); changing it needs retoc, ffmpeg and '
+            'the game\'s Unreal Engine version (--ue-version), so the menu keeps its English logo.')
+        return None
+    legacy = stage_root / 'menu-legacy'
+    shutil.rmtree(legacy, ignore_errors=True)
+    legacy.mkdir(parents=True)
+    for name, _ in widgets + textures:
+        try:
+            retoc._run(tool, 'to-legacy', '--version', retoc.check_version(args.ue_version), '--filter', name,
+                       str(containers[0].parent), str(legacy), timeout=1800)
+        except retoc.RetocError as err:
+            raise BuildError(str(err)) from None
+    out = stage_root / 'menu-patched'
+    shutil.rmtree(out, ignore_errors=True)
+    files = {p.stem: p for p in legacy.rglob('*.uasset')}
+    made = []
+    for widget_name, _ in widgets:
+        widget = files.get(widget_name)
+        if not widget or not widget.with_suffix('.uexp').is_file():
+            continue
+        widget_uasset, widget_uexp = widget.read_bytes(), widget.with_suffix('.uexp').read_bytes()
+        try:
+            used = {obj for _, obj in uetexture.package_imports(widget_uasset)}
+        except uetexture.TextureError:
+            continue
+        changed = False
+        for texture_name, _ in textures:
+            texture = files.get(texture_name)
+            if texture_name not in used or not texture or not texture.with_suffix('.uexp').is_file():
+                continue
+            try:
+                at = uetexture.find_brush(widget_uasset, widget_uexp, texture_name)
+                uexp = texture.with_suffix('.uexp').read_bytes()
+                tex = uetexture.read_texture(uexp)
+                w, h = uetexture.best_shape(tex, uelogo.png_size(Path(args.logo_image)))
+                pixels = uetexture.encode(tex.pixel_format, uetexture.logo_pixels(ffmpeg, Path(args.logo_image), w, h), w, h)
+                brush_w, brush_h = uetexture.brush_size(widget_uexp, at)
+            except (uetexture.TextureError, uelogo.LogoError) as err:
+                log(f'Menu logo {texture_name}: {err}')
+                continue
+            rel = texture.relative_to(legacy)
+            (out / rel).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(texture, out / rel)
+            (out / rel).with_suffix('.uexp').write_bytes(uetexture.write_texture(uexp, tex, pixels, w, h))
+            # The brush keeps its width and takes the texture's new shape, so the menu doesn't squash the logo.
+            widget_uexp = uetexture.set_brush_size(widget_uexp, at, brush_w, round(brush_w * h / w))
+            changed = True
+            made.append(f'{texture_name} ({tex.width}x{tex.height} -> {w}x{h} {tex.pixel_format}) in {widget_name} '
+                        f'(brush {brush_w:g}x{brush_h:g} -> {brush_w:g}x{round(brush_w * h / w)})')
+        if changed:
+            rel = widget.relative_to(legacy)
+            (out / rel).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(widget, out / rel)
+            (out / rel).with_suffix('.uexp').write_bytes(widget_uexp)
+    if not made:
+        log('Found no menu that draws the English logo texture, so the menu keeps its logo.')
+        return None
+    log('Arabic logo in the menu: ' + '; '.join(made) + '.')
     return out
 
 

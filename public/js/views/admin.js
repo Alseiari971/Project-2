@@ -961,7 +961,7 @@ async function studio(body) {
       </div>
       <p class="muted small">${t('GameShelf takes the style tables out of the game\'s containers itself. Or give the folder you took them out to with retoc to-legacy:')}</p>
       ${path('uiAssets', form.uiAssets, 'ui-folder', t('Choose style tables folder'))}
-      <p class="muted small">${t('Arabic title logo: a PNG with a transparent background. Where the game\'s logo is a video (the intro and main menu), GameShelf makes it again with your logo, at the game\'s size, place and timing.')}</p>
+      <p class="muted small">${t('Arabic title logo: a PNG with a transparent background. GameShelf puts it where the game shows its English logo: title videos are made again with it (at their size, place and timing), and a menu\'s logo picture is replaced by it.')}</p>
       ${path('logoImage', form.logoImage, 'logo-image', t('Choose title logo image'))}
       <p class="muted small">${t('Or a logo texture you cooked in the Unreal Editor for the game\'s engine version, at its path inside the game (<Project>/Content/...):')}</p>
       ${path('logoAssets', form.logoAssets, 'logo-folder', t('Choose title logo folder'))}
