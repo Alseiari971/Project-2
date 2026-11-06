@@ -338,7 +338,7 @@ class IoStore(unittest.TestCase):
         zen = json.loads((pack / 'payload' / 'pakchunk99-ArabicLocalization_P.utoc').read_bytes()[16:])
         self.assertEqual(zen, {'version': 'UE5_4', 'files': ['PhantomBlade/Content/UI/Fonts/Body_Font.uasset', 'PhantomBlade/Content/UI/Fonts/Body_Font.ubulk',
                                                              'PhantomBlade/Content/UI/Fonts/Body_Font.uexp']})
-        self.assertTrue(any('cooked font packages' in line for line in logged))
+        self.assertTrue(any('cooked packages into' in line for line in logged))
 
     @unittest.skipUnless(HAS_NODE, 'signing needs Node.js')
     def test_arabic_as_its_own_language_patches_the_style_tables_and_packs_the_logo(self):
