@@ -89,7 +89,11 @@ class Video:
 def _run(ffmpeg: str, args: list, what: str) -> subprocess.CompletedProcess:
     result = safe_exec.run([ffmpeg, '-hide_banner', '-nostdin', *args], capture_output=True, text=True, timeout=1800)
     if result.returncode != 0:
-        raise LogoError(f'ffmpeg couldn\'t {what}: {(result.stderr or "").strip()[-400:]}')
+        lines = [l.strip() for l in (result.stderr or '').splitlines() if l.strip()]
+        # ffmpeg says what went wrong first and how it stopped last: both, without the progress lines between.
+        why = [l for l in lines if re.search(r'(?i)error|invalid|not supported|unable|cannot|could not|no such|does not', l)
+               and not l.startswith(('frame=', '[out#'))]
+        raise LogoError(f'ffmpeg couldn\'t {what}: ' + ' | '.join(dict.fromkeys(why[:8] or lines[-4:]))[:1200])
     return result
 
 
@@ -155,10 +159,12 @@ def make_pair(ffmpeg: str, logo: Path, game_rgb: Path, game_alpha: Path, out_rgb
     video = probe(ffmpeg, game_rgb)
     opacity, box = timing(ffmpeg, game_alpha)
     x, y, w, h = fit(png_size(logo), box, (video.width, video.height))
-    # The opacity curve as a small grey video, a frame for each of the game's (ffmpeg can't scale a 1x1 frame up).
+    # The opacity curve as a small video, a frame for each of the game's (ffmpeg can't scale a 1x1 frame up). Colour
+    # (rgb24) rather than grey throughout, like the colour video: newer ffmpeg treats grey's range differently.
     curve = Path(out_alpha).with_name(Path(out_alpha).name + '.opacity.raw')
+    shape = Path(out_alpha).with_name(Path(out_alpha).name + '.shape.png')
     curve.parent.mkdir(parents=True, exist_ok=True)
-    curve.write_bytes(b''.join(bytes([round(o * 255)]) * 256 for o in opacity))
+    curve.write_bytes(b''.join(bytes([round(o * 255)]) * (16 * 16 * 3) for o in opacity))
     encode = ['-c:v', 'libx264', '-preset', 'medium', '-crf', '14', '-pix_fmt', 'yuv420p', '-movflags', '+faststart']
     # Colour: the logo's own colours where it's drawn, black elsewhere, on every frame of the game's video (its sound kept).
     colour = (f'[1:v]format=rgba,scale={w}:{h}:flags=lanczos,format=rgba,split[c][a];'
@@ -169,17 +175,21 @@ def make_pair(ffmpeg: str, logo: Path, game_rgb: Path, game_alpha: Path, out_rgb
     _run(ffmpeg, ['-y', '-i', str(game_rgb), '-loop', '1', '-framerate', video.fps, '-i', str(logo),
                   '-filter_complex', colour, '-map', '[v]', *(['-map', '0:a?', '-c:a', 'copy'] if video.audio else ['-an']),
                   *encode, str(out_rgb)], 'make the logo\'s colour video')
-    # Transparency: the logo's shape times the game's logo opacity on that frame (its transparency track, averaged).
-    alpha = (f'[1:v]format=rgba,scale={w}:{h}:flags=lanczos,format=rgba,'
-             f'pad={video.width}:{video.height}:{x}:{y}:color=0x00000000,alphaextract,lut=y=\'if(lt(val,8),0,val)\'[shape];'
-             f'[0:v]scale={video.width}:{video.height}:flags=neighbor,format=gray[level];'
-             f'[shape][level]blend=all_mode=multiply:shortest=1,format=yuv420p[v]')
+    # Transparency: the logo's shape (white where it's drawn, made once), times the game's logo opacity on each frame.
     try:
-        _run(ffmpeg, ['-y', '-f', 'rawvideo', '-pix_fmt', 'gray', '-s', '16x16', '-framerate', video.fps, '-i', str(curve),
-                      '-loop', '1', '-framerate', video.fps, '-i', str(logo),
+        _run(ffmpeg, ['-y', '-i', str(logo), '-vf',
+                      f'format=rgba,scale={w}:{h}:flags=lanczos,format=rgba,pad={video.width}:{video.height}:{x}:{y}:color=0x00000000,'
+                      f'alphaextract,lut=y=\'if(lt(val,8),0,val)\',format=rgb24', '-frames:v', '1', str(shape)],
+             'make the logo\'s shape')
+        alpha = (f'[0:v]scale={video.width}:{video.height}:flags=neighbor,format=gbrp[level];'
+                 f'[1:v]format=gbrp[shape];'
+                 f'[shape][level]blend=all_mode=multiply:shortest=1,format=yuv420p[v]')
+        _run(ffmpeg, ['-y', '-f', 'rawvideo', '-pixel_format', 'rgb24', '-video_size', '16x16', '-framerate', video.fps, '-i', str(curve),
+                      '-loop', '1', '-framerate', video.fps, '-i', str(shape),
                       '-filter_complex', alpha, '-map', '[v]', '-an', *encode, str(out_alpha)], 'make the logo\'s transparency video')
     finally:
         curve.unlink(missing_ok=True)
+        shape.unlink(missing_ok=True)
     return {'size': f'{video.width}x{video.height}', 'fps': video.fps, 'box': (x, y, w, h)}
 
 
