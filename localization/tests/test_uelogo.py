@@ -77,9 +77,10 @@ class WhichVideos(unittest.TestCase):
 
     def test_the_logo_is_fitted_into_the_games_logo_box(self):
         self.assertEqual(uelogo.fit((300, 100), (100, 70, 220, 110), (320, 180)), (100, 70, 120, 40))
-        x, y, w, h = uelogo.fit((100, 100), (100, 70, 220, 110), (320, 180))  # a square logo: as tall as the box, centred
-        self.assertEqual((w, h), (40, 40))
-        self.assertEqual(x, 140)
+        # A logo of another shape may be up to twice the box's height, centred on it: a square one in a thin title.
+        self.assertEqual(uelogo.fit((100, 100), (100, 70, 220, 110), (320, 180)), (120, 50, 80, 80))
+        # Like Phantom Blade Zero's title card: thin, widely spaced letters across the middle of a 4K frame.
+        self.assertEqual(uelogo.fit((2172, 724), (1150, 1000, 2700, 1150), (3840, 2160)), (1475, 925, 900, 300))
 
     def test_a_box_as_big_as_the_frame_never_makes_the_logo_bigger_than_the_video(self):
         # Like Phantom Blade Zero's: the transparency track's smoke fills (and, measured coarsely, overshoots) the frame.
@@ -125,6 +126,19 @@ class MakeVideos(unittest.TestCase):
                                  '-f', 'null', '-'], capture_output=True, text=True, check=True).stdout
         self.assertTrue(all(float(l.split('=')[1]) == 0 for l in corner.splitlines() if 'YMAX' in l))
         self.assertEqual(len(levels(self.tmp / 'out' / 'new_RGB.mp4')), 60)
+
+    def test_a_flash_brighter_than_the_logo_doesnt_shrink_or_dim_it(self):
+        # The title appears (0.3s), a flash much brighter than it lights its middle (0.5s to 0.6s), it fades out at 1.4s.
+        alpha = self.tmp / 'flash_Alpha.mp4'
+        ffmpeg('-f', 'lavfi', '-i', 'color=black:s=320x180:r=30:d=2', '-vf',
+               'drawbox=x=40:y=80:w=240:h=20:color=white:t=fill:enable=between(t\\,0.3\\,1.4),'
+               'drawbox=x=100:y=20:w=120:h=140:color=white:t=fill:enable=between(t\\,0.5\\,0.6)', '-pix_fmt', 'yuv420p', str(alpha))
+        opacity, box = uelogo.timing(FFMPEG, alpha)
+        self.assertLessEqual(box[0], 44)   # the whole title, not just the flash in its middle
+        self.assertGreaterEqual(box[2], 276)
+        self.assertEqual(opacity[30], 1.0)  # fully shown while the title is held, not dimmed by the flash
+        self.assertEqual(opacity[2], 0.0)
+        self.assertEqual(opacity[55], 0.0)
 
     def test_a_transparency_track_that_never_changes_is_refused(self):
         ffmpeg('-f', 'lavfi', '-i', 'color=black:s=64x64:r=10:d=1', '-pix_fmt', 'yuv420p', str(self.tmp / 'flat.mp4'))
@@ -179,6 +193,12 @@ class InThePack(unittest.TestCase):
         self.assertNotIn('PhantomBlade/Content/Movies/PBZLogo_Ja_RGB.mp4', packed)
         self.assertFalse(any(p.endswith('.raw') for p in packed))
         self.assertTrue(any('Arabic logo: PBZLogo_En_RGB.mp4 and PBZLogo_En_Alpha.mp4 (320x180' in line for line in logged))
+        # A picture of the game's logo beside the Arabic one, to check without playing to where it shows.
+        previews = [line.split(': ', 1)[1] for line in logged if line.startswith('Logo previews')]
+        self.assertEqual(len(previews), 1)
+        picture = Path(previews[0]) / 'Movies_PBZLogo_En.png'
+        self.assertTrue(picture.is_file())
+        self.assertEqual(uelogo.png_size(picture), (1920, 540))
 
     def test_a_logo_that_isnt_a_png_stops_the_build(self):
         (self.tmp / 'logo.png').write_bytes(b'not a picture')

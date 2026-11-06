@@ -1201,7 +1201,7 @@ def stage_logo(source, args, stage: Path, log) -> list:
         dest.write_bytes(got.stdout)
 
     try:
-        return uelogo.stage_logo_videos(Path(args.logo_image), listing, fetch, stage, log)
+        return uelogo.stage_logo_videos(Path(args.logo_image), listing, fetch, stage, log, previews=stage.parent / 'logo-previews')
     except uelogo.LogoError as err:
         raise BuildError(f'Arabic title logo: {err}') from None
 

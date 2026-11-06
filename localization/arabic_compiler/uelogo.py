@@ -110,7 +110,7 @@ def probe(ffmpeg: str, video: Path) -> Video:
 def timing(ffmpeg: str, alpha: Path, scale: int = 4) -> tuple:
     """The game's logo, from its transparency track: (its opacity on each frame, 0 to 1, and the box the logo
     fills while it's fully shown, in the video's own pixels)."""
-    graph = f'scale=iw/{scale}:-2,format=gray,signalstats,bbox=min_val=64,metadata=mode=print:file=-'
+    graph = f'scale=iw/{scale}:-2,format=gray,signalstats,bbox=min_val=40,metadata=mode=print:file=-'
     out = _run(ffmpeg, ['-i', str(alpha), '-vf', graph, '-an', '-f', 'null', '-'], 'read the logo\'s transparency video').stdout
     frames, current = [], None
     for line in out.splitlines():
@@ -127,12 +127,17 @@ def timing(ffmpeg: str, alpha: Path, scale: int = 4) -> tuple:
     if not levels:
         raise LogoError(f'{alpha.name} has no frames ffmpeg could measure.')
     low, high = min(levels), max(levels)
-    shown = [f for f in frames if 'x1' in f and f.get('YAVG', 0) >= low + (high - low) * 0.9]
-    if high - low < 0.5 or not shown:
+    # The frames that show the logo, and the level it holds there. An effect (a flash on part of it) can be brighter
+    # than the whole logo held still, so "fully shown" is that held level, not the brightest frame, and the logo's
+    # box takes in every frame that shows it.
+    showing = [f for f in frames if 'x1' in f and f.get('YAVG', 0) >= low + (high - low) * 0.1]
+    if high - low < 0.5 or not showing:
         raise LogoError(f'{alpha.name} doesn\'t show a logo (its transparency never changes).')
-    opacity = [min(1.0, max(0.0, (v - low) / (high - low))) for v in levels]
-    box = (min(f['x1'] for f in shown) * scale, min(f['y1'] for f in shown) * scale,
-           (max(f['x2'] for f in shown) + 1) * scale, (max(f['y2'] for f in shown) + 1) * scale)
+    held = sorted(f['YAVG'] for f in showing)[len(showing) // 2]
+    full = max(held - low, (high - low) * 0.1)
+    opacity = [min(1.0, max(0.0, (v - low) / full)) for v in levels]
+    box = (min(f['x1'] for f in showing) * scale, min(f['y1'] for f in showing) * scale,
+           (max(f['x2'] for f in showing) + 1) * scale, (max(f['y2'] for f in showing) + 1) * scale)
     return opacity, box
 
 
@@ -144,12 +149,13 @@ def png_size(png: Path) -> tuple:
 
 
 def fit(logo: tuple, box: tuple, frame: tuple) -> tuple:
-    """Where the logo goes: as big as fits the game's logo box, centred on it, inside the frame. (x, y, w, h).
-    A box nearly as big as the frame is the logo with its smoke or ink around it, not the logo: then the logo
-    is at most 60% of the frame's width and half its height, still centred where the game's is."""
+    """Where the logo goes: centred on the game's logo box, inside the frame. (x, y, w, h). It's as wide as the box
+    allows, and may be up to twice the box's height, since a game's title is often a long thin line of letters and
+    a logo of another shape would be tiny in it. A box nearly as big as the frame is the logo with its smoke or ink
+    around it: then the logo is at most 60% of the frame's width and half its height."""
     fw, fh = frame
     x1, y1, x2, y2 = max(0, box[0]), max(0, box[1]), min(fw, box[2]), min(fh, box[3])
-    bw, bh = max(2, x2 - x1), max(2, y2 - y1)
+    bw, bh = max(2, x2 - x1), max(2, y2 - y1) * 2
     if bw > fw * 0.8 or bh > fh * 0.8:
         bw, bh = min(bw, fw * 0.6), min(bh, fh * 0.5)
     s = min(bw / logo[0], bh / logo[1])
@@ -196,10 +202,27 @@ def make_pair(ffmpeg: str, logo: Path, game_rgb: Path, game_alpha: Path, out_rgb
     finally:
         curve.unlink(missing_ok=True)
         shape.unlink(missing_ok=True)
-    return {'size': f'{video.width}x{video.height}', 'fps': video.fps, 'box': (x, y, w, h)}
+    held = [i for i, o in enumerate(opacity) if o >= 0.99]
+    return {'size': f'{video.width}x{video.height}', 'fps': video.fps, 'box': (x, y, w, h),
+            'frame': held[len(held) // 2] if held else max(range(len(opacity)), key=opacity.__getitem__)}
 
 
-def stage_logo_videos(logo: Path, listing, fetch, stage: Path, log) -> list:
+def preview(ffmpeg: str, game_rgb: Path, game_alpha: Path, new_rgb: Path, new_alpha: Path, frame: int, out: Path):
+    """A picture to check the new logo without playing the game: the game's logo (left) and the Arabic one (right), on
+    the same frame, each over a dark grey background as the game would draw it."""
+    video = probe(ffmpeg, game_rgb)
+    ph = max(2, round(960 * video.height / video.width / 2) * 2)
+    pick = f'select=eq(n\\,{int(frame)}),setpts=PTS-STARTPTS'
+    half = lambda c, a, name: (f'[{c}:v]{pick},format=rgb24[{name}c];[{a}:v]{pick},format=rgb24[{name}a];'
+                               f'[{name}c][{name}a]alphamerge,scale=960:{ph},format=rgba[{name}l];'
+                               f'color=c=0x30343a:s=960x{ph}:d=1,format=rgba[{name}b];[{name}b][{name}l]overlay=format=auto:shortest=1[{name}]')
+    graph = f'{half(0, 1, "g")};{half(2, 3, "n")};[g][n]hstack=inputs=2,format=rgb24[v]'
+    out.parent.mkdir(parents=True, exist_ok=True)
+    _run(ffmpeg, ['-y', '-i', str(game_rgb), '-i', str(game_alpha), '-i', str(new_rgb), '-i', str(new_alpha),
+                  '-filter_complex', graph, '-map', '[v]', '-frames:v', '1', '-update', '1', str(out)], 'make the logo preview')
+
+
+def stage_logo_videos(logo: Path, listing, fetch, stage: Path, log, previews: Path | None = None) -> list:
     """The Arabic logo's videos at the game's logo video paths under `stage`. `fetch(path inside the game, file)`
     copies one of the game's files out. Returns [(staged file, path inside the game)]."""
     logo = Path(logo)
@@ -223,7 +246,17 @@ def stage_logo_videos(logo: Path, listing, fetch, stage: Path, log) -> list:
             out_rgb = stage.joinpath(*PurePosixPath(rgb).parts)
             out_alpha = stage.joinpath(*PurePosixPath(alpha).parts)
             made = make_pair(ffmpeg, logo, game_rgb, game_alpha, out_rgb, out_alpha)
+            if previews:
+                parts = PurePosixPath(rgb).parts
+                inside = parts[parts.index('Content') + 1:] if 'Content' in parts else parts[-2:]
+                name = '_'.join((*inside[:-1], re.sub(r'(?i)[_-]rgb$', '', PurePosixPath(rgb).stem)))
+                try:
+                    preview(ffmpeg, game_rgb, game_alpha, out_rgb, out_alpha, made['frame'], Path(previews) / f'{name}.png')
+                except LogoError as err:
+                    log(f'(No preview of {PurePosixPath(rgb).name}: {err})')
             staged += [(out_rgb, PurePosixPath(rgb)), (out_alpha, PurePosixPath(alpha))]
             log(f'Arabic logo: {PurePosixPath(rgb).name} and {PurePosixPath(alpha).name} ({made["size"]}, {made["fps"]} fps, logo at {made["box"][0]},{made["box"][1]} '
                 f'{made["box"][2]}x{made["box"][3]}).')
+    if previews and staged:
+        log(f'Logo previews (the game\'s logo left, the Arabic one right): {previews}')
     return staged
