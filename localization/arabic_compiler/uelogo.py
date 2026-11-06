@@ -150,12 +150,15 @@ def png_size(png: Path) -> tuple:
 
 def fit(logo: tuple, box: tuple, frame: tuple) -> tuple:
     """Where the logo goes: centred on the game's logo box, inside the frame. (x, y, w, h). It's as wide as the box
-    allows, and may be up to twice the box's height, since a game's title is often a long thin line of letters and
-    a logo of another shape would be tiny in it. A box nearly as big as the frame is the logo with its smoke or ink
-    around it: then the logo is at most 60% of the frame's width and half its height."""
+    allows and may be taller than the box: twice its height, and up to 3.5 times for a title far longer and thinner
+    than the logo (Phantom Blade Zero's spaced-out English letters), so a compact logo isn't tiny in it. A box nearly
+    as big as the frame is the logo with its smoke or ink around it: then the logo is at most 60% of the frame's
+    width and half its height."""
     fw, fh = frame
     x1, y1, x2, y2 = max(0, box[0]), max(0, box[1]), min(fw, box[2]), min(fh, box[3])
-    bw, bh = max(2, x2 - x1), max(2, y2 - y1) * 2
+    bw, bh = max(2, x2 - x1), max(2, y2 - y1)
+    longer = (bw / bh) / (logo[0] / logo[1])
+    bh *= min(3.5, max(2.0, longer * 0.75))
     if bw > fw * 0.8 or bh > fh * 0.8:
         bw, bh = min(bw, fw * 0.6), min(bh, fh * 0.5)
     s = min(bw / logo[0], bh / logo[1])

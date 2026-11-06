@@ -77,10 +77,15 @@ class WhichVideos(unittest.TestCase):
 
     def test_the_logo_is_fitted_into_the_games_logo_box(self):
         self.assertEqual(uelogo.fit((300, 100), (100, 70, 220, 110), (320, 180)), (100, 70, 120, 40))
-        # A logo of another shape may be up to twice the box's height, centred on it: a square one in a thin title.
-        self.assertEqual(uelogo.fit((100, 100), (100, 70, 220, 110), (320, 180)), (120, 50, 80, 80))
-        # Like Phantom Blade Zero's title card: thin, widely spaced letters across the middle of a 4K frame.
-        self.assertEqual(uelogo.fit((2172, 724), (1150, 1000, 2700, 1150), (3840, 2160)), (1475, 925, 900, 300))
+        # A logo of another shape may be taller than the box, centred on it: a square one in a thin title.
+        self.assertEqual(uelogo.fit((100, 100), (100, 70, 220, 110), (320, 180)), (115, 45, 90, 90))
+        # Phantom Blade Zero's English title card: thin, widely spaced letters, 55% of a 4K frame's width. The Arabic
+        # logo (3:1) comes out about 40% of the width, not a quarter as when it could only be twice their height.
+        x, y, w, h = uelogo.fit((2172, 724), (870, 1004, 2970, 1156), (3840, 2160))
+        self.assertTrue(1500 <= w <= 1650, w)
+        self.assertEqual(x + w / 2, 1920)
+        # Its Chinese title card: big calligraphy the logo's shape, so the logo takes its width.
+        self.assertEqual(uelogo.fit((2172, 724), (778, 600, 3082, 1600), (3840, 2160)), (778, 716, 2304, 768))
 
     def test_a_box_as_big_as_the_frame_never_makes_the_logo_bigger_than_the_video(self):
         # Like Phantom Blade Zero's: the transparency track's smoke fills (and, measured coarsely, overshoots) the frame.
