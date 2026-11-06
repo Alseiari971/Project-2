@@ -956,7 +956,9 @@ async function studio(body) {
       </div>
       <p class="muted small">${t('GameShelf takes the style tables out of the game\'s containers itself. Or give the folder you took them out to with retoc to-legacy:')}</p>
       ${path('uiAssets', form.uiAssets, 'ui-folder', t('Choose style tables folder'))}
-      <p class="muted small">${t('Arabic title logo (شعار اللعبة بالعربي): your own logo, cooked in the Unreal Editor for the game\'s engine version, at its path inside the game (<Project>/Content/...).')}</p>
+      <p class="muted small">${t('Arabic title logo: a PNG with a transparent background. Where the game\'s logo is a video (the intro and main menu), GameShelf makes it again with your logo, at the game\'s size, place and timing.')}</p>
+      ${path('logoImage', form.logoImage, 'logo-image', t('Choose title logo image'))}
+      <p class="muted small">${t('Or a logo texture you cooked in the Unreal Editor for the game\'s engine version, at its path inside the game (<Project>/Content/...):')}</p>
       ${path('logoAssets', form.logoAssets, 'logo-folder', t('Choose title logo folder'))}
 
       <h2>${t('3. Sign and build')}</h2>
@@ -981,7 +983,7 @@ async function studio(body) {
 
   const read = () => {
     const values = Object.fromEntries([...body.querySelectorAll('input[name], select[name]')].map((el) => [el.name, el.value.trim()]));
-    for (const name of ['source', 'pakList', 'reviewed', 'uiAssets', 'logoAssets']) values[name] = form[name] || '';
+    for (const name of ['source', 'pakList', 'reviewed', 'uiAssets', 'logoAssets', 'logoImage']) values[name] = form[name] || '';
     values.arabicLanguage = Boolean(body.querySelector('input[name="arabicLanguage"]')?.checked);
     values.ltrLayout = Boolean(body.querySelector('input[name="ltrLayout"]')?.checked);
     values.colorSpeakers = Boolean(body.querySelector('input[name="colorSpeakers"]')?.checked);

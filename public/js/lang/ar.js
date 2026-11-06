@@ -1800,7 +1800,9 @@ export const AR = {
   "Add Arabic as its own language (an \"ar\" culture, and an Arabic style in every row of the game's style tables)": "أضف العربية لغةً مستقلة (ثقافة \"ar\"، ونمط عربي في كل صف من جداول أنماط اللعبة)",
   "GameShelf takes the style tables out of the game's containers itself. Or give the folder you took them out to with retoc to-legacy:": "يستخرج قيم شلف جداول الأنماط من حاويات اللعبة بنفسه. أو حدّد المجلد الذي استخرجتها إليه باستخدام retoc to-legacy:",
   "Choose style tables folder": "اختر مجلد جداول الأنماط",
-  "Arabic title logo (شعار اللعبة بالعربي): your own logo, cooked in the Unreal Editor for the game's engine version, at its path inside the game (<Project>/Content/...).": "شعار اللعبة بالعربي: شعارك الخاص، مُعدّ في Unreal Editor لإصدار محرك اللعبة، في مساره داخل اللعبة (<Project>/Content/...).",
+  "Arabic title logo: a PNG with a transparent background. Where the game's logo is a video (the intro and main menu), GameShelf makes it again with your logo, at the game's size, place and timing.": "شعار اللعبة بالعربي: صورة PNG بخلفية شفافة. حين يكون شعار اللعبة فيديو (في المقدمة والقائمة الرئيسية) يصنعه GameShelf من جديد بشعارك، بحجم اللعبة ومكان شعارها وتوقيته.",
+  "Choose title logo image": "اختر صورة الشعار",
+  "Or a logo texture you cooked in the Unreal Editor for the game's engine version, at its path inside the game (<Project>/Content/...):": "أو صورة شعار جهّزتها في Unreal Editor لإصدار محرك اللعبة، في مسارها داخل اللعبة (<Project>/Content/...):",
   "Choose title logo folder": "اختر مجلد الشعار",
   // Showcase, notifications, pack numbers and profiles
   "Keep Arabic where the game puts English (for text that ends up against the far edge of the screen)": "أبقِ العربية حيث تضع اللعبة الإنجليزية (للنصوص التي تظهر عند الطرف البعيد من الشاشة)",

@@ -27,7 +27,7 @@ class StudioError extends Error {}
  * The builder's command line for a Studio build. `options`: { source, engine,
  * id, version, title, steamAppId, gameId, translate: 'shared' | 'provider' |
  * 'none', provider, model, pakList, reviewed, and for Unreal Engine 5: arabicLanguage, ueVersion, uiAssets,
- * logoAssets }.
+ * logoAssets, logoImage }.
  */
 function buildArgs(options, { script, msgTool, keyFile, outDir, server }) {
   const o = options || {};
@@ -67,6 +67,11 @@ function buildArgs(options, { script, msgTool, keyFile, outDir, server }) {
     if (!/^[A-Za-z][\w.]{0,60}$/.test(String(o.colorNames))) throw new StudioError('Pick one of the game\'s text styles for names.');
     args.push('--color-names', String(o.colorNames));
     if (o.colorSpeakers) args.push('--color-speakers');
+  }
+  // The Arabic title logo as a transparent PNG: games whose logo is a video pair get the pair made again from it.
+  if (o.logoImage) {
+    if (!/\.png$/i.test(String(o.logoImage))) throw new StudioError('The title logo is a PNG image (with a transparent background).');
+    args.push('--logo-image', o.logoImage);
   }
   if (o.logoAssets) {
     if (!o.ueVersion) throw new StudioError('A cooked title logo needs the game\'s Unreal Engine version, like UE5_7.');

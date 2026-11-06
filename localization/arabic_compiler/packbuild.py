@@ -66,11 +66,13 @@ from . import retoc
 from . import runtime
 from . import remsg
 from . import swffont
+from . import uelogo
 from . import uestyles
 from .fingerprint import build_table
 from . import reefont
 from .repak import GamePak, path_hashes, write_pak
 from .rtl import DEFAULT_MAX_LINE, ArabicCompiler, glyphs_needed
+from . import sources as sources_module
 from .sources import Row, Source, SourceError, msg_dump_source, read_source
 from .shared import SharedError, SharedMemory, credentials, game_key, line_hash
 from .translate import _LETTERS, _TOKENS, Cache, Provider, TranslationError, Translator, problem_with
@@ -196,6 +198,8 @@ def parse_args(argv=None):
                                        'shouldn\'t take them out of the game\'s containers itself')
     c.add_argument('--logo-assets', help='unreal (UE5): a folder of cooked replacements made in the Unreal Editor for the game\'s engine '
                                          'version, such as an Arabic title logo texture (.uasset/.uexp/.ubulk at <Project>/Content/...)')
+    c.add_argument('--logo-image', help='unreal: your Arabic title logo, a transparent PNG; for games whose title logo is a video pair '
+                                        '(..._RGB.mp4 and ..._Alpha.mp4), the pair is made again from it with the game\'s size, timing and fades')
     c.add_argument('--ue-version', help='unreal (UE5): the game\'s engine version for retoc to-zen, e.g. UE5_4 (default: what the game\'s program says)')
     c.add_argument('--pak-list', help='unreal: the game\'s pak file list (from repak list, UnrealPak -List or FModel), to find its fonts; '
                                       'reengine: a list of the game\'s file names (such as REE.PAK.Tool\'s), whose .oft fonts get the Arabic font')
@@ -1136,6 +1140,8 @@ def build_unreal(source, translations: dict, args, payload: Path, stage_root: Pa
 
     if getattr(args, 'arabic_language', False):
         staged += stage_arabic_language(source, in_pak, target, stage, log)
+    if getattr(args, 'logo_image', None):
+        staged += stage_logo(source, args, stage, log)
 
     kind, exe = find_packer(args)
     if not exe:
@@ -1178,6 +1184,26 @@ def build_unreal(source, translations: dict, args, payload: Path, stage_root: Pa
         # UE5 games with IoStore containers: the Arabic .pak goes with a .utoc and .ucas of its own name (the
         # game's cooked replacements in them, or empty), since those games only mount a .pak that has them.
         build_zen_fonts(args, iostore, payload, stage_root, log)
+
+
+def stage_logo(source, args, stage: Path, log) -> list:
+    """The Arabic title logo as the game's own logo videos, in the .pak at their paths (see uelogo)."""
+    movies = (source.extra or {}).get('pak_movies') or {}
+    listing = list(movies) or (source.pak_listing or '').splitlines()
+
+    def fetch(inside: str, dest: Path):
+        pak = movies.get(inside)
+        if not pak:
+            raise BuildError(f'{inside} isn\'t in the game\'s .pak files, so the logo can\'t be made from it.')
+        got = sources_module._repak(source.pak_tool or args.packer_path, 'get', pak, inside, binary=True)
+        if got.returncode != 0 or not got.stdout:
+            raise BuildError(f'repak couldn\'t read {inside} from {Path(pak).name}.')
+        dest.write_bytes(got.stdout)
+
+    try:
+        return uelogo.stage_logo_videos(Path(args.logo_image), listing, fetch, stage, log)
+    except uelogo.LogoError as err:
+        raise BuildError(f'Arabic title logo: {err}') from None
 
 
 # A paragraph laid out left to right (LRM), with the Arabic in it read right to left (RLE ... PDF).

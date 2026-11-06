@@ -414,6 +414,8 @@ GameShelf takes the style tables out of the game's containers with retoc's `to-l
 
 **Arabic title logo:** your own logo, cooked in the Unreal Editor for the game's engine version and kept at its path inside the game (`<Project>/Content/...`), goes into the same `.utoc/.ucas` (**Choose title logo folder**).
 
+**Arabic title logo as a video:** many games play their title logo as a pair of videos, a colour track and a transparency track (Phantom Blade Zero: `Movies/PBZLogo_En_RGB.mp4` + `PBZLogo_En_Alpha.mp4` in the intro, `Movies/UI/AlphaVideo/PBZlogo-EN_*.mp4` behind the main menu, and their `MoviesHalfRes` copies). Give your logo as a transparent PNG (**Choose title logo image**, `--logo-image`) and GameShelf makes each English (or language-free) pair again: the game's size, frame rate, length and sound, your logo fitted into the box the game's logo fills, fading in and out exactly as the game's does (its transparency track's brightness, frame by frame). The new videos go into the Arabic `.pak` at the same paths. The game's logos in other languages, and a studio's logo (which comes in one language only), are left alone. This needs ffmpeg on the admin's PC: `winget install Gyan.FFmpeg` (or `GAMESHELF_FFMPEG`).
+
 Arabic that brings in text its English doesn't have (another team's credit such as «تعريب …», a Discord or other link, an @handle) is refused everywhere: from the AI, from admins and from players' fixes, so it never reaches the shared memory or a pack.
 
 ### AES Keys & Recipes (Admin Panel)

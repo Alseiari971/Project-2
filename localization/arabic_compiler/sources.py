@@ -194,6 +194,7 @@ def _unreal_paks(folder: Path) -> Source:
     if not paks and not containers:
         raise SourceError(f'Found no .pak files in {folder}.')
     listing, encrypted, found = [], [], None
+    movies = {}  # videos in the paks (a logo the Arabic replaces): path inside the game -> its .pak
     for pak in paks:
         result = _repak(tool, 'list', str(pak))
         if result.returncode != 0:
@@ -203,6 +204,7 @@ def _unreal_paks(folder: Path) -> Source:
             continue
         names = [line.strip().replace('\\', '/') for line in result.stdout.splitlines() if line.strip()]
         listing += names
+        movies.update({n: str(pak) for n in names if n.lower().endswith('.mp4') and n not in movies})
         english = [n for n in names if _ENGLISH_LOCRES.search(n)]
         if english and not found:
             found = (pak, sorted(english, key=len)[0])
@@ -292,6 +294,7 @@ def _unreal_paks(folder: Path) -> Source:
     source.pak_tool = tool
     source.pak_version = version.group(1).upper() if version else None
     source.extra['iostore'] = iostore
+    source.extra['pak_movies'] = movies
     source.notes.append(f'Read {inside} from {origin}.')
     if iostore['containers']:
         source.notes.append(f'IoStore containers: {len(iostore["containers"])}'

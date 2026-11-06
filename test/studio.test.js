@@ -53,6 +53,9 @@ test('the Studio\'s choices become the pack builder\'s command line, and mistake
   assert.throws(() => buildArgs({ ...base, arabicLanguage: true }, where), /Unreal Engine version/);
   assert.throws(() => buildArgs({ ...base, logoAssets: 'logo' }, where), /Unreal Engine version/);
   assert.throws(() => buildArgs({ ...base, ueVersion: '5.7; rm -rf' }, where), /looks like UE5_7/);
+  // The title logo as a PNG: the game's logo videos are made again from it (no engine version needed).
+  assert.ok(buildArgs({ ...base, translate: 'none', logoImage: 'C:\\logos\\PBZ-ar.png' }, where).join(' ').includes('--logo-image C:\\logos\\PBZ-ar.png'));
+  assert.throws(() => buildArgs({ ...base, logoImage: 'logo.jpg' }, where), /PNG/);
 });
 
 test('a Studio build of an encrypted Unreal game gets the key from its signed recipe, in the environment only', async (t) => {
