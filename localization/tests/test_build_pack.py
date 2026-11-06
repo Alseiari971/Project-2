@@ -539,15 +539,24 @@ class ColorNamesTest(unittest.TestCase):
         ar = {'D/Character_Main_1': 'الروح', 'D/Character_Main_2': 'زوو شانغ', 'D/Dlg_1': 'يا الروح، نتدرب كل يوم.',
               'D/Dlg_2': 'الروح متعبة.', 'D/Dlg_3': 'اسأل وزوو شانغ عن <Bold>وولين</>.', 'D/Dlg_4': '<Bold>زوو شانغ</>!'}
         out, n = color_names(en, ar, 'Character_Yellow_Decorator2')
-        self.assertEqual(out['D/Dlg_1'], 'يا <Character_Yellow_Decorator2>الروح</>، نتدرب كل يوم.')
+        self.assertEqual(out['D/Dlg_1'], 'يا\u00a0<Character_Yellow_Decorator2>الروح</>، نتدرب كل يوم.')
         self.assertEqual(out['D/Dlg_2'], 'الروح متعبة.')  # "soul" the word, not the character
-        self.assertEqual(out['D/Dlg_3'], 'اسأل و<Character_Yellow_Decorator2>زوو شانغ</> عن <Bold>وولين</>.')  # the و stays outside
+        self.assertEqual(out['D/Dlg_3'], 'اسأل و<Character_Yellow_Decorator2>زوو شانغ</>\u00a0عن <Bold>وولين</>.')  # the و stays outside
         self.assertEqual(out['D/Dlg_4'], '<Bold>زوو شانغ</>!')  # already styled: left as it is
         self.assertEqual(out['D/Character_Main_1'], 'الروح')  # the speaker label only with speakers=True
         self.assertEqual(n, 2)
         self.assertEqual(color_names(en, ar, 'Blue', speakers=True)[0]['D/Character_Main_1'], '<Blue>الروح</>')
         with self.assertRaises(BuildError):
             color_names(en, ar, '<b>')
+
+    def test_health_bar_names_stay_plain_and_spaces_next_to_names_are_kept(self):
+        from arabic_compiler.packbuild import color_names
+        en = {'D/Character_Main_2': 'Zhuo Shang', 'D/BossName_000': 'Zhuo Shang', 'D/Quest_1': 'Defeat Zhuo Shang!'}
+        ar = {'D/Character_Main_2': 'زوو شانغ', 'D/BossName_000': 'زوو شانغ', 'D/Quest_1': 'اهزم زوو شانغ!'}
+        out, _ = color_names(en, ar, 'Blue', speakers=True)
+        self.assertEqual(out['D/Character_Main_2'], '<Blue>زوو شانغ</>')  # the speaker label above subtitles
+        self.assertEqual(out['D/BossName_000'], 'زوو شانغ')  # the health bar's plain label
+        self.assertEqual(out['D/Quest_1'], 'اهزم\u00a0<Blue>زوو شانغ</>!')  # no "اهزمزوو"
 
     def test_each_character_gets_a_colour_of_its_own(self):
         from arabic_compiler.packbuild import color_names
@@ -557,5 +566,5 @@ class ColorNamesTest(unittest.TestCase):
         # Soul is mentioned most, so gets the first colour; each keeps its colour in labels and lines.
         self.assertEqual(out['D/Character_A'], '<Gold>الروح</>')
         self.assertEqual(out['D/Character_B'], '<Blue>زوو شانغ</>')
-        self.assertEqual(out['D/Dlg_1'], '<Gold>الروح</> و<Blue>زوو شانغ</>.')
+        self.assertEqual(out['D/Dlg_1'], '<Gold>الروح</>\u00a0و<Blue>زوو شانغ</>.')
         self.assertEqual(out, color_names(en, ar, 'auto', speakers=True, palette=['Gold', 'Blue'])[0])  # the same every build

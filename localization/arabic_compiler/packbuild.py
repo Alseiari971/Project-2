@@ -1199,6 +1199,9 @@ def ltr_layout(text: str) -> str:
 
 # The game's character names: Unreal text entries like Character_Main_1 ("Soul") or BossName_000.
 _NAME_KEY = re.compile(r'(?:^|/)(?:Character|NPC|Npc|Speaker|BossName)_[\w-]*$')
+# The entries a subtitle shows as its speaker's name. Boss and enemy names label health bars, which are plain
+# text: a colour tag there would show as text, so those only get coloured inside lines.
+_SPEAKER_KEY = re.compile(r'(?:^|/)(?:Character|NPC|Npc|Speaker)_[\w-]*$')
 _TAGGED = re.compile(r'<[^<>/]+>.*?</>', re.S)
 _ARABIC_WORD_CHAR = '\u0621-\u064A\u0660-\u0669\u0671-\u06D3'
 _STYLE_NAME = re.compile(r'^[A-Za-z][\w.]{0,60}$')
@@ -1244,7 +1247,7 @@ def color_names(english: dict, texts: dict, style: str, speakers: bool = False, 
     count = 0
     for key, ar in texts.items():
         if _NAME_KEY.search(key):
-            if speakers and ar.strip() in label_names:
+            if speakers and _SPEAKER_KEY.search(key) and ar.strip() in label_names:
                 out[key] = f'<{style_of[ar.strip()]}>{ar.strip()}</>'
                 count += 1
             continue
@@ -1264,6 +1267,12 @@ def color_names(english: dict, texts: dict, style: str, speakers: bool = False, 
                 return f'{m.group(1)}<{style_of[ar_name]}>{ar_name}</>'
 
             text = ar_pattern.sub(wrap, text)
+        if text != ar:
+            # A plain space next to a styled name can be dropped where the game draws it ("اهزمزوو"); a no-break
+            # space never is.
+            ours = '|'.join(re.escape(s) for s in set(style_of.values()))
+            text = re.sub(rf' (?=<(?:{ours})>)', '\u00a0', text)
+            text = re.sub(rf'(<(?:{ours})>[^<]*</>) ', '\\1\u00a0', text)
         out[key] = text
     return out, count
 
