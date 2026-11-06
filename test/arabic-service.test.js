@@ -178,6 +178,18 @@ test('packs are checked when added, and only their listed files are copied', asy
   assert.deepEqual(await library.list(), []);
 });
 
+test('a game with two packs of different ids gets the one added last', async () => {
+  const library = createPackLibrary({ dir: await temp('gs-lib-'), publicKey });
+  await library.add(await overlayPack({ id: 'gameshelf-steam-4242-ar', title: 'My Game' }));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  await library.add(await overlayPack({ id: 'my-game-ar', title: 'My Game', version: '1.1.0' }));
+  assert.deepEqual((await library.forGame({ steamAppId: STEAM_ID })).map((p) => p.id), ['my-game-ar', 'gameshelf-steam-4242-ar']);
+  // Adding the older one again makes it the one used.
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  await library.add(await overlayPack({ id: 'gameshelf-steam-4242-ar', title: 'My Game' }));
+  assert.equal((await library.forGame({ steamAppId: STEAM_ID }))[0].id, 'gameshelf-steam-4242-ar');
+});
+
 test('the pack builder\'s output folder can be added: its pack is in "pack"', async () => {
   const library = createPackLibrary({ dir: await temp('gs-lib-'), publicKey });
   const built = await temp('gs-built-');

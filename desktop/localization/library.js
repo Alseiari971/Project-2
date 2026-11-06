@@ -18,7 +18,9 @@ function createPackLibrary({ dir, publicKey }) {
       const packDir = path.join(dir, entry.name);
       try {
         const manifest = JSON.parse(await fs.readFile(path.join(packDir, MANIFEST), 'utf8'));
-        out.push({ id: manifest.id, version: manifest.version, engine: manifest.engine, title: manifest.title || null, game: manifest.game || null, overlay: manifest.overlay || null, fontStyle: manifest.fontStyle || null, dir: packDir });
+        // When it was added here (add() copies the files in, so they're new then).
+        const added = (await fs.stat(path.join(packDir, MANIFEST))).mtimeMs;
+        out.push({ id: manifest.id, version: manifest.version, engine: manifest.engine, title: manifest.title || null, game: manifest.game || null, overlay: manifest.overlay || null, fontStyle: manifest.fontStyle || null, dir: packDir, added });
       } catch {
         // Not a pack (or a damaged one): ignored.
       }
@@ -29,9 +31,12 @@ function createPackLibrary({ dir, publicKey }) {
   return {
     list: entries,
 
-    /** The packs for a game: { steamAppId, gameId }. */
+    /**
+     * The packs for a game: { steamAppId, gameId }, the most recently added first, so a game with packs of
+     * different ids (one made in Pack Studio, one made by the app's own builder) gets the one added last.
+     */
     async forGame(game) {
-      return (await entries()).filter((p) => forGameMatch(p, game));
+      return (await entries()).filter((p) => forGameMatch(p, game)).sort((a, b) => b.added - a.added);
     },
 
     /** Checks a pack again; returns what readPack does. */
