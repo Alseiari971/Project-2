@@ -548,3 +548,14 @@ class ColorNamesTest(unittest.TestCase):
         self.assertEqual(color_names(en, ar, 'Blue', speakers=True)[0]['D/Character_Main_1'], '<Blue>الروح</>')
         with self.assertRaises(BuildError):
             color_names(en, ar, '<b>')
+
+    def test_each_character_gets_a_colour_of_its_own(self):
+        from arabic_compiler.packbuild import color_names
+        en = {'D/Character_A': 'Soul', 'D/Character_B': 'Zhuo Shang', 'D/Dlg_1': 'Soul and Zhuo Shang.', 'D/Dlg_2': 'Soul!', 'D/Dlg_3': 'Soul?'}
+        ar = {'D/Character_A': 'الروح', 'D/Character_B': 'زوو شانغ', 'D/Dlg_1': 'الروح وزوو شانغ.', 'D/Dlg_2': 'الروح!', 'D/Dlg_3': 'الروح؟'}
+        out, _ = color_names(en, ar, 'auto', speakers=True, palette=['Gold', 'Blue'])
+        # Soul is mentioned most, so gets the first colour; each keeps its colour in labels and lines.
+        self.assertEqual(out['D/Character_A'], '<Gold>الروح</>')
+        self.assertEqual(out['D/Character_B'], '<Blue>زوو شانغ</>')
+        self.assertEqual(out['D/Dlg_1'], '<Gold>الروح</> و<Blue>زوو شانغ</>.')
+        self.assertEqual(out, color_names(en, ar, 'auto', speakers=True, palette=['Gold', 'Blue'])[0])  # the same every build

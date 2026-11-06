@@ -947,7 +947,7 @@ async function studio(body) {
       <div class="form-grid">
         <label>${t('Unreal Engine version')}<input class="input" name="ueVersion" value="${form.ueVersion || ''}" placeholder="UE5_7" dir="ltr"></label>
         <label>${t('Colour character names')}<select class="input" name="colorNames">
-          ${[['', 'Leave names as they are'], ['Character_Yellow_Decorator2', 'Gold'], ['Blue', 'Blue'], ['Character_Red_Decorator2', 'Red'],
+          ${[['', 'Leave names as they are'], ['auto', 'A colour per character'], ['Character_Yellow_Decorator2', 'Gold'], ['Blue', 'Blue'], ['Character_Red_Decorator2', 'Red'],
             ['Character_Green_Decorator2', 'Green'], ['Character_Purple_Decorator2', 'Purple']].map(([value, label]) => html`<option value="${value}" ${(form.colorNames || '') === value ? 'selected' : ''}>${t(label)}</option>`)}
         </select></label>
         <label class="check-row"><input type="checkbox" name="colorSpeakers" ${form.colorSpeakers ? 'checked' : ''}> ${t('Also colour the speaker\'s name above subtitles (turn off if tags show as text)')}</label>

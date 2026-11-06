@@ -1812,6 +1812,8 @@ export const AR = {
   "Red": "أحمر",
   "Green": "أخضر",
   "Purple": "بنفسجي",
+  // Showcase, notifications, pack numbers and profiles
+  "A colour per character": "لون لكل شخصية",
 };
 
 // Arabic counts have six forms: no items, one, two, three to ten, eleven to

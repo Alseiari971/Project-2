@@ -184,7 +184,8 @@ def parse_args(argv=None):
                         'tables (DT_*Styles), packed into the .utoc/.ucas; needs --ue-version')
     c.add_argument('--color-names', metavar='STYLE',
                    help='unreal: colour character names in the lines with one of the game\'s own rich text styles, e.g. '
-                        'Character_Yellow_Decorator2 (only where the English line names the character)')
+                        'Character_Yellow_Decorator2, or "auto" for a colour per character (only where the English line '
+                        'names the character)')
     c.add_argument('--color-speakers', action='store_true',
                    help='unreal, with --color-names: colour the character entries themselves too (the speaker\'s name above a '
                         'subtitle); only for games that show it as styled text, or the tag shows as text')
@@ -1105,7 +1106,8 @@ def build_unreal(source, translations: dict, args, payload: Path, stage_root: Pa
         else:
             english = {row.key: row.source for row in source.rows if row.key}
             texts, coloured = color_names(english, texts, args.color_names, speakers=getattr(args, 'color_speakers', False))
-            log(f'Coloured {coloured} character names in the lines with the game\'s {args.color_names} style.')
+            how = 'a colour per character' if args.color_names == 'auto' else f'the game\'s {args.color_names} style'
+            log(f'Coloured {coloured} character names with {how}.')
     if getattr(args, 'ltr_layout', False):
         texts = {key: ltr_layout(text) for key, text in texts.items()}
         log('Arabic lines keep the place the game gives its English (laid out left to right, read right to left).')
@@ -1200,16 +1202,21 @@ _NAME_KEY = re.compile(r'(?:^|/)(?:Character|NPC|Npc|Speaker|BossName)_[\w-]*$')
 _TAGGED = re.compile(r'<[^<>/]+>.*?</>', re.S)
 _ARABIC_WORD_CHAR = '\u0621-\u064A\u0660-\u0669\u0671-\u06D3'
 _STYLE_NAME = re.compile(r'^[A-Za-z][\w.]{0,60}$')
+# "auto": a colour per character, from the game's own styles (Phantom Blade Zero's style table has all of these).
+NAME_PALETTE = ['Character_Yellow_Decorator2', 'Blue', 'Character_Green_Decorator2', 'Character_Purple_Decorator2', 'Character_Red_Decorator2']
 
 
-def color_names(english: dict, texts: dict, style: str, speakers: bool = False) -> tuple:
+def color_names(english: dict, texts: dict, style: str, speakers: bool = False, palette: list | None = None) -> tuple:
     """`texts` with the game's character names wrapped in one of its own rich text styles (<style>name</>).
     Names come from the game's character entries (Character_*, NPC_*, Speaker_*, BossName_*): their English and
     Arabic. A name is coloured in a line only where that line's English names the character, so the common word
     under a name («الروح», "the soul") stays plain elsewhere; a letter joined in front of it (و، ف، ب، ل، ك) stays
     outside the colour, and text that's already styled is left alone. With `speakers`, the character entries
-    themselves (the speaker's name above a subtitle) are coloured too. Returns (texts, how many names were coloured)."""
-    if not _STYLE_NAME.match(style or ''):
+    themselves (the speaker's name above a subtitle) are coloured too. With `style` "auto", each character gets a
+    colour of its own from `palette`, the most mentioned first so the main characters differ, the same one in every
+    line and label. Returns (texts, how many names were coloured)."""
+    palette = [p for p in (palette or NAME_PALETTE) if _STYLE_NAME.match(p)]
+    if not _STYLE_NAME.match(style or '') or (style == 'auto' and not palette):
         raise BuildError(f'"{style}" isn\'t a rich text style name (like Character_Yellow_Decorator2).')
     names = []
     for key, en in english.items():
@@ -1225,12 +1232,20 @@ def color_names(english: dict, texts: dict, style: str, speakers: bool = False) 
                  re.compile(rf'(?<![{_ARABIC_WORD_CHAR}])([وفبلك]?){re.escape(ar_name)}(?![{_ARABIC_WORD_CHAR}])'))
                 for en_name, ar_name in names]
     label_names = {ar for _, ar in names}
+    if style == 'auto':
+        # The most mentioned characters first, so the main cast get different colours; ties by name, so the
+        # same game gets the same colours every build.
+        mentions = {ar: sum(1 for t in texts.values() if ar in t) for ar in label_names}
+        order = sorted(label_names, key=lambda ar: (-mentions[ar], ar))
+        style_of = {ar: palette[i % len(palette)] for i, ar in enumerate(order)}
+    else:
+        style_of = {ar: style for ar in label_names}
     out = dict(texts)
     count = 0
     for key, ar in texts.items():
         if _NAME_KEY.search(key):
             if speakers and ar.strip() in label_names:
-                out[key] = f'<{style}>{ar.strip()}</>'
+                out[key] = f'<{style_of[ar.strip()]}>{ar.strip()}</>'
                 count += 1
             continue
         en = english.get(key, '')
@@ -1246,7 +1261,7 @@ def color_names(english: dict, texts: dict, style: str, speakers: bool = False) 
                 if any(a <= m.start() < b for a, b in styled):
                     return m.group(0)
                 count += 1
-                return f'{m.group(1)}<{style}>{ar_name}</>'
+                return f'{m.group(1)}<{style_of[ar_name]}>{ar_name}</>'
 
             text = ar_pattern.sub(wrap, text)
         out[key] = text
