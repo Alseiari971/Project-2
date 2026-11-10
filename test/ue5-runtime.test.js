@@ -256,6 +256,24 @@ test('a UE5 patch\'s .pak, .utoc and .ucas go in together and come out together'
   assert.deepEqual(await fs.readdir(path.join(paks, '~mods')), ['Their_Mod_P.pak']);
 });
 
+test('a game\'s Arabic swaps from one pack to another of a different id (the app\'s own build, then Pack Studio\'s)', async (t) => {
+  const game = await tree({ 'Engine/x.txt': 'x', 'Blade/Content/Paks/pakchunk0-Windows.pak': 'pak', 'Blade/Content/Paks/pakchunk0-Windows.utoc': 'toc' });
+  const data = await fs.mkdtemp(path.join(os.tmpdir(), 'gs-state-'));
+  t.after(() => Promise.all([game, data].map((d) => fs.rm(d, { recursive: true, force: true }))));
+  const files = (tag) => ({ 'pakchunk99-ArabicLocalization_P.pak': `pak ${tag}`, 'pakchunk99-ArabicLocalization_P.utoc': `toc ${tag}`, 'pakchunk99-ArabicLocalization_P.ucas': `cas ${tag}` });
+  const auto = await makePack('unreal', files('auto'), { id: 'gameshelf-steam-42-ar', version: '1.0.4' });
+  const studio = await makePack('unreal', files('studio'), { id: 'blade-ar', version: '1.1.0' });
+  const localization = createLocalization({ dataDir: data });
+  await localization.enable({ root: game, packDir: auto, publicKey: PUBLIC });
+  const mods = path.join(game, 'Blade', 'Content', 'Paks', '~mods');
+  assert.equal(await fs.readFile(path.join(mods, 'pakchunk99-ArabicLocalization_P.pak'), 'utf8'), 'pak auto');
+  // The other pack takes its place, instead of "An earlier version is still in this game".
+  await localization.enable({ root: game, packDir: studio, publicKey: PUBLIC });
+  for (const [name, content] of Object.entries(files('studio'))) assert.equal(await fs.readFile(path.join(mods, name), 'utf8'), content);
+  assert.equal((await localization.status(game)).pack.id, 'blade-ar');
+  assert.deepEqual((await localization.disable({ root: game })).kept, []);
+});
+
 test('the runtime adapter goes in with its settings, only as the library GameShelf ships, and comes out cleanly', async (t) => {
   const game = await tree(textGame());
   const data = await fs.mkdtemp(path.join(os.tmpdir(), 'gs-state-'));

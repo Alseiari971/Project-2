@@ -9,7 +9,7 @@ const path = require('node:path');
 
 const { writePack } = require('../desktop/localization/pack');
 const { createPackLibrary } = require('../desktop/localization/library');
-const { createArabicService } = require('../desktop/localization/service');
+const { createArabicService, newerVersion } = require('../desktop/localization/service');
 const fixture = require('./fixtures/fingerprint-vectors.json');
 
 const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
@@ -176,6 +176,15 @@ test('packs are checked when added, and only their listed files are copied', asy
   assert.deepEqual((await library.list()).map((p) => p.version), ['1.1.0']);
   await library.remove('overlay-pack');
   assert.deepEqual(await library.list(), []);
+});
+
+test('only a newer version in the catalog is an update', () => {
+  assert.equal(newerVersion('1.1.0', '1.0.9'), true);
+  assert.equal(newerVersion('1.0.10', '1.0.9'), true);
+  assert.equal(newerVersion('1.0.4', '1.1.0'), false); // published before a newer one was made here: not an update
+  assert.equal(newerVersion('1.1.0', '1.1.0'), false);
+  assert.equal(newerVersion('1.1', '1.1.0'), false);
+  assert.equal(newerVersion('2.0.0-beta', '1.9.9'), true);
 });
 
 test('a game with two packs of different ids gets the one added last', async () => {

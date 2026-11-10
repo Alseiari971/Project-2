@@ -319,12 +319,14 @@ async function enableArabic({ root, packDir, stager, publicKey, allowUnsigned = 
     }
     ours = null;
   }
-  if (ours?.status === 'enabled' && ours.pack.id === pack.manifest.id) {
-    // Another version of the same pack is in: take it out first. If anything of
-    // it has to stay (changed since, or a newer RE Engine patch follows it), say so.
+  if (ours?.status === 'enabled') {
+    // Another version of the same pack, or another pack for the game (one made in Pack Studio after one the app
+    // made itself), is in: take it out first. If anything of it has to stay (changed since, or a newer RE Engine
+    // patch follows it), say so.
     const old = await stager.disable(root);
     if (old.kept.length) {
-      throw new LocalizationError(`GameShelf couldn't take out version ${ours.pack.version} to put in ${pack.manifest.version}. Turn Arabic off for this game, then on again.`, 'busy');
+      const was = ours.pack.id === pack.manifest.id ? `version ${ours.pack.version}` : `${ours.pack.id} ${ours.pack.version}`;
+      throw new LocalizationError(`GameShelf couldn't take out ${was} to put in ${pack.manifest.id} ${pack.manifest.version}. Turn Arabic off for this game, then on again.`, 'busy');
     }
     ours = null;
   }

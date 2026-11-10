@@ -44,6 +44,22 @@ const why = (text, vars = {}) => ({ text, vars });
  * rebuild({ game, tier, fontStyle, onProgress }) -> pack folder or null, to make it
  * again after a game update or for another font } (see main.js).
  */
+/** Whether version `a` (1.2.10) comes after `b` (1.2.9), part by part; parts that aren't numbers compare as text. */
+function newerVersion(a, b) {
+  const pa = String(a || '').split(/[.-]/);
+  const pb = String(b || '').split(/[.-]/);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i += 1) {
+    const x = pa[i] ?? '0';
+    const y = pb[i] ?? '0';
+    if (x === y) continue;
+    const nx = Number(x);
+    const ny = Number(y);
+    if (Number.isFinite(nx) && Number.isFinite(ny)) return nx > ny;
+    return x > y;
+  }
+  return false;
+}
+
 function createArabicService({ dataDir, publicKey, overlayAvailable = process.platform === 'win32', localization, packs, catalog = null, builder = null, runtimeHooks = null }) {
   localization ??= createLocalization({ dataDir, runtimeHooks });
   packs ??= createPackLibrary({ dir: path.join(dataDir, 'localization', 'packs'), publicKey });
@@ -131,7 +147,8 @@ function createArabicService({ dataDir, publicKey, overlayAvailable = process.pl
       || (cloud.mode === 'overlay' && overlayAvailable)
       || (cloud.mode === 'build' && cloud.tier === tier && (tier !== 'overlay' || overlayAvailable) && Boolean(builder?.canBuild(tier, engine))));
     const local = native || (overlayAvailable && overlayPack);
-    const update = fits && local && cloud.id === local.id && cloud.version !== local.version ? cloud : null;
+    // Only a newer version: an older one in the catalog (a pack rebuilt here since it was published) isn't an update.
+    const update = fits && local && cloud.id === local.id && newerVersion(cloud.version, local.version) ? cloud : null;
     // The runtime adapter: which library it stands in for, and what it saw in the game (see index.js, requests.js).
     const runtime = tier === 'native-runtime' ? await runtimeInfo(game, result) : null;
     let out;
@@ -343,4 +360,4 @@ function createArabicService({ dataDir, publicKey, overlayAvailable = process.pl
   return { info, set, prepareLaunch, install, remake, fontFor, setFont, overlayStyle, setOverlayStyle, packs, localization, recover: () => localization.recover(), fill };
 }
 
-module.exports = { createArabicService };
+module.exports = { createArabicService, newerVersion };
