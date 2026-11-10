@@ -779,12 +779,15 @@ function createApi({
     }
   }));
   api.post('/translations/translate', requireUser, translateLimiter, translateUserLimiter, asyncRoute(async (req, res) => {
-    const { game, lines, context } = req.body || {};
+    const { game, lines, context, refresh } = req.body || {};
     if (!translations) return res.status(503).json({ error: 'Shared translation isn\'t set up on this server.' });
     if (!Array.isArray(lines) || !lines.length || lines.length > 200) return res.status(400).json({ error: 'Send 1 to 200 lines at a time.' });
+    // Translating stored lines again (with the game's other languages as context) is an admin's call.
+    if (refresh && req.user.role !== 'admin') return res.status(403).json({ error: 'Only an admin can have stored lines translated again.' });
     try {
       // `ref`: the same line in the game's other languages ({ culture: text }), as context for the translator.
-      const wanted = lines.map((l) => ({ hash: String(l?.hash || ''), english: l?.english, ref: l?.ref }));
+      // `key`: the line's (namespace/key), for a line whose English is said elsewhere to someone else (see lineHash).
+      const wanted = lines.map((l) => ({ hash: String(l?.hash || ''), english: l?.english, ref: l?.ref, key: l?.key }));
       // Lines already in the shared memory are free; new ones count against the player's plan.
       const allowance = plans.allowance(req.user, String(game));
       const result = await translations.translate(req.user, String(game), wanted, {
@@ -792,6 +795,7 @@ function createApi({
         dailyLines: allowance.ok ? allowance.dailyLines : 0,
         maxLines: allowance.maxLines,
         priority: allowance.priority,
+        refresh: Boolean(refresh),
       });
       plans.record(req.user.id, String(game), result.used?.lines || 0, result.used?.chars || 0);
       res.json({ ...result, ...(result.limited && !allowance.ok ? { limit: { code: allowance.code, reason: allowance.reason, plan: allowance.plan } } : {}) });

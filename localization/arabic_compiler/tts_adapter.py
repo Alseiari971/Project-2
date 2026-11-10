@@ -5,13 +5,19 @@ Two ways to make the speech, neither of them code inside GameShelf:
   ever called), or
 - the f5-tts command line (f5-tts_infer-cli, with an Arabic model), run through safe_exec.
 
-Whose voice: a cloned voice is a person's voice. The reference recording must be one the admin has the right to use
+Whose voice: by default nobody's. A dub's characters are cast to synthetic voice presets (VOICE_ARCHETYPES:
+male_protagonist_deep, female_warrior_calm, narrator_epic, ...): a speaker the TTS server has built in under that
+name, or a recording of that name in GameShelf's own royalty-free voice bank (a folder of <preset>.wav with a
+voices.json saying where each came from and its licence). The game's audio is only measured, for each line's length.
+
+Cloning is still there for a voice of one's own: a cloned voice is a person's voice. The reference recording must be one the admin has the right to use
 (their own voice, or a voice actor's with their consent), said so in a VoiceConsent that goes into the dub pack's
 record. A reference taken from the game's own files (its actors' performances) is refused.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import urllib.error
@@ -25,6 +31,11 @@ from . import safe_exec
 from . import uelogo
 
 DEFAULT_TTS_URL = 'http://127.0.0.1:3900'
+SPEAK_PATH = '/api/v1/tts'
+# The synthetic voices a dub's characters are cast to. A TTS server's built-in speakers, or the voice bank's recordings, go by these names.
+VOICE_ARCHETYPES = ('male_protagonist_deep', 'male_young_bold', 'male_elder_wise', 'male_villain_cold', 'female_warrior_calm',
+                    'female_young_bright', 'female_elder_stern', 'narrator_epic', 'child_curious', 'crowd_neutral')
+_PRESET = re.compile(r'^[a-z][a-z0-9_]{1,40}$')
 CLONE_PATH = '/api/v1/tts/clone'
 MIN_TEMPO, MAX_TEMPO = 0.85, 1.30
 _LOOPBACK = {'127.0.0.1', 'localhost', '::1'}
@@ -97,6 +108,68 @@ def _clone_f5(ref: Path, arabic_text: str, out: Path):
                             '--gen_text', arabic_text, '--output_file', str(out)], capture_output=True, text=True, timeout=1800)
     if result.returncode != 0 or not out.is_file():
         raise DubError(f'f5-tts couldn\'t make the line: {(result.stderr or result.stdout or "").strip()[-300:]}')
+
+
+def bank_voice(voice_bank, preset: str, game_dir=None) -> Path | None:
+    """The voice bank's recording for a preset, if it has one: <bank>/<preset>.wav, listed in <bank>/voices.json with
+    its source and licence ({"<preset>": {"source": ..., "license": ...}}). A bank inside the game's folder, or a
+    recording the bank doesn't account for, is refused."""
+    if not voice_bank:
+        return None
+    bank = Path(voice_bank).resolve()
+    recording = bank / f'{preset}.wav'
+    if not recording.is_file():
+        return None
+    if game_dir and (Path(game_dir).resolve() == bank or Path(game_dir).resolve() in bank.parents):
+        raise DubError('The voice bank is inside the game\'s folder: its actors\' voices aren\'t used. Keep your own recordings elsewhere.')
+    try:
+        listed = json.loads((bank / 'voices.json').read_text(encoding='utf-8')).get(preset) or {}
+    except (OSError, ValueError):
+        listed = {}
+    if not str(listed.get('source') or '').strip() or not str(listed.get('license') or '').strip():
+        raise DubError(f'The voice bank\'s voices.json doesn\'t say where {preset}.wav came from and its licence, so it isn\'t used.')
+    return recording
+
+
+def _speak_http(preset: str, arabic_text: str, dialect: str, out: Path):
+    body = json.dumps({'text': arabic_text, 'language': 'ar', 'dialect': dialect, 'voice': preset}, ensure_ascii=False).encode('utf-8')
+    request = urllib.request.Request(tts_url() + (os.environ.get('GAMESHELF_TTS_SPEAK_PATH') or SPEAK_PATH), data=body, method='POST', headers={
+        'Content-Type': 'application/json', 'Authorization': f'Bearer {os.environ.get("OMNIVOICE_API_KEY", "")}'})
+    try:
+        with urllib.request.urlopen(request, timeout=600) as response:
+            audio = response.read()
+    except (urllib.error.URLError, TimeoutError, ConnectionError) as err:
+        raise DubError(f'The local TTS server didn\'t answer: {err}') from None
+    if audio[:4] != b'RIFF':
+        raise DubError(f'The local TTS server didn\'t answer with a WAV file (does it have a voice called "{preset}"?).')
+    out.write_bytes(audio)
+
+
+def synthesize_preset_line(preset: str, arabic_text: str, target_duration_ms: int, dialect: str = 'MSA', *, out_path,
+                           voice_bank=None, backend: str = 'http', game_dir=None, ffmpeg: str | None = None) -> dict:
+    """One dub line in a synthetic voice: `preset` from the voice bank when it has a recording of that name (said in
+    its voice by the TTS, `backend` 'http' or 'f5'), else the TTS server's own speaker of that name. Fitted to the
+    original line's length. Returns fit_audio_duration's report, with the file's path and where the voice came from."""
+    if not _PRESET.match(preset or ''):
+        raise DubError(f'"{preset}" isn\'t a voice preset\'s name (like male_protagonist_deep).')
+    if not arabic_text.strip():
+        raise DubError('There\'s no Arabic to say.')
+    out = Path(out_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    raw = out.with_name(out.stem + '.raw.wav')
+    recording = bank_voice(voice_bank, preset, game_dir)
+    try:
+        if recording and backend == 'f5':
+            _clone_f5(recording, arabic_text, raw)
+        elif recording:
+            _clone_http(recording, arabic_text, dialect, raw)
+        elif backend == 'http':
+            _speak_http(preset, arabic_text, dialect, raw)
+        else:
+            raise DubError(f'f5-tts needs a recording to speak from: put {preset}.wav in the voice bank.')
+        return {**fit_audio_duration(raw, out, target_duration_ms, ffmpeg), 'file': str(out), 'voice': 'bank' if recording else 'server'}
+    finally:
+        raw.unlink(missing_ok=True)
 
 
 def duration_ms(ffmpeg: str, wav: Path) -> int:

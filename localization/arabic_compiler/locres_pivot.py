@@ -126,6 +126,76 @@ def by_source(aligned: dict) -> dict:
     return out
 
 
+def by_key(aligned: dict) -> dict:
+    """{key: {culture: text}}: each key's own references."""
+    return {key: refs for key, refs in ((k, clean_references({c: t for c, t in e.items() if c != 'en'})) for k, e in aligned.items()) if refs}
+
+
+def variant_keys(aligned: dict) -> set:
+    """The keys whose English line is said under other keys too, with other references: the same "Are you ready?"
+    to a man in one scene (ru "Готов?") and a woman in another ("Готова?"). Each of these keeps its own Arabic,
+    under its key; every other line is kept once, under its English."""
+    seen = {}
+    for key, entry in aligned.items():
+        refs = tuple(sorted((c, t) for c, t in entry.items() if c != 'en'))
+        seen.setdefault(entry['en'], {}).setdefault(refs, []).append(key)
+    return {key for groups in seen.values() if len(groups) > 1 for keys in groups.values() for key in keys}
+
+
+# Russian words that say a woman is spoken of or to: past tense (-ла, -лась) and short adjectives (готова, должна).
+_RU_FEMININE = re.compile(r'(?<![\w-])(?:[а-яё]{2,}ла(?:сь)?|готова|должна|рада|сама|одна|уверена|согласна|права|нужна|обязана|'
+                          r'способна|достойна|виновата|жива|мертва|больна|свободна|знакома|благодарна)(?![\w-])', re.I)
+# Words ending in -ла that are things, not verbs.
+_RU_NOT_VERBS = {'сила', 'скала', 'стрела', 'игла', 'мгла', 'пила', 'хвала', 'смола', 'зола', 'пчела', 'дела', 'тела', 'села', 'школа',
+                 'мила', 'акула', 'метла', 'стекла', 'числа', 'масла', 'весла', 'кресла', 'ремесла', 'зла', 'кола', 'пола', 'стола',
+                 'угла', 'узла', 'посла', 'осла', 'котла', 'орла', 'была'}
+_RU_SECOND_PERSON = re.compile(r'(?<![\w-])(?:ты|тебя|тебе|тобой|тобою|твой|твоя|твоё|твое|твои|твоего|твоей|твоих|твоим)(?![\w-])', re.I)
+_EN_SECOND_PERSON = re.compile(r"\b(?:you|your|yours|yourself|you're|you've|you'll|you'd)\b", re.I)
+_NAME_KEY = re.compile(r'(?i)(?:name|title|skill|abilit|item|weapon|sect|technique|move|buff|talent|armor|armour|faction|rank)')
+_HAN = re.compile('[\u3400-\u9fff]')
+
+
+def _feminine(russian: str) -> bool:
+    return any(m.group(0).lower() not in _RU_NOT_VERBS for m in _RU_FEMININE.finditer(russian))
+
+
+def context_candidates(rows, refs_by_key: dict, variants: set) -> dict:
+    """Which of a game's lines the other languages can change, for translating only those again:
+    {'variant': [...], 'feminine': [...], 'second_person': [...], 'names': [...]}, each a list of (key, english).
+    - variant: the same English under several keys with different references (always worth its own Arabic);
+    - feminine: the Russian line marks a woman (past tense -ла, готова, должна, ...);
+    - second_person: "you" in English and ты/твой in Russian, with no feminine marker (gender may matter; it can't
+      be told from the text alone, so these are counted apart);
+    - names: short lines (under 8 words) that name something (by their key) and have a Chinese original.
+    A line is in the first group it fits."""
+    groups = {'variant': [], 'feminine': [], 'second_person': [], 'names': []}
+    taken = set()
+    for row in rows:
+        key, english = getattr(row, 'key', None), getattr(row, 'source', '')
+        refs = refs_by_key.get(key) or {}
+        if not key or not refs:
+            continue
+        item = (key, english)
+        russian = next((t for c, t in refs.items() if c.lower().startswith('ru')), '')
+        chinese = next((t for c, t in refs.items() if c.lower().startswith('zh')), '')
+        if key in variants:
+            group = 'variant'
+        elif russian and _feminine(russian):
+            group = 'feminine'
+        elif russian and _EN_SECOND_PERSON.search(english) and _RU_SECOND_PERSON.search(russian):
+            group = 'second_person'
+        elif chinese and _HAN.search(chinese) and len(english.split()) < 8 and _NAME_KEY.search(key) and not re.search(r'[.!?]\s*$', english):
+            group = 'names'
+        else:
+            continue
+        # A line kept under its English is one line, however many keys have it.
+        identity = key if group == 'variant' else english
+        if identity not in taken:
+            taken.add(identity)
+            groups[group].append(item)
+    return groups
+
+
 def clean_references(refs) -> dict:
     """References as they may go to a translator: up to three, {culture: text}, nothing else."""
     out = {}

@@ -11,6 +11,9 @@ from unittest import mock
 
 from arabic_compiler import locres as locres_format
 from arabic_compiler import locres_pivot
+from types import SimpleNamespace
+
+from arabic_compiler import packbuild
 from arabic_compiler.shared import SharedMemory, line_hash
 from arabic_compiler.sources import read_source
 from arabic_compiler.translate import Cache, Translator
@@ -139,6 +142,139 @@ class ToTheTranslator(unittest.TestCase):
         lines = {l['english']: l for l in posted[0][1]['lines']}
         self.assertEqual(lines['Are you ready?'], {'hash': line_hash('Are you ready?'), 'english': 'Are you ready?', 'ref': {'ru': 'Ты готова?'}})
         self.assertNotIn('ref', lines['Continue'])
+
+
+# The same English under two keys, to a man and to a woman; a line that marks a woman; "you" with no marker; a name.
+ALIGNED = {
+    'Dialogue/Ready_M': {'en': 'Are you ready?', 'zh-Hans': '你准备好了吗？', 'ru': 'Ты готов?'},
+    'Dialogue/Ready_F': {'en': 'Are you ready?', 'zh-Hans': '你准备好了吗？', 'ru': 'Ты готова?'},
+    'UI/Go_1': {'en': 'Go', 'ru': 'Иди'}, 'UI/Go_2': {'en': 'Go', 'ru': 'Иди'},
+    'Dialogue/Back': {'en': 'She came back.', 'ru': 'Она вернулась.'},
+    'Dialogue/Power': {'en': 'Your power grows.', 'ru': 'Твоя сила растёт.'},
+    'Skill/Skill_Name_7': {'en': 'Seven Star Strike', 'zh-Hans': '七星击'},
+    'Skill/Skill_Desc_7': {'en': 'Strikes seven times.', 'zh-Hans': '连击七次。'},
+    'UI/Plain': {'en': 'Continue'},
+}
+
+
+def rows_of(aligned):
+    return [SimpleNamespace(key=key, source=entry['en'], arabic=None) for key, entry in aligned.items()]
+
+
+class KeyedLines(unittest.TestCase):
+    def test_the_same_english_said_to_someone_else_keeps_its_own_arabic_under_its_key(self):
+        variants = locres_pivot.variant_keys(ALIGNED)
+        self.assertEqual(variants, {'Dialogue/Ready_M', 'Dialogue/Ready_F'})  # "Go" has one reference: one Arabic
+        self.assertEqual(locres_pivot.by_key(ALIGNED)['Dialogue/Ready_F'], {'zh-Hans': '你准备好了吗？', 'ru': 'Ты готова?'})
+        self.assertNotIn('UI/Plain', locres_pivot.by_key(ALIGNED))
+        # Its hash is of its English and its key; every other line's, of its English alone, as before.
+        self.assertNotEqual(line_hash('Are you ready?', 'Dialogue/Ready_F'), line_hash('Are you ready?', 'Dialogue/Ready_M'))
+        self.assertEqual(line_hash('Go'), line_hash('Go', None))
+        args = SimpleNamespace(variant_keys=variants)
+        rows = rows_of(ALIGNED)
+        self.assertEqual(packbuild.line_item(rows[1], args), ('Are you ready?', 'Dialogue/Ready_F'))
+        self.assertEqual(packbuild.line_item(rows[2], args), 'Go')
+
+    def test_which_lines_the_other_languages_can_change(self):
+        groups = locres_pivot.context_candidates(rows_of(ALIGNED), locres_pivot.by_key(ALIGNED), locres_pivot.variant_keys(ALIGNED))
+        self.assertEqual(groups['variant'], [('Dialogue/Ready_M', 'Are you ready?'), ('Dialogue/Ready_F', 'Are you ready?')])
+        self.assertEqual(groups['feminine'], [('Dialogue/Back', 'She came back.')])
+        # "сила" (strength) ends like a feminine verb and isn't one.
+        self.assertEqual(groups['second_person'], [('Dialogue/Power', 'Your power grows.')])
+        self.assertEqual(groups['names'], [('Skill/Skill_Name_7', 'Seven Star Strike')])  # the description isn't a name
+        self.assertEqual(sum(len(g) for g in groups.values()), 5)  # "Go" and "Continue" gain nothing
+
+    def test_a_keyed_line_goes_to_the_memory_with_its_key_and_a_refresh_says_so(self):
+        memory = SharedMemory('http://127.0.0.1:9', {'token': 't'})
+        posted = []
+
+        def post(path, body):
+            posted.append(body)
+            return {'arabic': {l['hash']: f'عربي {l.get("key", "")}' for l in body['lines']}}
+
+        item = ('Are you ready?', 'Dialogue/Ready_F')
+        with mock.patch.object(memory, '_post', post):
+            done, _, _ = memory.translate('steam:1', [item, 'Go'], references={item: {'ru': 'Ты готова?'}}, refresh=True, log=lambda *_: None)
+        self.assertEqual(done, {item: 'عربي Dialogue/Ready_F', 'Go': 'عربي '})
+        self.assertTrue(posted[0]['refresh'])
+        self.assertEqual(posted[0]['lines'][0], {'hash': line_hash(*item), 'english': 'Are you ready?', 'key': 'Dialogue/Ready_F', 'ref': {'ru': 'Ты готова?'}})
+        self.assertEqual(posted[0]['lines'][1], {'hash': line_hash('Go'), 'english': 'Go'})
+
+    def build_args(self, tmp, **more):
+        return SimpleNamespace(shared='http://127.0.0.1:9', steam_app_id='4115450', game_id=None, resolved_kind='unreal', font_targets=None,
+                               pak_list=None, no_translate=False, context='', out=str(tmp), references=locres_pivot.by_source(ALIGNED),
+                               references_by_key=locres_pivot.by_key(ALIGNED), variant_keys=locres_pivot.variant_keys(ALIGNED),
+                               refresh_context=None, refresh_groups=None, **more)
+
+    def test_a_build_uses_a_keyed_lines_own_arabic_and_falls_back_to_its_englishs(self):
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp)
+        stored = {line_hash('Are you ready?'): 'هل أنت مستعد؟',  # from before lines were kept by key
+                  line_hash('Are you ready?', 'Dialogue/Ready_F'): 'هل أنتِ مستعدة؟'}
+        asked = []
+
+        class Memory:
+            def __init__(self, *a):
+                pass
+
+            def lookup(self, game, hashes):
+                return {h: stored[h] for h in hashes if h in stored}
+
+            def translate(self, game, lines, context='', log=print, references=None, refresh=False):
+                asked.append((lines, references, refresh))
+                return {i: 'عربي جديد' for i in lines}, {}, False
+
+        rows = rows_of(ALIGNED)
+        with mock.patch.object(packbuild, 'SharedMemory', Memory), mock.patch.dict(os.environ, {'GAMESHELF_TOKEN': 't'}):
+            packbuild.shared_translate(rows, self.build_args(tmp), lambda *_: None)
+        by_key = {r.key: r.arabic for r in rows}
+        self.assertEqual(by_key['Dialogue/Ready_F'], 'هل أنتِ مستعدة؟')  # her own line
+        self.assertEqual(by_key['Dialogue/Ready_M'], 'هل أنت مستعد؟')    # the English's, until his own is made
+        self.assertNotIn(('Are you ready?', 'Dialogue/Ready_M'), asked[0][0])
+        self.assertIn('Go', asked[0][0])
+        self.assertEqual(asked[0][1]['Seven Star Strike'], {'zh-Hans': '七星击'})
+
+    def test_counting_spends_nothing_and_applying_translates_only_the_chosen_lines_again(self):
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp)
+        logged, asked = [], []
+
+        class Memory:
+            def __init__(self, *a):
+                pass
+
+            def translate(self, game, lines, context='', log=print, references=None, refresh=False):
+                asked.append((game, lines, references, refresh))
+                return {i: 'عربي' for i in lines}, {}, False
+
+        rows = rows_of(ALIGNED)
+        with mock.patch.object(packbuild, 'SharedMemory', Memory), mock.patch.dict(os.environ, {'GAMESHELF_TOKEN': 't'}):
+            stopped = packbuild.refresh_context(rows, SimpleNamespace(**{**vars(self.build_args(tmp)), 'refresh_context': 'count'}), logged.append)
+            self.assertTrue(stopped)
+            self.assertEqual(asked, [])  # counted only
+            self.assertTrue(any('variant: 2 lines' in line for line in logged))
+            self.assertTrue(any('second_person: 1 lines' in line and '(not chosen)' in line for line in logged))
+            self.assertTrue(any('Chosen (variant, feminine, names): 4 of 7 lines' in line for line in logged), logged)
+            listing = (tmp / 'context-candidates.csv').read_text(encoding='utf-8-sig')
+            self.assertIn('feminine,Dialogue/Back,She came back.,Она вернулась.', listing)
+            # Applying: the chosen lines, each with its own key's references, as a refresh.
+            apply_args = SimpleNamespace(**{**vars(self.build_args(tmp)), 'refresh_context': 'apply', 'refresh_groups': 'variant,feminine'})
+            self.assertFalse(packbuild.refresh_context(rows, apply_args, logged.append))
+        game, lines, references, refresh = asked[0]
+        self.assertEqual((game, refresh), ('steam:4115450', True))
+        self.assertEqual(lines, [('Are you ready?', 'Dialogue/Ready_M'), ('Are you ready?', 'Dialogue/Ready_F'), 'She came back.'])
+        self.assertEqual(references[('Are you ready?', 'Dialogue/Ready_F')]['ru'], 'Ты готова?')
+        with self.assertRaises(packbuild.BuildError):
+            packbuild.refresh_context(rows, SimpleNamespace(**{**vars(self.build_args(tmp)), 'refresh_context': 'count', 'refresh_groups': 'everything'}), logged.append)
+
+    def test_a_set_of_arabic_by_hash_gives_a_keyed_line_its_own(self):
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp)
+        (tmp / 'set.json').write_text(json.dumps({'lines': [[line_hash('Are you ready?'), 'هل أنت مستعد؟'],
+                                                            [line_hash('Are you ready?', 'Dialogue/Ready_F'), 'هل أنتِ مستعدة؟']]}), encoding='utf-8')
+        rows = rows_of(ALIGNED)[:2]
+        packbuild.apply_by_hash(rows, tmp / 'set.json', lambda *_: None)
+        self.assertEqual([r.arabic for r in rows], ['هل أنت مستعد؟', 'هل أنتِ مستعدة؟'])
 
 
 class FromTheGame(unittest.TestCase):

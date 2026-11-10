@@ -309,7 +309,11 @@ def _unreal_paks(folder: Path) -> Source:
             except locres_format.LocResError:
                 pass
         if others:
-            source.extra['references'] = locres_pivot.by_source(locres_pivot.align(source.locres, others))
+            aligned = locres_pivot.align(source.locres, others)
+            source.extra['references'] = locres_pivot.by_source(aligned)
+            # Each key's own references, and the keys that keep their own Arabic (the same English, said to someone else).
+            source.extra['references_by_key'] = locres_pivot.by_key(aligned)
+            source.extra['variant_keys'] = locres_pivot.variant_keys(aligned)
             roles = [f'{c} ({"the original" if c == picked["original"] else "for gender"})' for c in others]
             source.notes.append(f'Read the game\'s {" and ".join(roles)} text as context for {len(source.extra["references"])} lines.')
     version = None

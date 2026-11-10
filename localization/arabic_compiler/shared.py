@@ -26,8 +26,11 @@ class SharedError(RuntimeError):
     pass
 
 
-def line_hash(english: str) -> str:
-    return hashlib.sha256(english.encode('utf-8')).hexdigest()
+def line_hash(english: str, key: str | None = None) -> str:
+    """A line's hash in the shared memory: of its English alone, or of its English and its key, for a line whose
+    English is also said elsewhere to someone else, so each keeps its own Arabic (see locres_pivot.variant_keys)."""
+    text = english if not key else f'{english}\0{key}'
+    return hashlib.sha256(text.encode('utf-8')).hexdigest()
 
 
 def game_key(steam_app_id=None, game_id=None) -> str:
@@ -89,21 +92,28 @@ class SharedMemory:
         """The game's glossary on the server ({terms, player}), made (or added to) from these candidates and sample lines."""
         return self._post('/translations/glossary', {'game': game, 'terms': terms[:300], 'samples': samples[:40], 'context': context[:300]})
 
-    def translate(self, game: str, lines: list, context: str = '', log=print, references: dict | None = None):
-        """Has the server translate [english] it doesn't have yet. Returns ({english: arabic}, {english: why not}, limited).
-        `references` is {english: {culture: text}}: the same lines in the game's other languages, sent beside each."""
+    def translate(self, game: str, lines: list, context: str = '', log=print, references: dict | None = None, refresh: bool = False):
+        """Has the server translate lines it doesn't have yet. A line is its English, or (english, key) for a line
+        kept under its key. Returns ({line: arabic}, {line: why not}, limited). `references` is {line: {culture: text}}:
+        the same lines in the game's other languages, sent beside each. `refresh` (admins only) has stored machine
+        lines translated again."""
         references = references or {}
+        done, failed, limited = {}, {}, False
+
+        def parts(item):
+            return (item, None) if isinstance(item, str) else (item[0], item[1])
+
+        by_hash = {line_hash(*parts(item)): item for item in lines}
 
         def line(h):
+            english, key = parts(by_hash[h])
             refs = locres_pivot.clean_references(references.get(by_hash[h]))
-            return {'hash': h, 'english': by_hash[h], **({'ref': refs} if refs else {})}
+            return {'hash': h, 'english': english, **({'key': key} if key else {}), **({'ref': refs} if refs else {})}
 
-        done, failed, limited = {}, {}, False
-        by_hash = {line_hash(english): english for english in lines}
         hashes = list(by_hash)
         for i in range(0, len(hashes), TRANSLATE_BATCH):
             chunk = hashes[i:i + TRANSLATE_BATCH]
-            answer = self._post('/translations/translate', {'game': game, 'context': context,
+            answer = self._post('/translations/translate', {'game': game, 'context': context, **({'refresh': True} if refresh else {}),
                                                             'lines': [line(h) for h in chunk]})
             for h, arabic in (answer.get('arabic') or {}).items():
                 if h in by_hash:

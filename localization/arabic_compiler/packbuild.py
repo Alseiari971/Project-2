@@ -60,6 +60,7 @@ from pathlib import Path, PurePosixPath
 from . import bethesda
 from . import glossary as glossary_module
 from . import locres as locres_format
+from . import locres_pivot
 from . import loose
 from . import recipes
 from . import retoc
@@ -225,6 +226,12 @@ def parse_args(argv=None):
                                          'version, such as an Arabic title logo texture (.uasset/.uexp/.ubulk at <Project>/Content/...)')
     c.add_argument('--logo-image', help='unreal: your Arabic title logo, a transparent PNG; for games whose title logo is a video pair '
                                         '(..._RGB.mp4 and ..._Alpha.mp4), the pair is made again from it with the game\'s size, timing and fades')
+    c.add_argument('--refresh-context', choices=['count', 'apply'],
+                   help='the lines the game\'s other languages can change (the same English said to someone else, Russian that '
+                        'marks a woman, short names with a Chinese original): "count" says how many and writes them to '
+                        'context-candidates.csv, spending nothing; "apply" has the shared memory translate them again (an admin\'s token)')
+    c.add_argument('--refresh-groups', metavar='LIST', help='with --refresh-context: which groups, of variant, feminine, second_person, '
+                                                            'names (default: variant,feminine,names)')
     c.add_argument('--chapter-cards', metavar='FOLDER',
                    help='unreal: Arabic chapter title cards, a folder of transparent PNGs named after the game\'s card videos '
                         '(Chap_Sizhen.png for Chap_Sizhen_RGB.mp4 + Chap_Sizhen_Alpha.mp4); each pair is made again like the title logo\'s')
@@ -283,28 +290,110 @@ def shared_translate(rows, args, log) -> dict:
             args.font_targets = ','.join(fonts)
             log(f'The server knows {len(fonts)} font names for this game.')
     # Lines with nothing to translate (numbers, placeholders) stay as they are, as with the other translators.
-    wanted = list(dict.fromkeys(r.source for r in rows if not r.arabic and _LETTERS.search(_TOKENS.sub('', r.source))))
+    wanted = list(dict.fromkeys(line_item(r, args) for r in rows if not r.arabic and _LETTERS.search(_TOKENS.sub('', r.source))))
     try:
-        found = memory.lookup(game, [line_hash(s) for s in wanted])
-        by_hash = {line_hash(s): s for s in wanted}
-        answers = {by_hash[h]: arabic for h, arabic in found.items() if h in by_hash}
+        hashes = [item_hash(i) for i in wanted] + [line_hash(i[0]) for i in wanted if not isinstance(i, str)]
+        found = memory.lookup(game, list(dict.fromkeys(hashes)))
+        answers = {}
+        for item in wanted:
+            # A line kept under its key: its own Arabic, else the one stored for its English alone.
+            arabic = found.get(item_hash(item)) or (None if isinstance(item, str) else found.get(line_hash(item[0])))
+            if arabic:
+                answers[item] = arabic
         log(f'Shared memory had {len(answers)} of {len(wanted)} lines.')
         failed = {}
-        rest = [s for s in wanted if s not in answers]
+        rest = [i for i in wanted if i not in answers]
         if rest and not args.no_translate:
-            done, failed, _ = memory.translate(game, rest, context=args.context, log=log,
-                                               references=getattr(args, 'references', None) or {})
+            done, failed, _ = memory.translate(game, rest, context=args.context, log=log, references=item_references(rest, args))
             answers.update(done)
+            failed = {(i if isinstance(i, str) else i[0]): why for i, why in failed.items()}
     except SharedError as err:
         raise BuildError(str(err)) from None
     for row in rows:
-        arabic = answers.get(row.source)
+        arabic = answers.get(line_item(row, args))
         # Checked here too: a broken line never goes into a pack.
         if not row.arabic and arabic and problem_with(row.source, arabic) is None:
             row.arabic = arabic
         elif not row.arabic and _LETTERS.search(_TOKENS.sub('', row.source)) is None:
             row.arabic = row.source
     return failed
+
+
+def line_item(row, args):
+    """A row as the memory keeps it: its English, or (english, key) for a line whose English is said under other
+    keys too with other references (locres_pivot.variant_keys), which keeps its own Arabic."""
+    variants = getattr(args, 'variant_keys', None) or ()
+    return (row.source, row.key) if row.key and row.key in variants else row.source
+
+
+def item_hash(item) -> str:
+    return line_hash(item) if isinstance(item, str) else line_hash(*item)
+
+
+def item_references(items, args) -> dict:
+    """{line: {culture: text}}: a keyed line's own references, another line's most common ones."""
+    by_source = getattr(args, 'references', None) or {}
+    by_key = getattr(args, 'references_by_key', None) or {}
+    out = {}
+    for item in items:
+        refs = by_source.get(item) if isinstance(item, str) else by_key.get(item[1])
+        if refs:
+            out[item] = refs
+    return out
+
+
+def refresh_context(rows, args, log) -> bool:
+    """--refresh-context: the lines the game's other languages can change (locres_pivot.context_candidates), counted,
+    and with "apply" translated again in the shared memory (an admin's token). Returns True for "count": the build
+    stops there, having spent nothing."""
+    by_key = getattr(args, 'references_by_key', None) or {}
+    if not by_key:
+        raise BuildError('This game has no other languages to read as context (no .locres beside the English one).')
+    groups = locres_pivot.context_candidates(rows, by_key, getattr(args, 'variant_keys', None) or set())
+    wanted = {name.strip() for name in (args.refresh_groups or 'variant,feminine,names').split(',') if name.strip()}
+    unknown = wanted - set(groups)
+    if unknown:
+        raise BuildError(f'--refresh-groups takes {", ".join(groups)}; not {", ".join(sorted(unknown))}.')
+    log('Lines the game\'s other languages can change:')
+    notes = {'variant': 'the same English under several keys, said to someone else: each gets its own Arabic',
+             'feminine': 'the Russian line marks a woman (past tense -ла, готова, должна, ...)',
+             'second_person': '"you" with ты/твой in Russian and no feminine marker: gender can\'t be told from the text',
+             'names': 'short names (skills, items, sects, titles) with a Chinese original'}
+    for name, lines in groups.items():
+        chars = sum(len(english) for _, english in lines)
+        log(f'  {name}: {len(lines)} lines, {chars} characters{"" if name in wanted else " (not chosen)"} - {notes[name]}')
+    chosen = [(key, english) for name in groups if name in wanted for key, english in groups[name]]
+    total_chars = sum(len(english) for _, english in chosen)
+    log(f'Chosen ({", ".join(n for n in groups if n in wanted)}): {len(chosen)} of {len({r.source for r in rows})} lines, {total_chars} characters of English.')
+    listing = Path(args.out) / 'context-candidates.csv'
+    listing.parent.mkdir(parents=True, exist_ok=True)
+    with open(listing, 'w', encoding='utf-8-sig', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['group', 'key', 'english'] + sorted({c for refs in by_key.values() for c in refs}))
+        cultures = sorted({c for refs in by_key.values() for c in refs})
+        for name, lines in groups.items():
+            for key, english in lines:
+                writer.writerow([name, key, english] + [by_key.get(key, {}).get(c, '') for c in cultures])
+    log(f'Wrote {listing}: every candidate with its other languages, to look through.')
+    if args.refresh_context == 'count':
+        log('Counted only: nothing was translated. Run again with --refresh-context apply to translate the chosen lines.')
+        return True
+    if not args.shared:
+        raise BuildError('--refresh-context apply translates in the shared memory: give --shared.')
+    auth = credentials(os.environ)
+    if not auth:
+        raise BuildError('Set GAMESHELF_TOKEN to an admin\'s access token from your GameShelf account.')
+    variants = getattr(args, 'variant_keys', None) or set()
+    references = {((english, key) if key in variants else english): by_key.get(key) for key, english in chosen}
+    items = list(references)
+    try:
+        done, failed, limited = SharedMemory(args.shared, auth).translate(
+            game_key(args.steam_app_id, args.game_id), items, context=args.context, log=log, references=references, refresh=True)
+    except SharedError as err:
+        raise BuildError(str(err)) from None
+    log(f'Translated {len(done)} lines again with their other languages ({len(failed)} failed{", stopped at the limit" if limited else ""}). '
+        'Reviewed lines were left as they are.')
+    return False
 
 
 def choose_unity_tools(args, log):
@@ -329,7 +418,8 @@ def apply_by_hash(rows, path, log):
     table = dict(data['lines']) if isinstance(data, dict) and isinstance(data.get('lines'), list) else data
     found = 0
     for row in rows:
-        arabic = table.get(line_hash(row.source))
+        # A line kept under its key (the same English, said to someone else) has its own Arabic in the set.
+        arabic = (table.get(line_hash(row.source, row.key)) if row.key else None) or table.get(line_hash(row.source))
         if arabic and not row.arabic and problem_with(row.source, arabic) is None:
             row.arabic = arabic
             found += 1
@@ -425,12 +515,31 @@ def translate_rows(rows, args, out: Path, log):
                                 references=getattr(args, 'references', None) or {})
         if not args.no_glossary:
             translator.game_glossary = local_glossary(translator, [r.source for r in rows], out, log)
-        done, failed = translator.translate(missing)
+        variants = getattr(args, 'variant_keys', None) or set()
+        done, failed = translator.translate([r.source for r in rows if not r.arabic and r.key not in variants])
+        for row in rows:
+            if not row.arabic and row.key not in variants:
+                row.arabic = done.get(row.source)
+        # Lines kept under their key (the same English, said to someone else): each with its own key's references.
+        # A round holds each English line once, so its request can't mix two keys' references.
+        by_key = getattr(args, 'references_by_key', None) or {}
+        rounds = []
+        for row in rows:
+            if not row.arabic and row.key in variants:
+                for batch in rounds:
+                    if row.source not in batch:
+                        batch[row.source] = row
+                        break
+                else:
+                    rounds.append({row.source: row})
+        for batch in rounds:
+            translator.references = {source: by_key.get(row.key) or {} for source, row in batch.items()}
+            done, more = translator.translate(list(batch))
+            failed.update(more)
+            for source, row in batch.items():
+                row.arabic = done.get(source)
     finally:
         cache.close()
-    for row in rows:
-        if not row.arabic:
-            row.arabic = done.get(row.source)
     return failed
 
 
@@ -1730,6 +1839,10 @@ def build(args, log=print) -> Path:
         try:
             # The same lines in the game's other languages, when it has them (see sources.py and locres_pivot.py).
             args.references = (source.extra or {}).get('references') or {}
+            args.references_by_key = (source.extra or {}).get('references_by_key') or {}
+            args.variant_keys = (source.extra or {}).get('variant_keys') or set()
+            if getattr(args, 'refresh_context', None) and refresh_context(rows, args, log):
+                return None
             failed = translate_rows(rows, args, out, log)
         except TranslationError as err:
             raise BuildError(str(err)) from None

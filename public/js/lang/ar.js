@@ -803,6 +803,7 @@ export const AR = {
   'Give the token a name.': 'أعطِ الرمز اسمًا.',
   'You already have 10 access tokens. Delete one first.': 'لديك 10 رموز وصول بالفعل. احذف واحدًا أولًا.',
   "Shared translation isn't set up on this server.": 'الترجمة المشتركة غير مفعّلة على هذا الخادم.',
+  'Only an admin can have stored lines translated again.': 'إعادة ترجمة الأسطر المحفوظة للمشرفين فقط.',
   'Too many new copies of GameShelf from this address today. Please try again tomorrow.': 'نُسخ جديدة كثيرة من GameShelf من هذا العنوان اليوم. حاول مجددًا غدًا.',
   "Arabic subtitles aren't set up on this server.": 'الترجمة العربية غير مفعّلة على هذا الخادم.',
   'Only admins can see this.': 'هذه الصفحة للمشرفين فقط.',

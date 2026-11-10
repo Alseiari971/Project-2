@@ -115,6 +115,18 @@ Some lines come with the same line in the game's other languages, as extra field
 const CULTURE_RE = /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,4})?$/;
 const MAX_REFERENCE_CHARS = 600;
 
+/**
+ * A line's hash in the memory: of its English alone, or, for a line whose English is also said elsewhere to
+ * someone else (the same "Are you ready?" to a man under one key and a woman under another), of its English and
+ * its key, so each keeps its own Arabic. The pack builder decides which (locres_pivot.py) and falls back to the
+ * English-only hash when a keyed line isn't there.
+ */
+function lineHash(english, key) {
+  if (key === undefined || key === null || key === '') return sha256(english);
+  if (typeof key !== 'string' || key.length > 300) return null;
+  return sha256(`${english}\0${key}`);
+}
+
 /** A line's references as they may go to the translator: up to three, { culture: text }, nothing else. */
 function cleanReferences(ref) {
   const out = {};
@@ -259,6 +271,12 @@ function createTranslationMemory({ db, env = process.env, fetch = globalThis.fet
   const select = db.prepare('SELECT line_hash, arabic FROM translation_memory WHERE game = ? AND line_hash = ?');
   const insert = db.prepare(`INSERT INTO translation_memory (game, line_hash, arabic, origin, model) VALUES (?, ?, ?, 'machine', ?)
     ON CONFLICT (game, line_hash) DO NOTHING`);
+  // An admin's refresh (a line translated again with the game's other languages as context): machine lines only,
+  // never over a reviewed one.
+  const refreshLine = db.prepare(`INSERT INTO translation_memory (game, line_hash, arabic, origin, model) VALUES (?, ?, ?, 'machine', ?)
+    ON CONFLICT (game, line_hash) DO UPDATE SET arabic = excluded.arabic, model = excluded.model, created_at = datetime('now')
+    WHERE translation_memory.origin = 'machine'`);
+  const originOf = db.prepare('SELECT origin FROM translation_memory WHERE game = ? AND line_hash = ?');
   const usageToday = db.prepare('SELECT lines FROM translation_usage WHERE user_id = ? AND day = ?');
   const usageMonth = db.prepare('SELECT COALESCE(SUM(chars), 0) AS chars FROM translation_usage WHERE day LIKE ?');
   const addUsage = db.prepare(`INSERT INTO translation_usage (user_id, day, lines, chars) VALUES (?, ?, ?, ?)
@@ -353,21 +371,23 @@ function createTranslationMemory({ db, env = process.env, fetch = globalThis.fet
    * remainder), priority puts the request ahead in the AI's queue. The answer
    * also says how many new lines the AI translated (used).
    */
-  async function translate(user, game, lines, { context = '', dailyLines: planDaily = null, maxLines = null, priority = 0 } = {}) {
+  async function translate(user, game, lines, { context = '', dailyLines: planDaily = null, maxLines = null, priority = 0, refresh = false } = {}) {
     checkGame(game);
     if (!apiKey) throw new TranslationLimit('Shared translation isn\'t set up on this server.');
     const arabic = {};
     const failed = {};
     const todo = [];
-    for (const { hash, english, ref } of lines) {
+    for (const { hash, english, ref, key } of lines) {
       if (typeof english !== 'string' || !english.trim() || english.length > MAX_LINE_CHARS) {
         failed[hash] = 'the line is empty or too long';
-      } else if (sha256(english) !== hash) {
+      } else if (lineHash(english, key) !== hash) {
         failed[hash] = 'the hash isn\'t this line\'s';
       } else {
         const row = select.get(game, hash);
-        if (row) arabic[hash] = row.arabic;
-        else if (!todo.some((t) => t.hash === hash)) todo.push({ hash, english, ref: cleanReferences(ref) });
+        // A refresh translates a machine line again; a reviewed one stays as it is.
+        const again = refresh && row && originOf.get(game, hash)?.origin === 'machine';
+        if (row && !again) arabic[hash] = row.arabic;
+        else if (!todo.some((t) => t.hash === hash)) todo.push({ hash, english, ref: cleanReferences(ref), again });
       }
     }
     if (!todo.length) return { arabic, failed, limited: false, used: { lines: 0, chars: 0 } };
@@ -378,6 +398,7 @@ function createTranslationMemory({ db, env = process.env, fetch = globalThis.fet
     try {
       // Someone may have translated some of these while this waited.
       const fresh = todo.filter((t) => {
+        if (t.again) return true;
         const row = select.get(game, t.hash);
         if (row) arabic[t.hash] = row.arabic;
         return !row;
@@ -401,7 +422,7 @@ function createTranslationMemory({ db, env = process.env, fetch = globalThis.fet
       let next = 0;
       const worker = async () => {
         while (next < batches.length) {
-          const lines = batches[next++].map((t, i) => [i, t.english, t.hash, t.ref]);
+          const lines = batches[next++].map((t, i) => [i, t.english, t.hash, t.ref, t.again]);
           const known = glossary(game);
           const englishLines = lines.map(([, english]) => english);
           const extra = (known ? glossaryPrompt(known, englishLines) : '') + examplesPrompt(examplesOf.all(game), englishLines);
@@ -410,9 +431,9 @@ function createTranslationMemory({ db, env = process.env, fetch = globalThis.fet
           addUsage.run(user.id, day, lines.length, chars);
           used.lines += lines.length;
           used.chars += chars;
-          for (const [i, , hash] of lines) {
+          for (const [i, , hash, , again] of lines) {
             if (i in good) {
-              insert.run(game, hash, good[i], model);
+              (again ? refreshLine : insert).run(game, hash, good[i], model);
               arabic[hash] = good[i];
             } else {
               failed[hash] = bad[i];
@@ -518,4 +539,4 @@ function createTranslationMemory({ db, env = process.env, fetch = globalThis.fet
   return { configured: Boolean(apiKey), lookup, translate, review, stored, model, glossary, ensureGlossary, setGlossary };
 }
 
-module.exports = { createTranslationMemory, createPriorityGate, cleanReferences, PIVOT_RULES, problemWith, matchBreaks, unshapeArabic, examplesPrompt, sha256, TranslationLimit, GAME_RE, cleanGlossary, glossaryPrompt, GLOSSARY_PROMPT };
+module.exports = { createTranslationMemory, createPriorityGate, cleanReferences, lineHash, PIVOT_RULES, problemWith, matchBreaks, unshapeArabic, examplesPrompt, sha256, TranslationLimit, GAME_RE, cleanGlossary, glossaryPrompt, GLOSSARY_PROMPT };

@@ -186,5 +186,81 @@ class Fitting(unittest.TestCase):
         self.assertIn('no Arabic to say', done[1]['error'])  # one bad line doesn't stop the rest
 
 
+@unittest.skipUnless(FFMPEG, 'needs ffmpeg')
+class SyntheticVoices(unittest.TestCase):
+    """Characters are cast to synthetic voice presets: nobody's voice is cloned, and the game's audio is only measured."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp)
+        speech = tone(self.tmp / 'speech.wav', 1.2).read_bytes()
+        self.seen = seen = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                body = self.rfile.read(int(self.headers['Content-Length']))
+                seen.append((self.path, self.headers.get('Content-Type', ''), body))
+                self.send_response(200)
+                self.send_header('Content-Length', str(len(speech)))
+                self.end_headers()
+                self.wfile.write(speech)
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        env = mock.patch.dict(os.environ, {'GAMESHELF_TTS_URL': f'http://127.0.0.1:{server.server_address[1]}'})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def test_each_speaker_is_said_in_its_cast_preset_and_the_narrator_says_the_rest(self):
+        lines = [{'key': 'D/1', 'speaker': 'Soul', 'arabic': 'لن أتراجع.', 'duration_ms': 1300},
+                 {'key': 'D/2', 'arabic': 'وهكذا بدأت الرحلة.', 'duration_ms': 1300}]
+        done = dub.dub_lines(lines, self.tmp / 'work', cast={'Soul': 'male_protagonist_deep'}, log=lambda *_: None)
+        self.assertEqual([d.get('preset') for d in done], ['male_protagonist_deep', 'narrator_epic'])
+        self.assertEqual([d['voice'] for d in done], ['server', 'server'])  # the TTS server's own speakers
+        path, kind, body = self.seen[0]
+        self.assertEqual((path, kind), ('/api/v1/tts', 'application/json'))
+        self.assertEqual(json.loads(body), {'text': 'لن أتراجع.', 'language': 'ar', 'dialect': 'MSA', 'voice': 'male_protagonist_deep'})
+        self.assertLessEqual(abs(done[0]['final_ms'] - 1300), 60)
+        self.assertIn('male_protagonist_deep', tts.VOICE_ARCHETYPES)
+
+    def test_a_speaker_nobody_cast_or_a_voice_that_isnt_a_presets_name_stops_the_dub_before_it_starts(self):
+        with self.assertRaises(dub.DubError) as caught:
+            dub.dub_lines([{'key': 'D/1', 'speaker': 'Zuo Shang', 'arabic': 'نص', 'duration_ms': 900}], self.tmp / 'work', cast={'Soul': 'male_protagonist_deep'})
+        self.assertIn('Zuo Shang', str(caught.exception))
+        with self.assertRaises(dub.DubError):
+            dub.check_cast({'Soul': 'C:/game/voice.wav'}, [])
+        self.assertEqual(self.seen, [])
+
+    def test_the_voice_banks_recordings_are_used_only_when_it_says_where_they_came_from(self):
+        bank = self.tmp / 'voice-bank'
+        bank.mkdir()
+        tone(bank / 'female_warrior_calm.wav', 1.0)
+        line = [{'key': 'D/3', 'speaker': 'Hong', 'arabic': 'استعد.', 'duration_ms': 1200}]
+        cast = {'Hong': 'female_warrior_calm'}
+        done = dub.dub_lines(line, self.tmp / 'work', cast=cast, voice_bank=bank, log=lambda *_: None)
+        self.assertIn('voices.json', done[0]['error'])  # an unaccounted recording isn't used
+        self.assertEqual(self.seen, [])
+        (bank / 'voices.json').write_text(json.dumps({'female_warrior_calm': {'source': 'Recorded for GameShelf', 'license': 'CC0'}}))
+        done = dub.dub_lines(line, self.tmp / 'work', cast=cast, voice_bank=bank, log=lambda *_: None)
+        self.assertEqual(done[0]['voice'], 'bank')
+        self.assertEqual(self.seen[0][0], '/api/v1/tts/clone')  # said in the bank's voice
+        self.assertIn(b'filename="female_warrior_calm.wav"', self.seen[0][2])
+        # A "bank" inside the game's folder is the game's actors: refused.
+        game = self.tmp / 'Game'
+        shutil.copytree(bank, game / 'Audio')
+        done = dub.dub_lines(line, self.tmp / 'work', cast=cast, voice_bank=game / 'Audio', game_dir=game, log=lambda *_: None)
+        self.assertIn('actors', done[0]['error'])
+
+    def test_the_games_lines_are_only_measured(self):
+        original = tone(self.tmp / 'Voice_001.wav', 1.75)
+        self.assertLessEqual(abs(dub.original_durations({'D/1': original, 'D/missing': self.tmp / 'nope.wav'})['D/1'] - 1750), 40)
+        self.assertNotIn('D/missing', dub.original_durations({'D/missing': self.tmp / 'nope.wav'}))
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const { createApp } = require('../server');
 const { openDatabase } = require('../src/db');
 const { createLocalProvider } = require('../src/games/local');
-const { createTranslationMemory, sha256, problemWith, matchBreaks, unshapeArabic, examplesPrompt, cleanReferences } = require('../src/translation-memory');
+const { createTranslationMemory, sha256, problemWith, matchBreaks, unshapeArabic, examplesPrompt, cleanReferences, lineHash } = require('../src/translation-memory');
 const { createArabicGames } = require('../src/arabic-games');
 const { createPlans } = require('../src/plans');
 
@@ -38,7 +38,7 @@ async function start(env = {}, openai = fakeOpenAI()) {
   const server = createApp({ db, games: createLocalProvider(), translations, arabicGames, plans }).listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
-  return { db, server, base, openai };
+  return { db, server, base, openai, translations };
 }
 
 function client(base) {
@@ -126,6 +126,43 @@ test('a line\'s other languages go to the translator beside it, with the rules f
   // Without references the rules for them aren't sent.
   await alice('/api/translations/translate', { method: 'POST', body: { game, lines: [line('New Game')] } });
   assert.doesNotMatch(openai.calls[1].body.messages[0].content, /other languages/);
+});
+
+test('the same English under two keys keeps two Arabic lines; an admin can have machine lines translated again', async (t) => {
+  const { server, base, db, openai, translations } = await start();
+  t.after(() => server.close());
+  const alice = await signedIn(base, 'alice');
+  const game = 'steam:4115450';
+  const keyed = (english, key, ref) => ({ hash: sha256(`${english}\0${key}`), english, key, ref });
+  const him = keyed('Are you ready?', 'Dialogue/Ready_M', { ru: 'Ты готов?' });
+  const her = keyed('Are you ready?', 'Dialogue/Ready_F', { ru: 'Ты готова?' });
+  const plain = line('Are you ready?');
+  const first = await alice('/api/translations/translate', { method: 'POST', body: { game, lines: [him, her, plain] } });
+  assert.deepEqual(first.body.failed, {});
+  assert.equal(Object.keys(first.body.arabic).length, 3); // three lines in the memory, one English
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM translation_memory WHERE game = ?').get(game).n, 3);
+  const sent = JSON.parse(openai.calls[0].body.messages[1].content);
+  assert.deepEqual(sent.map((row) => row.ru), ['Ты готов?', 'Ты готова?', undefined]);
+  // A key that isn't the hash's is refused, like a wrong hash.
+  const wrong = await alice('/api/translations/translate', { method: 'POST', body: { game, lines: [{ ...her, key: 'Dialogue/Other' }] } });
+  assert.match(wrong.body.failed[her.hash], /hash/);
+  assert.equal(lineHash('a'), sha256('a'));
+  assert.equal(lineHash('a', 5), null);
+
+  // Only an admin refreshes; a reviewed line stays, a machine line is translated again.
+  assert.equal((await alice('/api/translations/translate', { method: 'POST', body: { game, lines: [plain], refresh: true } })).status, 403);
+  db.prepare("UPDATE users SET role = 'admin' WHERE username = 'alice'").run();
+  translations.review(game, 'Are you ready?', 'هل أنت جاهز؟');
+  const before = openai.calls.length;
+  const again = await alice('/api/translations/translate', { method: 'POST', body: { game, lines: [plain, her], refresh: true } });
+  assert.equal(again.status, 200);
+  assert.equal(again.body.arabic[plain.hash], 'هل أنت جاهز؟'); // the reviewed line, untouched
+  assert.equal(openai.calls.length, before + 1);
+  assert.deepEqual(JSON.parse(openai.calls[before].body.messages[1].content).map((row) => row.text), ['Are you ready?']); // only hers
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM translation_memory WHERE game = ?').get(game).n, 3);
+  // Without refresh, stored lines cost nothing, as before.
+  await alice('/api/translations/translate', { method: 'POST', body: { game, lines: [him, her, plain] } });
+  assert.equal(openai.calls.length, before + 1);
 });
 
 test('references are a few short texts by language, and nothing else', () => {
