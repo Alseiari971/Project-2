@@ -71,6 +71,7 @@ export async function appSettingsView(app, params) {
         <h2>${t('Arabic subtitle packs')}</h2>
         <div id="arabic-packs"></div>
         <button class="btn btn-quiet" type="button" id="add-pack">${t('Add a pack')}</button>
+        <label class="check-row" id="steam-logo-row" hidden><input type="checkbox" id="steam-logo"> ${t('Show a game\'s Arabic logo in my Steam library too (your own custom artwork is kept and put back)')}</label>
         <div class="overlay-style" id="overlay-style" hidden>
           <h3>${t('Overlay subtitles')}</h3>
           <div class="lang-choices" role="radiogroup" aria-label="${t('Overlay subtitles')}">
@@ -128,6 +129,14 @@ export async function appSettingsView(app, params) {
   document.querySelectorAll('[data-overlay-style]').forEach((b) => b.addEventListener('click', async () => {
     showOverlayStyle(await desktop.setArabicOverlayStyle(b.dataset.overlayStyle));
   }));
+
+  // A pack's Arabic logo in the Steam library, when the player wants it. Saved at once.
+  if (desktop.arabicSteamLogo) {
+    const box = document.getElementById('steam-logo');
+    document.getElementById('steam-logo-row').hidden = false;
+    desktop.arabicSteamLogo().then((on) => { box.checked = on; }).catch(() => {});
+    box.addEventListener('change', async () => { box.checked = await desktop.setArabicSteamLogo(box.checked); });
+  }
 
   // Signed packs that give games Arabic: a patch the game loads, or the overlay.
   const KINDS = {

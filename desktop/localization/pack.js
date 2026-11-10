@@ -191,6 +191,12 @@ function checkManifest(manifest) {
   if (manifest.fontBundle !== undefined && !/^[\w.\-]{1,80}$/.test(manifest.fontBundle)) throw new PackError('The pack\'s font bundle name is invalid.');
   if (manifest.uguiFont !== undefined && !/^[\w .\-]{1,80}$/.test(manifest.uguiFont)) throw new PackError('The pack\'s UI font name is invalid.');
   if (manifest.fontStyle !== undefined && !FONT_STYLES.includes(manifest.fontStyle)) throw new PackError('The pack\'s font style is unknown.');
+  // The game's Arabic logo for the player's Steam library (see steam-grid.js): a PNG in the pack, not put into the game.
+  if (manifest.steamLogo !== undefined) {
+    const logo = manifest.steamLogo;
+    if (!logo || typeof logo !== 'object' || typeof logo.source !== 'string' || !/\.png$/i.test(logo.source) || !/^[0-9a-f]{64}$/.test(String(logo.sha256))
+      || !Number.isInteger(logo.size) || logo.size <= 0 || logo.size > 8 * 1024 * 1024) throw new PackError('The pack\'s Steam logo is invalid.');
+  }
   const godot = manifest.requires?.godot;
   if (godot !== undefined && godot !== 3 && godot !== 4) throw new PackError('The pack\'s Godot version must be 3 or 4.');
   if (!Array.isArray(manifest.files) || !manifest.files.length || manifest.files.length > MAX_FILES) {
@@ -276,14 +282,28 @@ async function readPack(dir, { publicKey, allowUnsigned = false } = {}) {
     }
     files.push({ source, target: file.target, sha256: file.sha256, size: file.size });
   }
-  return { dir: realDir, manifest, files };
+  let steamLogo = null;
+  if (manifest.steamLogo) {
+    const source = path.resolve(realDir, ...safeParts(manifest.steamLogo.source, 'A source path'));
+    if (!isInside(realDir, source)) throw new PackError(`"${manifest.steamLogo.source}" is outside the pack.`);
+    const info = await fs.lstat(source).catch(() => null);
+    if (!info?.isFile() || info.size !== manifest.steamLogo.size || (await sha256File(source)) !== manifest.steamLogo.sha256) {
+      throw new PackError('The pack\'s Steam logo doesn\'t match pack.json. The pack may be damaged.');
+    }
+    steamLogo = source;
+  }
+  return { dir: realDir, manifest, files, steamLogo };
 }
 
 /**
  * For whoever builds packs: writes pack.json for files already in the pack
  * folder (each { source, target }) and, given the private key, pack.json.sig.
  */
-async function writePack(dir, { files, privateKey, ...details }) {
+async function writePack(dir, { files, privateKey, steamLogo, ...details }) {
+  if (steamLogo) {
+    const file = path.join(dir, ...safeParts(steamLogo.source || steamLogo, 'A source path'));
+    details.steamLogo = { source: steamLogo.source || steamLogo, sha256: await sha256File(file), size: (await fs.stat(file)).size };
+  }
   const listed = [];
   for (const { source, target } of files) {
     const file = path.join(dir, ...safeParts(source, 'A source path'));

@@ -84,6 +84,8 @@ contextBridge.exposeInMainWorld('gameshelfDesktop', {
   addArabicPack: () => ipcRenderer.invoke('arabic:add-pack'),
   removeArabicPack: (id) => ipcRenderer.invoke('arabic:remove-pack', id),
   arabicOverlayStyle: () => ipcRenderer.invoke('arabic:overlay-style'),
+  arabicSteamLogo: () => ipcRenderer.invoke('arabic:steam-logo'),
+  setArabicSteamLogo: (on) => ipcRenderer.invoke('arabic:set-steam-logo', on),
   subtitleStudio: () => ipcRenderer.invoke('arabic:studio'),
   setSubtitleStudio: (settings) => ipcRenderer.invoke('arabic:set-studio', settings),
   setArabicOverlayStyle: (style) => ipcRenderer.invoke('arabic:set-overlay-style', style),

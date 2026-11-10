@@ -1825,6 +1825,7 @@ export const AR = {
   "Choose style tables folder": "اختر مجلد جداول الأنماط",
   "Arabic title logo: a PNG with a transparent background. GameShelf puts it where the game shows its English logo: title videos are made again with it (at their size, place and timing), and a menu's logo picture is replaced by it.": "شعار اللعبة بالعربي: صورة PNG بخلفية شفافة. يضعه GameShelf حيث تعرض اللعبة شعارها الإنجليزي: تُصنع فيديوهات العنوان من جديد به (بحجمها ومكانها وتوقيتها)، وتُستبدل به صورة الشعار في القائمة.",
   "Choose title logo image": "اختر صورة الشعار",
+  "Show a game's Arabic logo in my Steam library too (your own custom artwork is kept and put back)": "أظهر شعار اللعبة العربي في مكتبة Steam أيضاً (صورك المخصصة تُحفظ وتُعاد)",
   "Arabic chapter title cards (بطاقات الفصول): a folder of transparent PNGs, each named after the game's card video it replaces (Chap_Sizhen.png). The build log lists the cards the game has.": "بطاقات الفصول بالعربي: مجلد فيه صور PNG بخلفية شفافة، كل صورة باسم فيديو البطاقة الذي تستبدله في اللعبة (Chap_Sizhen.png). سجل البناء يذكر بطاقات اللعبة.",
   "Choose chapter cards folder": "اختر مجلد بطاقات الفصول",
   "Arabic text weight": "سماكة الخط العربي",

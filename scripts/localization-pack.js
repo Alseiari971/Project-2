@@ -77,6 +77,7 @@ async function main([command, folder, ...rest]) {
       ...(opt['font-bundle'] ? { fontBundle: opt['font-bundle'] } : {}),
       ...(opt['ugui-font'] ? { uguiFont: opt['ugui-font'] } : {}),
       ...(opt['font-style'] ? { fontStyle: opt['font-style'] } : {}),
+      ...(opt['steam-logo'] ? { steamLogo: opt['steam-logo'] } : {}),
       ...(Object.keys(requires).length ? { requires } : {}),
       files,
       privateKey: crypto.createPrivateKey(await fs.readFile(opt.key)),

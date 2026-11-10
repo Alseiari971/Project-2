@@ -26,6 +26,7 @@ const path = require('node:path');
 const { createMatcher } = require('./fingerprint');
 const { createLocalization, fill, TIER_ENGINES } = require('./index');
 const { createPackLibrary } = require('./library');
+const steamGrid = require('./steam-grid');
 const { OVERLAY_STYLES, DEFAULT_STYLE } = require('./overlay-manager');
 const { engineOf } = require('./dirprint');
 
@@ -60,12 +61,13 @@ function newerVersion(a, b) {
   return false;
 }
 
-function createArabicService({ dataDir, publicKey, overlayAvailable = process.platform === 'win32', localization, packs, catalog = null, builder = null, runtimeHooks = null }) {
+function createArabicService({ dataDir, publicKey, overlayAvailable = process.platform === 'win32', localization, packs, catalog = null, builder = null, runtimeHooks = null, steamRoots = null }) {
   localization ??= createLocalization({ dataDir, runtimeHooks });
   packs ??= createPackLibrary({ dir: path.join(dataDir, 'localization', 'packs'), publicKey });
   const prefsFile = path.join(dataDir, 'localization', 'arabic.json');
   const overlayFile = path.join(dataDir, 'localization', 'overlay.json');
   const fontsFile = path.join(dataDir, 'localization', 'fonts.json');
+  const steamLogoFile = path.join(dataDir, 'localization', 'steam-logo.json');
   const checks = new Map(); // game folder -> { at, result }
 
   async function readPrefs() {
@@ -217,6 +219,7 @@ function createArabicService({ dataDir, publicKey, overlayAvailable = process.pl
         try {
           const result = await localization.disable({ root: game.dir });
           checks.delete(game.dir);
+          await syncSteamLogo(game, null, false);
           if (result.kept.length) {
             await savePref(game.key, false);
             return { info: await info(game), error: why('Arabic is off. GameShelf left {count} files that were changed or added after it.', { count: result.kept.length }) };
@@ -266,6 +269,7 @@ function createArabicService({ dataDir, publicKey, overlayAvailable = process.pl
         const pack = (await packs.list()).find((p) => p.id === now.pack.id);
         await localization.enable({ root: game.dir, packDir: pack.dir, publicKey, steamAppId: game.steamAppId });
         checks.delete(game.dir);
+        if (await steamLogo()) await syncSteamLogo(game, pack.id, true);
         const remade = Boolean(verified?.updated || fontChanged) && !notice;
         return { mode: 'native', ok: true, ...(verified?.updated ? { updated: true } : {}), ...(remade ? { remade: true } : {}), ...(notice ? { error: notice } : {}) };
       }
@@ -350,6 +354,41 @@ function createArabicService({ dataDir, publicKey, overlayAvailable = process.pl
     }
   }
 
+  /** Whether a pack's Arabic logo also goes into the player's Steam library (off unless they turn it on). */
+  async function steamLogo() {
+    try {
+      return JSON.parse(await fs.readFile(steamLogoFile, 'utf8')).on === true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** The Steam library logo for one game, put in or taken out; never a reason for Play or the switch to fail. */
+  async function syncSteamLogo(game, packId, on) {
+    try {
+      if (!steamRoots || !game?.steamAppId) return 0;
+      const roots = await steamRoots();
+      if (!on) return await steamGrid.removeLogo({ roots, appId: game.steamAppId });
+      const pack = packId ? await packs.verify(packId) : null;
+      return pack?.steamLogo ? await steamGrid.applyLogo({ roots, appId: game.steamAppId, png: pack.steamLogo }) : 0;
+    } catch (err) {
+      console.error('Steam library logo:', err.message);
+      return 0;
+    }
+  }
+
+  async function setSteamLogo(on) {
+    await fs.mkdir(path.dirname(steamLogoFile), { recursive: true });
+    await fs.writeFile(steamLogoFile, JSON.stringify({ on: Boolean(on) }));
+    if (!on) {
+      // Turned off: GameShelf's logos come out of the library, and the player's own artwork goes back.
+      for (const pack of await packs.list()) {
+        if (pack.game?.steamAppId) await syncSteamLogo({ steamAppId: pack.game.steamAppId }, null, false);
+      }
+    }
+    return Boolean(on);
+  }
+
   async function setOverlayStyle(style) {
     if (!OVERLAY_STYLES.includes(style)) throw new Error(`Unknown overlay style "${style}".`);
     await fs.mkdir(path.dirname(overlayFile), { recursive: true });
@@ -357,7 +396,7 @@ function createArabicService({ dataDir, publicKey, overlayAvailable = process.pl
     return style;
   }
 
-  return { info, set, prepareLaunch, install, remake, fontFor, setFont, overlayStyle, setOverlayStyle, packs, localization, recover: () => localization.recover(), fill };
+  return { info, set, prepareLaunch, install, remake, fontFor, setFont, overlayStyle, setOverlayStyle, steamLogo, setSteamLogo, packs, localization, recover: () => localization.recover(), fill };
 }
 
 module.exports = { createArabicService, newerVersion };

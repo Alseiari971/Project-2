@@ -1756,6 +1756,12 @@ def sign(pack_dir: Path, args, kind: str):
         command += ['--title', args.title]
     if kind != 'overlay':
         command += ['--font-style', 'custom' if args.font else args.font_style]
+    # The Arabic title logo, for the player's Steam library too (the app copies it there when the player asks).
+    logo = getattr(args, 'logo_image', None)
+    if logo and Path(logo).is_file() and Path(logo).stat().st_size <= 8 * 1024 * 1024:
+        (pack_dir / 'steam').mkdir(exist_ok=True)
+        shutil.copyfile(logo, pack_dir / 'steam' / 'logo.png')
+        command += ['--steam-logo', 'steam/logo.png']
     if kind == 'overlay':
         for flag, value in (('--threshold', args.threshold), ('--region', args.region), ('--text-luma', args.text_luma)):
             if value is not None:

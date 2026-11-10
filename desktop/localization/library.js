@@ -66,6 +66,11 @@ function createPackLibrary({ dir, publicKey }) {
           await fs.mkdir(path.dirname(to), { recursive: true });
           await fs.copyFile(path.join(pack.dir, ...file.source.split(/[\\/]/)), to);
         }
+        if (pack.steamLogo) {
+          const to = path.join(temp, ...pack.manifest.steamLogo.source.split(/[\\/]/));
+          await fs.mkdir(path.dirname(to), { recursive: true });
+          await fs.copyFile(pack.steamLogo, to);
+        }
         await readPack(temp, { publicKey }); // the copy is whole
         await fs.rm(target, { recursive: true, force: true });
         await fs.rename(temp, target);

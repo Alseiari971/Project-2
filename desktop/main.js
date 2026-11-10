@@ -10,7 +10,7 @@ const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
 const { app, BrowserWindow, Menu, dialog, ipcMain, shell, desktopCapturer, screen, session, safeStorage } = require('electron');
 const { SETTINGS_KEYS, readSettings, writeSettings } = require('./settings');
-const { LAUNCHER_NAMES, scanInstalledGames, suggestedStatus } = require('./installed');
+const { LAUNCHER_NAMES, scanInstalledGames, suggestedStatus, defaultSteamRoots } = require('./installed');
 const { processesOf, listProcesses, stopProcesses } = require('./processes');
 const { createCustomGames, suggestName } = require('./custom-games');
 const { getGpuPreference, setGpuPreference, pickMainProgram, createProgramStore, gogUninstaller } = require('./game-options');
@@ -395,6 +395,7 @@ const arabic = createArabicService({
   publicKey: [packKey, localKey.publicKey].filter(Boolean),
   overlayAvailable: process.platform === 'win32' || Boolean(devOcrHelper),
   catalog: online.catalog,
+  steamRoots: () => defaultSteamRoots(),
   builder: { canBuild: (tier, engine) => packBuilder.canBuild(tier, engine), fromSet: buildFromSet, rebuild: rebuildArabic },
 });
 const packBuilder = createPackBuilder({
@@ -1106,6 +1107,8 @@ function registerIpc() {
     return { settings, allowed: true };
   });
   handle('arabic:overlay-style', async () => arabic.overlayStyle());
+  handle('arabic:steam-logo', async () => arabic.steamLogo());
+  handle('arabic:set-steam-logo', async (on) => arabic.setSteamLogo(Boolean(on)));
   handle('arabic:set-overlay-style', async (style) => {
     const saved = await arabic.setOverlayStyle(String(style));
     overlays?.setStyle(saved); // overlays already showing change at once
