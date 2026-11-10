@@ -783,7 +783,8 @@ function createApi({
     if (!translations) return res.status(503).json({ error: 'Shared translation isn\'t set up on this server.' });
     if (!Array.isArray(lines) || !lines.length || lines.length > 200) return res.status(400).json({ error: 'Send 1 to 200 lines at a time.' });
     try {
-      const wanted = lines.map((l) => ({ hash: String(l?.hash || ''), english: l?.english }));
+      // `ref`: the same line in the game's other languages ({ culture: text }), as context for the translator.
+      const wanted = lines.map((l) => ({ hash: String(l?.hash || ''), english: l?.english, ref: l?.ref }));
       // Lines already in the shared memory are free; new ones count against the player's plan.
       const allowance = plans.allowance(req.user, String(game));
       const result = await translations.translate(req.user, String(game), wanted, {

@@ -27,7 +27,7 @@ class StudioError extends Error {}
  * The builder's command line for a Studio build. `options`: { source, engine,
  * id, version, title, steamAppId, gameId, translate: 'shared' | 'provider' |
  * 'none', provider, model, pakList, reviewed, and for Unreal Engine 5: arabicLanguage, ueVersion, uiAssets,
- * logoAssets, logoImage, fontWeight, credit }.
+ * logoAssets, logoImage, chapterCards, fontWeight, credit }.
  */
 function buildArgs(options, { script, msgTool, keyFile, outDir, server }) {
   const o = options || {};
@@ -78,6 +78,8 @@ function buildArgs(options, { script, msgTool, keyFile, outDir, server }) {
     if (!/\.png$/i.test(String(o.logoImage))) throw new StudioError('The title logo is a PNG image (with a transparent background).');
     args.push('--logo-image', o.logoImage);
   }
+  // Chapter title cards: a folder of PNGs named after the game's card videos (Chap_Sizhen.png).
+  if (o.chapterCards) args.push('--chapter-cards', o.chapterCards);
   if (o.logoAssets) {
     if (!o.ueVersion) throw new StudioError('A cooked title logo needs the game\'s Unreal Engine version, like UE5_7.');
     args.push('--logo-assets', o.logoAssets);

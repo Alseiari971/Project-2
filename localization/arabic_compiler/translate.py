@@ -31,6 +31,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 
 from . import glossary as game_glossary_module
+from . import locres_pivot
 from .rtl import _TOKENS
 
 PROMPT_VERSION = 1
@@ -44,6 +45,7 @@ Rules:
 - Keep proper names of people and places in their usual Arabic spelling; keep brand and product names in Latin letters.
 - Match the tone: menus short and plain, dialogue natural.
 - Use Western digits (0-9) as written.
+- Keep the language clean and dignified: turn swearing and crude insults into measured Arabic (تبّاً، سحقاً، ويلك); never write explicit profanity, sexual vulgarity or blasphemy.
 Answer with JSON only: {"translations": [{"id": <id>, "arabic": "<translation>"}, ...]}, one item per input line, same ids."""
 
 
@@ -174,6 +176,8 @@ class Translator:
     glossary: dict = field(default_factory=dict)
     # The game's glossary (glossary.py): its terms and how to speak to the player, given to each batch for its own lines.
     game_glossary: dict = field(default_factory=dict)
+    # The same lines in the game's other languages, {english: {culture: text}} (locres_pivot.py): sent beside each line.
+    references: dict = field(default_factory=dict)
     max_retries: int = 5
     log: object = print
     sleep: object = time.sleep
@@ -188,6 +192,9 @@ class Translator:
         if not game_glossary_module.is_empty(self.game_glossary):
             # Only what of the game's glossary this line's translation depends on, so the glossary can grow.
             parts.append(game_glossary_module.line_key(self.game_glossary, source))
+        refs = locres_pivot.clean_references(self.references.get(source))
+        if refs:
+            parts.append(json.dumps(sorted(refs.items()), ensure_ascii=False))
         return hashlib.sha256('\0'.join(parts).encode('utf-8')).hexdigest()
 
     def system_prompt(self, lines=()):
@@ -198,6 +205,8 @@ class Translator:
             terms = '\n'.join(f'- {en} -> {ar}' for en, ar in self.glossary.items())
             extra += f'\nAlways translate these terms this way:\n{terms}'
         extra += game_glossary_module.prompt_section(self.game_glossary, list(lines))
+        if any(locres_pivot.clean_references(self.references.get(line)) for line in lines):
+            extra += locres_pivot.PIVOT_RULES
         return SYSTEM_PROMPT + extra
 
     def make_glossary(self, lines) -> dict:
@@ -237,7 +246,7 @@ class Translator:
 
     def _ask(self, lines: list, note: str = '') -> dict:
         """{id: arabic} for [(id, source)] from one request."""
-        user = json.dumps([{'id': i, 'text': text} for i, text in lines], ensure_ascii=False)
+        user = json.dumps([locres_pivot.prompt_row(i, text, self.references.get(text)) for i, text in lines], ensure_ascii=False)
         if note:
             user = f'{note}\n{user}'
         body, headers = self.provider.request(self.system_prompt([text for _, text in lines]), user)

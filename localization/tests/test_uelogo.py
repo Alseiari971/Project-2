@@ -151,6 +151,44 @@ class MakeVideos(unittest.TestCase):
             uelogo.timing(FFMPEG, self.tmp / 'flat.mp4')
 
 
+class ChapterCards(unittest.TestCase):
+    LISTING = ['P/Content/Movies/UI/ChapterVideo/Chap_Sizhen_Alpha.mp4', 'P/Content/Movies/UI/ChapterVideo/Chap_Sizhen_RGB.mp4',
+               'P/Content/MoviesHalfRes/UI/ChapterVideo/Chap_Sizhen_Alpha.mp4', 'P/Content/MoviesHalfRes/UI/ChapterVideo/Chap_Sizhen_RGB.mp4',
+               'P/Content/Movies/UI/ChapterVideo/Chap_Yingxiong_Zuiren_RGB.mp4', 'P/Content/Movies/UI/ChapterVideo/Chap_Yingxiong_Zuiren_Alpha.mp4',
+               'P/Content/Movies/PBZLogo_En_RGB.mp4', 'P/Content/Movies/PBZLogo_En_Alpha.mp4',
+               'P/Content/Movies/Chapel_RGB.mp4', 'P/Content/Movies/Chapel_Alpha.mp4', 'P/Content/Movies/Chapter_2_RGB.mp4']
+
+    def test_chapter_cards_are_the_video_pairs_named_for_a_chapter(self):
+        cards = uelogo.card_videos(self.LISTING)
+        self.assertEqual(sorted(cards), ['Chap_Sizhen', 'Chap_Yingxiong_Zuiren'])  # not the logo, a chapel, or half a pair
+        self.assertEqual(len(cards['Chap_Sizhen']), 2)  # its full-size and half-size copies
+
+    @unittest.skipUnless(FFMPEG, 'needs ffmpeg')
+    def test_each_card_with_a_picture_of_its_name_is_made_again_and_the_rest_are_listed(self):
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp)
+        rgb, alpha = game_logo_pair(tmp)
+        pictures = tmp / 'cards'
+        pictures.mkdir()
+        arabic_logo(pictures / 'chap_sizhen.PNG')  # names match whatever their capitals
+        (pictures / 'notes.txt').write_text('not a card')
+
+        def fetch(inside, dest):
+            shutil.copyfile(alpha if inside.endswith('_Alpha.mp4') else rgb, dest)
+
+        logged = []
+        staged = uelogo.stage_card_videos(pictures, self.LISTING, fetch, tmp / 'stage', logged.append, previews=tmp / 'previews')
+        self.assertEqual(sorted(inside.as_posix() for _, inside in staged), sorted(p for p in self.LISTING if '/Chap_Sizhen_' in p))
+        for path, _ in staged:
+            self.assertTrue(path.is_file())
+        self.assertTrue(any('without a picture yet (1 of 2): Chap_Yingxiong_Zuiren.png' in line for line in logged), logged)
+        self.assertTrue(any('Arabic chapter card: Chap_Sizhen (2 video pairs)' in line for line in logged))
+        self.assertTrue((tmp / 'previews' / 'Movies_UI_ChapterVideo_Chap_Sizhen.png').is_file())
+        # A folder with no matching picture changes nothing.
+        self.assertEqual(uelogo.stage_card_videos(tmp / 'previews', self.LISTING, fetch, tmp / 'stage2', logged.append), [])
+        self.assertFalse((tmp / 'stage2').exists())
+
+
 @unittest.skipUnless(FFMPEG and HAS_NODE, 'needs ffmpeg and Node.js')
 class InThePack(unittest.TestCase):
     def setUp(self):

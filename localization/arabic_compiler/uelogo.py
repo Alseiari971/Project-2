@@ -264,3 +264,71 @@ def stage_logo_videos(logo: Path, listing, fetch, stage: Path, log, previews: Pa
     if previews and staged:
         log(f'Logo previews (the game\'s logo left, the Arabic one right): {previews}')
     return staged
+
+
+# Chapter and act title cards played as a video pair: Chap_Sizhen_RGB.mp4 + Chap_Sizhen_Alpha.mp4.
+_CARD = re.compile(r'(?i)^(?:chap(?:ter)?|act|episode|stage_?title)(?![a-z])[\w-]*$')
+
+
+def card_videos(listing) -> dict:
+    """The game's chapter title cards that are video pairs: {card name: [(colour, transparency), ...]}, a card's
+    full-size and half-size copies together under its name (Chap_Sizhen)."""
+    files = {}
+    for name in listing:
+        name = str(name).strip().replace('\\', '/')
+        path = PurePosixPath(name)
+        m = _TRACK.match(path.name)
+        if m and _CARD.match(m.group('base')):
+            files.setdefault((str(path.parent), m.group('base')), {})[m.group('track').lower()] = name
+    cards = {}
+    for (_, base), tracks in sorted(files.items()):
+        if set(tracks) == {'rgb', 'alpha'}:
+            cards.setdefault(base, []).append((tracks['rgb'], tracks['alpha']))
+    return cards
+
+
+def stage_card_videos(folder: Path, listing, fetch, stage: Path, log, previews: Path | None = None) -> list:
+    """The Arabic chapter title cards as the game's own card videos: for each card of the game's with a picture of
+    its name in `folder` (Chap_Sizhen.png, a transparent PNG), the pair is made again from it like the title logo's
+    (make_pair). Says which cards the game has and which have no picture yet. Returns [(staged file, path inside)]."""
+    folder = Path(folder)
+    if not folder.is_dir():
+        raise LogoError(f'{folder} isn\'t a folder.')
+    cards = card_videos(listing)
+    if not cards:
+        log('Found no chapter title card videos (Chap..._RGB.mp4 with Chap..._Alpha.mp4) in the game.')
+        return []
+    pictures = {p.stem.lower(): p for p in folder.iterdir() if p.suffix.lower() == '.png'}
+    missing = [name for name in cards if name.lower() not in pictures]
+    if missing:
+        log(f'Chapter cards without a picture yet ({len(missing)} of {len(cards)}): ' + ', '.join(f'{n}.png' for n in missing))
+    wanted = {name: pictures[name.lower()] for name in cards if name.lower() in pictures}
+    if not wanted:
+        return []
+    ffmpeg = ffmpeg_exe()
+    if not ffmpeg:
+        raise LogoError('Making the chapter card videos needs ffmpeg. Install it (in PowerShell: winget install Gyan.FFmpeg --source winget), '
+                        'restart GameShelf and build again.')
+    staged = []
+    with tempfile.TemporaryDirectory() as tmp:
+        for name, picture in wanted.items():
+            png_size(picture)
+            for rgb, alpha in cards[name]:
+                game_rgb, game_alpha = Path(tmp) / 'game_RGB.mp4', Path(tmp) / 'game_Alpha.mp4'
+                fetch(rgb, game_rgb)
+                fetch(alpha, game_alpha)
+                out_rgb = stage.joinpath(*PurePosixPath(rgb).parts)
+                out_alpha = stage.joinpath(*PurePosixPath(alpha).parts)
+                made = make_pair(ffmpeg, picture, game_rgb, game_alpha, out_rgb, out_alpha)
+                if previews:
+                    parts = PurePosixPath(rgb).parts
+                    inside = parts[parts.index('Content') + 1:] if 'Content' in parts else parts[-2:]
+                    try:
+                        preview(ffmpeg, game_rgb, game_alpha, out_rgb, out_alpha, made['frame'], Path(previews) / ('_'.join((*inside[:-1], name)) + '.png'))
+                    except LogoError as err:
+                        log(f'(No preview of {PurePosixPath(rgb).name}: {err})')
+                staged += [(out_rgb, PurePosixPath(rgb)), (out_alpha, PurePosixPath(alpha))]
+            log(f'Arabic chapter card: {name} ({len(cards[name])} video pair{"s" if len(cards[name]) != 1 else ""}).')
+    if previews and staged:
+        log(f'Chapter card previews (the game\'s card left, the Arabic one right): {previews}')
+    return staged

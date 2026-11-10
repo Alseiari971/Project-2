@@ -40,6 +40,7 @@ from pathlib import Path, PurePosixPath
 
 from . import bethesda, godotpck, loose, renpyc, retoc
 from . import locres as locres_format
+from . import locres_pivot
 from . import remsg
 from . import safe_exec
 
@@ -286,6 +287,31 @@ def _unreal_paks(folder: Path) -> Source:
                 meta = None
         if meta:
             source.extra['locmeta'] = (meta_inside, meta)
+        # The game's other languages, line for line, as context for the Arabic (locres_pivot.py): the original
+        # (Chinese, Japanese, Korean) and one whose grammar marks gender (French, Spanish, ..., Russian).
+        siblings = locres_pivot.sibling_locres(listing, inside)
+        picked = locres_pivot.pick_references(siblings)
+        others = {}
+        for culture in dict.fromkeys(c for c in picked.values() if c):
+            other_inside = siblings[culture]
+            data = None
+            if found:
+                got = _repak(tool, 'get', str(found[0]), other_inside, binary=True)
+                data = got.stdout if got.returncode == 0 and got.stdout else None
+            elif other_inside in container_files:
+                try:
+                    data = retoc.get_chunk(retoc_tool, container_files[other_inside], Path(tmp) / f'{culture}.locres')
+                except (retoc.RetocError, OSError):
+                    data = None
+            try:
+                if data:
+                    others[culture] = locres_format.read(data)
+            except locres_format.LocResError:
+                pass
+        if others:
+            source.extra['references'] = locres_pivot.by_source(locres_pivot.align(source.locres, others))
+            roles = [f'{c} ({"the original" if c == picked["original"] else "for gender"})' for c in others]
+            source.notes.append(f'Read the game\'s {" and ".join(roles)} text as context for {len(source.extra["references"])} lines.')
     version = None
     if paks:
         info = _repak(tool, 'info', str(paks[0]))

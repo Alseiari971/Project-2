@@ -963,6 +963,8 @@ async function studio(body) {
       ${path('uiAssets', form.uiAssets, 'ui-folder', t('Choose style tables folder'))}
       <p class="muted small">${t('Arabic title logo: a PNG with a transparent background. GameShelf puts it where the game shows its English logo: title videos are made again with it (at their size, place and timing), and a menu\'s logo picture is replaced by it.')}</p>
       ${path('logoImage', form.logoImage, 'logo-image', t('Choose title logo image'))}
+      <p class="muted small">${t('Arabic chapter title cards (بطاقات الفصول): a folder of transparent PNGs, each named after the game\'s card video it replaces (Chap_Sizhen.png). The build log lists the cards the game has.')}</p>
+      ${path('chapterCards', form.chapterCards, 'cards-folder', t('Choose chapter cards folder'))}
       <p class="muted small">${t('Or a logo texture you cooked in the Unreal Editor for the game\'s engine version, at its path inside the game (<Project>/Content/...):')}</p>
       ${path('logoAssets', form.logoAssets, 'logo-folder', t('Choose title logo folder'))}
 
@@ -988,7 +990,7 @@ async function studio(body) {
 
   const read = () => {
     const values = Object.fromEntries([...body.querySelectorAll('input[name], select[name]')].map((el) => [el.name, el.value.trim()]));
-    for (const name of ['source', 'pakList', 'reviewed', 'uiAssets', 'logoAssets', 'logoImage']) values[name] = form[name] || '';
+    for (const name of ['source', 'pakList', 'reviewed', 'uiAssets', 'logoAssets', 'logoImage', 'chapterCards']) values[name] = form[name] || '';
     values.arabicLanguage = Boolean(body.querySelector('input[name="arabicLanguage"]')?.checked);
     values.ltrLayout = Boolean(body.querySelector('input[name="ltrLayout"]')?.checked);
     values.colorSpeakers = Boolean(body.querySelector('input[name="colorSpeakers"]')?.checked);

@@ -1049,6 +1049,7 @@ function registerIpc() {
       'keys-folder': { title: 'Choose a folder for the new signing key (keep it private)', properties: ['openDirectory', 'createDirectory'] },
       'ui-folder': { title: 'Choose the folder with the game\'s style tables (from retoc to-legacy)', properties: ['openDirectory'] },
       'logo-image': { title: 'Choose your Arabic title logo (a PNG with a transparent background)', properties: ['openFile'], filters: [{ name: 'PNG image', extensions: ['png'] }] },
+      'cards-folder': { title: 'Choose the folder with your Arabic chapter title cards (PNGs named after the game\'s cards)', properties: ['openDirectory'] },
       'logo-folder': { title: 'Choose the folder with your cooked Arabic title logo (<Project>/Content/...)', properties: ['openDirectory'] },
     }[kind];
     if (!choices) throw new Error('Not allowed.');

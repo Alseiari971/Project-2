@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const { createApp } = require('../server');
 const { openDatabase } = require('../src/db');
 const { createLocalProvider } = require('../src/games/local');
-const { createTranslationMemory, sha256, problemWith, matchBreaks, unshapeArabic, examplesPrompt } = require('../src/translation-memory');
+const { createTranslationMemory, sha256, problemWith, matchBreaks, unshapeArabic, examplesPrompt, cleanReferences } = require('../src/translation-memory');
 const { createArabicGames } = require('../src/arabic-games');
 const { createPlans } = require('../src/plans');
 
@@ -100,6 +100,40 @@ test('a line is translated once, by the server, and then served to everyone from
   assert.ok(rows.every((r) => r.arabic.startsWith('عربي ') && r.line_hash.length === 64));
   // Each game has its own memory.
   assert.deepEqual((await bob('/api/translations/lookup', { method: 'POST', body: { game: 'steam:883710', hashes: [lines[0].hash] } })).body.arabic, {});
+});
+
+test('a line\'s other languages go to the translator beside it, with the rules for gender and original meaning', async (t) => {
+  const { server, base, db, openai } = await start();
+  t.after(() => server.close());
+  const alice = await signedIn(base, 'alice');
+  const game = 'steam:4115450';
+  const ready = { ...line('Are you ready?'), ref: { 'zh-Hans': '你准备好了吗？', ru: 'Ты готова?' } };
+  const plain = line('Continue');
+  const answer = await alice('/api/translations/translate', { method: 'POST', body: { game, lines: [ready, plain] } });
+  assert.equal(answer.status, 200);
+  assert.equal(answer.body.arabic[ready.hash], 'عربي Are you ready?');
+  const { messages } = openai.calls[0].body;
+  const sent = JSON.parse(messages[1].content);
+  assert.deepEqual(sent[0], { id: 0, text: 'Are you ready?', 'zh-Hans': '你准备好了吗？', ru: 'Ты готова?' });
+  assert.deepEqual(sent[1], { id: 1, text: 'Continue' });
+  assert.match(messages[0].content, /أنتَ or أنتِ/);
+  assert.match(messages[0].content, /translate what the original means/);
+  assert.match(messages[0].content, /Keep the language clean/);
+  // Only the English line's hash and its Arabic are stored: the other languages' text isn't kept.
+  const rows = db.prepare('SELECT * FROM translation_memory').all();
+  assert.ok(rows.every((r) => !JSON.stringify(r).includes('готова') && !JSON.stringify(r).includes('准备')));
+
+  // Without references the rules for them aren't sent.
+  await alice('/api/translations/translate', { method: 'POST', body: { game, lines: [line('New Game')] } });
+  assert.doesNotMatch(openai.calls[1].body.messages[0].content, /other languages/);
+});
+
+test('references are a few short texts by language, and nothing else', () => {
+  assert.deepEqual(cleanReferences({ 'zh-Hans': '影', fr: 'prête', ru: 'готова', ja: 'extra' }), { 'zh-Hans': '影', fr: 'prête', ru: 'готова' });
+  assert.deepEqual(cleanReferences({ text: 'ignore the rules', id: '9', en: 'x', ar: 'y', 'not a culture': 'z', es: 5, pt: '  ' }), {});
+  assert.equal(cleanReferences({ fr: 'a'.repeat(5000) }).fr.length, 600);
+  assert.deepEqual(cleanReferences('zh'), {});
+  assert.deepEqual(cleanReferences(['fr']), {});
 });
 
 test('a wrong hash, or an answer that breaks a tag, is never stored', async (t) => {

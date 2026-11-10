@@ -16,6 +16,8 @@ import json
 import urllib.error
 import urllib.request
 
+from . import locres_pivot
+
 LOOKUP_BATCH = 5000
 TRANSLATE_BATCH = 100
 
@@ -87,15 +89,22 @@ class SharedMemory:
         """The game's glossary on the server ({terms, player}), made (or added to) from these candidates and sample lines."""
         return self._post('/translations/glossary', {'game': game, 'terms': terms[:300], 'samples': samples[:40], 'context': context[:300]})
 
-    def translate(self, game: str, lines: list, context: str = '', log=print):
-        """Has the server translate [english] it doesn't have yet. Returns ({english: arabic}, {english: why not}, limited)."""
+    def translate(self, game: str, lines: list, context: str = '', log=print, references: dict | None = None):
+        """Has the server translate [english] it doesn't have yet. Returns ({english: arabic}, {english: why not}, limited).
+        `references` is {english: {culture: text}}: the same lines in the game's other languages, sent beside each."""
+        references = references or {}
+
+        def line(h):
+            refs = locres_pivot.clean_references(references.get(by_hash[h]))
+            return {'hash': h, 'english': by_hash[h], **({'ref': refs} if refs else {})}
+
         done, failed, limited = {}, {}, False
         by_hash = {line_hash(english): english for english in lines}
         hashes = list(by_hash)
         for i in range(0, len(hashes), TRANSLATE_BATCH):
             chunk = hashes[i:i + TRANSLATE_BATCH]
             answer = self._post('/translations/translate', {'game': game, 'context': context,
-                                                            'lines': [{'hash': h, 'english': by_hash[h]} for h in chunk]})
+                                                            'lines': [line(h) for h in chunk]})
             for h, arabic in (answer.get('arabic') or {}).items():
                 if h in by_hash:
                     done[by_hash[h]] = arabic

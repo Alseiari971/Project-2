@@ -225,6 +225,9 @@ def parse_args(argv=None):
                                          'version, such as an Arabic title logo texture (.uasset/.uexp/.ubulk at <Project>/Content/...)')
     c.add_argument('--logo-image', help='unreal: your Arabic title logo, a transparent PNG; for games whose title logo is a video pair '
                                         '(..._RGB.mp4 and ..._Alpha.mp4), the pair is made again from it with the game\'s size, timing and fades')
+    c.add_argument('--chapter-cards', metavar='FOLDER',
+                   help='unreal: Arabic chapter title cards, a folder of transparent PNGs named after the game\'s card videos '
+                        '(Chap_Sizhen.png for Chap_Sizhen_RGB.mp4 + Chap_Sizhen_Alpha.mp4); each pair is made again like the title logo\'s')
     c.add_argument('--ue-version', help='unreal (UE5): the game\'s engine version for retoc to-zen, e.g. UE5_4 (default: what the game\'s program says)')
     c.add_argument('--pak-list', help='unreal: the game\'s pak file list (from repak list, UnrealPak -List or FModel), to find its fonts; '
                                       'reengine: a list of the game\'s file names (such as REE.PAK.Tool\'s), whose .oft fonts get the Arabic font')
@@ -289,7 +292,8 @@ def shared_translate(rows, args, log) -> dict:
         failed = {}
         rest = [s for s in wanted if s not in answers]
         if rest and not args.no_translate:
-            done, failed, _ = memory.translate(game, rest, context=args.context, log=log)
+            done, failed, _ = memory.translate(game, rest, context=args.context, log=log,
+                                               references=getattr(args, 'references', None) or {})
             answers.update(done)
     except SharedError as err:
         raise BuildError(str(err)) from None
@@ -400,7 +404,8 @@ def translate_rows(rows, args, out: Path, log):
             cache = Cache(cache_path)
             try:
                 translator = Translator(Provider(args.provider, args.model, None, args.api_base), cache,
-                                        context=args.context, glossary=read_glossary(args.glossary))
+                                        context=args.context, glossary=read_glossary(args.glossary),
+                                        references=getattr(args, 'references', None) or {})
                 for row in rows:
                     row.arabic = row.arabic or cache.get(translator.cache_key(row.source))
             finally:
@@ -416,7 +421,8 @@ def translate_rows(rows, args, out: Path, log):
     cache = Cache(cache_path)
     try:
         translator = Translator(Provider(args.provider, args.model, api_key, args.api_base, json_mode=not args.no_json_mode), cache,
-                                batch_size=args.batch, workers=args.workers, context=args.context, glossary=read_glossary(args.glossary), log=log)
+                                batch_size=args.batch, workers=args.workers, context=args.context, glossary=read_glossary(args.glossary), log=log,
+                                references=getattr(args, 'references', None) or {})
         if not args.no_glossary:
             translator.game_glossary = local_glossary(translator, [r.source for r in rows], out, log)
         done, failed = translator.translate(missing)
@@ -1183,6 +1189,8 @@ def build_unreal(source, translations: dict, args, payload: Path, stage_root: Pa
         staged += stage_arabic_language(source, in_pak, target, stage, log)
     if getattr(args, 'logo_image', None):
         staged += stage_logo(source, args, stage, log)
+    if getattr(args, 'chapter_cards', None):
+        staged += stage_chapter_cards(source, args, stage, log)
 
     kind, exe = find_packer(args)
     if not exe:
@@ -1230,24 +1238,39 @@ def build_unreal(source, translations: dict, args, payload: Path, stage_root: Pa
         build_zen_fonts(args, iostore, payload, stage_root, log)
 
 
-def stage_logo(source, args, stage: Path, log) -> list:
-    """The Arabic title logo as the game's own logo videos, in the .pak at their paths (see uelogo)."""
+def _movie_fetcher(source, args):
+    """(the game's video paths, fetch(path inside the game, file)): its videos, read out of its .pak files with repak."""
     movies = (source.extra or {}).get('pak_movies') or {}
     listing = list(movies) or (source.pak_listing or '').splitlines()
 
     def fetch(inside: str, dest: Path):
         pak = movies.get(inside)
         if not pak:
-            raise BuildError(f'{inside} isn\'t in the game\'s .pak files, so the logo can\'t be made from it.')
+            raise BuildError(f'{inside} isn\'t in the game\'s .pak files, so it can\'t be made again.')
         got = sources_module._repak(source.pak_tool or args.packer_path, 'get', pak, inside, binary=True)
         if got.returncode != 0 or not got.stdout:
             raise BuildError(f'repak couldn\'t read {inside} from {Path(pak).name}.')
         dest.write_bytes(got.stdout)
 
+    return listing, fetch
+
+
+def stage_logo(source, args, stage: Path, log) -> list:
+    """The Arabic title logo as the game's own logo videos, in the .pak at their paths (see uelogo)."""
+    listing, fetch = _movie_fetcher(source, args)
     try:
         return uelogo.stage_logo_videos(Path(args.logo_image), listing, fetch, stage, log, previews=stage.parent / 'logo-previews')
     except uelogo.LogoError as err:
         raise BuildError(f'Arabic title logo: {err}') from None
+
+
+def stage_chapter_cards(source, args, stage: Path, log) -> list:
+    """The Arabic chapter title cards as the game's own card videos, from a folder of pictures named after them."""
+    listing, fetch = _movie_fetcher(source, args)
+    try:
+        return uelogo.stage_card_videos(Path(args.chapter_cards), listing, fetch, stage, log, previews=stage.parent / 'card-previews')
+    except uelogo.LogoError as err:
+        raise BuildError(f'Arabic chapter cards: {err}') from None
 
 
 CREDIT = 'تعريب قيم شلف'
@@ -1705,6 +1728,8 @@ def build(args, log=print) -> Path:
     if rows:
         log(f'{len(rows)} English lines; making a{"n" if kind[0] in "aeiou" else ""} {kind} pack.')
         try:
+            # The same lines in the game's other languages, when it has them (see sources.py and locres_pivot.py).
+            args.references = (source.extra or {}).get('references') or {}
             failed = translate_rows(rows, args, out, log)
         except TranslationError as err:
             raise BuildError(str(err)) from None

@@ -102,7 +102,31 @@ Rules:
 - Keep proper names of people and places in their usual Arabic spelling; keep brand and product names in Latin letters.
 - Match the tone: menus short and plain, dialogue natural.
 - Use Western digits (0-9) as written.
+- Keep the language clean and dignified: turn swearing and crude insults into measured Arabic (تبّاً، سحقاً، ويلك); never write explicit profanity, sexual vulgarity or blasphemy.
 Answer with JSON only: {"translations": [{"id": <id>, "arabic": "<translation>"}, ...]}, one item per input line, same ids.`;
+
+// The same line in the game's other official languages, sent by the pack builder beside its English (see
+// localization/arabic_compiler/locres_pivot.py, which has the same rules for --provider builds).
+const PIVOT_RULES = `
+Some lines come with the same line in the game's other languages, as extra fields beside "text" (for example "zh-Hans", "ja", "fr", "es", "ru"). Translate the English "text"; use the others only to understand it:
+- A gendered language (French, Spanish, Portuguese, Italian: adjectives and participles, "prêt"/"prête", "il"/"elle"; Russian: past tense verbs and adjectives, "готов"/"готова") shows who is speaking and who is spoken to. Choose the Arabic pronoun and conjugation from it: أنتَ or أنتِ, masculine or feminine verbs and adjectives.
+- The Chinese, Japanese or Korean line is the original. For martial arts techniques, sects, titles and idioms, translate what the original means, not a literal rendering of the English wording.
+- Never copy the other languages' text into the Arabic, and keep the tags and placeholders of the English "text".`;
+const CULTURE_RE = /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,4})?$/;
+const MAX_REFERENCE_CHARS = 600;
+
+/** A line's references as they may go to the translator: up to three, { culture: text }, nothing else. */
+function cleanReferences(ref) {
+  const out = {};
+  if (!ref || typeof ref !== 'object' || Array.isArray(ref)) return out;
+  for (const [culture, text] of Object.entries(ref)) {
+    if (Object.keys(out).length >= 3) break;
+    if (!CULTURE_RE.test(culture) || ['en', 'ar', 'id', 'text'].includes(culture.toLowerCase())) continue;
+    if (typeof text !== 'string' || !text.trim()) continue;
+    out[culture] = text.slice(0, MAX_REFERENCE_CHARS);
+  }
+  return out;
+}
 
 // The glossary pass (the pack builder sends a game's candidate names, terms and sample lines; see
 // localization/arabic_compiler/glossary.py, which has the same prompt for --provider builds).
@@ -258,9 +282,12 @@ function createTranslationMemory({ db, env = process.env, fetch = globalThis.fet
     return found;
   }
 
+  // `lines` is [[id, english, references]]: the references ({ culture: text }) go beside the line, with the rules for them.
   async function ask(lines, context, note = '', extra = '') {
-    const system = SYSTEM_PROMPT + (context ? `\nAbout the game: ${context}` : '') + extra;
-    const user = (note ? `${note}\n` : '') + JSON.stringify(lines.map(([id, text]) => ({ id, text })));
+    const rows = lines.map(([id, text, ref]) => ({ id, text, ...cleanReferences(ref) }));
+    const pivot = rows.some((row) => Object.keys(row).length > 2) ? PIVOT_RULES : '';
+    const system = SYSTEM_PROMPT + (context ? `\nAbout the game: ${context}` : '') + extra + pivot;
+    const user = (note ? `${note}\n` : '') + JSON.stringify(rows);
     const data = await complete(system, user);
     if (!data) return {};
     const items = Array.isArray(data) ? data : data?.translations;
@@ -299,11 +326,11 @@ function createTranslationMemory({ db, env = process.env, fetch = globalThis.fet
     const answers = await ask(lines, context, '', extra);
     const good = {};
     const failed = {};
-    for (const [id, english] of lines) {
+    for (const [id, english, ref] of lines) {
       let arabic = answers[id];
       let problem = problemWith(english, arabic);
       if (problem) {
-        arabic = (await ask([[id, english]], context, `Your last translation of this line was unusable because ${problem}. Keep every tag and placeholder exactly.`, extra))[id];
+        arabic = (await ask([[id, english, ref]], context, `Your last translation of this line was unusable because ${problem}. Keep every tag and placeholder exactly.`, extra))[id];
         problem = problemWith(english, arabic);
       }
       if (problem) failed[id] = problem;
@@ -332,7 +359,7 @@ function createTranslationMemory({ db, env = process.env, fetch = globalThis.fet
     const arabic = {};
     const failed = {};
     const todo = [];
-    for (const { hash, english } of lines) {
+    for (const { hash, english, ref } of lines) {
       if (typeof english !== 'string' || !english.trim() || english.length > MAX_LINE_CHARS) {
         failed[hash] = 'the line is empty or too long';
       } else if (sha256(english) !== hash) {
@@ -340,7 +367,7 @@ function createTranslationMemory({ db, env = process.env, fetch = globalThis.fet
       } else {
         const row = select.get(game, hash);
         if (row) arabic[hash] = row.arabic;
-        else if (!todo.some((t) => t.hash === hash)) todo.push({ hash, english });
+        else if (!todo.some((t) => t.hash === hash)) todo.push({ hash, english, ref: cleanReferences(ref) });
       }
     }
     if (!todo.length) return { arabic, failed, limited: false, used: { lines: 0, chars: 0 } };
@@ -374,11 +401,11 @@ function createTranslationMemory({ db, env = process.env, fetch = globalThis.fet
       let next = 0;
       const worker = async () => {
         while (next < batches.length) {
-          const lines = batches[next++].map((t, i) => [i, t.english, t.hash]);
+          const lines = batches[next++].map((t, i) => [i, t.english, t.hash, t.ref]);
           const known = glossary(game);
           const englishLines = lines.map(([, english]) => english);
           const extra = (known ? glossaryPrompt(known, englishLines) : '') + examplesPrompt(examplesOf.all(game), englishLines);
-          const { good, failed: bad } = await gate.run(priority, () => batch(lines.map(([i, english]) => [i, english]), String(context).slice(0, 300), extra));
+          const { good, failed: bad } = await gate.run(priority, () => batch(lines.map(([i, english, , ref]) => [i, english, ref]), String(context).slice(0, 300), extra));
           const chars = lines.reduce((sum, [, english]) => sum + english.length, 0);
           addUsage.run(user.id, day, lines.length, chars);
           used.lines += lines.length;
@@ -491,4 +518,4 @@ function createTranslationMemory({ db, env = process.env, fetch = globalThis.fet
   return { configured: Boolean(apiKey), lookup, translate, review, stored, model, glossary, ensureGlossary, setGlossary };
 }
 
-module.exports = { createTranslationMemory, createPriorityGate, problemWith, matchBreaks, unshapeArabic, examplesPrompt, sha256, TranslationLimit, GAME_RE, cleanGlossary, glossaryPrompt, GLOSSARY_PROMPT };
+module.exports = { createTranslationMemory, createPriorityGate, cleanReferences, PIVOT_RULES, problemWith, matchBreaks, unshapeArabic, examplesPrompt, sha256, TranslationLimit, GAME_RE, cleanGlossary, glossaryPrompt, GLOSSARY_PROMPT };
