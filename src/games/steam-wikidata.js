@@ -377,6 +377,8 @@ function createSteamWikidataProvider({
     }).filter(Boolean);
     return {
       type: Number.isInteger(it.type) ? it.type : null,
+      // Steam's content descriptors (3: adult only sexual content, 4: frequent nudity or sexual content, ...).
+      descriptors: (Array.isArray(it.content_descriptorids) ? it.content_descriptorids : []).map(Number).filter(Number.isInteger),
       art: {
         image: at(a.main_capsule),
         header: at(a.header),
@@ -394,7 +396,9 @@ function createSteamWikidataProvider({
     const missing = [];
     for (const appid of [...new Set(appids.map(Number).filter(Boolean))]) {
       const row = q.cacheGet.get(`steam:item:${appid}`);
-      if (row && now() - row.fetched_at < TTL_MS) out.set(appid, JSON.parse(row.body));
+      const cached = row && now() - row.fetched_at < TTL_MS ? JSON.parse(row.body) : undefined;
+      // An answer kept from before content descriptors were read is read again.
+      if (cached !== undefined && (cached === null || Array.isArray(cached.descriptors))) out.set(appid, cached);
       else missing.push(appid);
     }
     for (let i = 0; i < missing.length; i += 50) {
@@ -720,6 +724,12 @@ function createSteamWikidataProvider({
 
   return {
     name: 'steam',
+
+    /** Steam's content descriptor ids for these apps: Map appid -> [ids] (an app Steam doesn't know has none). */
+    async contentDescriptors(appids) {
+      const items = await storeItems(appids);
+      return new Map([...items].map(([appid, item]) => [appid, item?.descriptors || []]));
+    },
 
     async search({ query: text = '', genre = '', sort = 'popular', page = 1, pageSize = 24 }) {
       const term = expandShortNames(String(text).trim());

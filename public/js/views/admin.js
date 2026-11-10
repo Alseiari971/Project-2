@@ -12,10 +12,10 @@ import { CATEGORY_LABELS, TICKET_STATUS, statusChip, threadHtml, when } from './
 import { keysTab } from './admin-keys.js';
 
 const desktop = window.gameshelfDesktop;
-const TABS = ['overview', 'support', 'approvals', 'requests', 'keys', 'fixes', 'packs', 'users', 'supporters', 'installer', ...(desktop?.studio ? ['studio'] : [])];
+const TABS = ['overview', 'support', 'approvals', 'requests', 'keys', 'fixes', 'packs', 'blocked', 'users', 'supporters', 'installer', ...(desktop?.studio ? ['studio'] : [])];
 const TAB_LABELS = {
   overview: 'Overview', support: 'Support', approvals: 'Pending approvals', users: 'Users', packs: 'Arabic packs', requests: 'Requests', fixes: 'Translation fixes',
-  keys: 'AES Keys & Recipes', supporters: 'Supporters & codes', installer: 'Windows app', studio: 'Pack Studio',
+  keys: 'AES Keys & Recipes', blocked: 'Blocked games', supporters: 'Supporters & codes', installer: 'Windows app', studio: 'Pack Studio',
 };
 const ENGINE_LABELS = {
   auto: 'Detect it', unreal: 'Unreal Engine', unity: 'Unity', reengine: 'Capcom RE Engine', godot: 'Godot', renpy: "Ren'Py",
@@ -93,7 +93,7 @@ export async function adminView(app, params) {
       <div id="admin-body" class="admin-body"></div>
     </div>`);
   const body = document.getElementById('admin-body');
-  await { overview, support, approvals, users, packs, requests, keys: keysTab, fixes, supporters, installer, studio }[tab](body, params);
+  await { overview, support, approvals, users, packs, requests, keys: keysTab, fixes, blocked, supporters, installer, studio }[tab](body, params);
 }
 
 // ---- Overview ------------------------------------------------------------------
@@ -559,6 +559,65 @@ async function fixes(body) {
 }
 
 // ---- Pending approvals: Arabic made on players' PCs ------------------------------------
+
+const BLOCK_REASONS = {
+  policy_violation: 'Against GameShelf\'s rules', adult_content: 'Adult content', gambling: 'Gambling', publisher_request: 'The publisher asked',
+  legal: 'A legal reason', other: 'Another reason',
+};
+
+/** Games GameShelf doesn't carry: left out of the catalog, their pages and translation. */
+async function blocked(body) {
+  const { blocked: list, reasons } = await api('/admin/blocked-games');
+  mount(body, html`
+    <p class="muted small">${t('A blocked game is left out of the catalog and search, its page says it isn\'t available, and its text isn\'t translated. Games Steam marks as adult-only are left out on their own.')}</p>
+    <section class="panel">
+      <h2>${t('Block a game')}</h2>
+      <form class="form-grid" id="block-form">
+        <label>${t('Steam app ID')}<input class="input" name="steamAppId" inputmode="numeric" placeholder="1234560" dir="ltr"></label>
+        <label>${t('GameShelf game ID')}<input class="input" name="gameId" placeholder="steam-1234560" dir="ltr"></label>
+        <label>${t('Title')}<input class="input" name="title" required maxlength="200"></label>
+        <label>${t('Reason')}<select class="input" name="reason">
+          ${reasons.map((r) => html`<option value="${r}">${t(BLOCK_REASONS[r] || r)}</option>`)}
+        </select></label>
+        <div class="settings-actions full"><button class="btn btn-light" type="submit">${icon('shield')} ${t('Block this game')}</button></div>
+        <p class="form-error full" id="block-error" hidden></p>
+      </form>
+    </section>
+    <section class="panel">
+      <h2>${t('Blocked games')}</h2>
+      ${list.length ? html`<div class="fix-list">${list.map((b) => html`
+        <div class="fix-row" data-block="${b.id}">
+          <div><strong>${bdi(b.title)}</strong> <span class="muted small" dir="ltr">${[b.steamAppId ? `steam:${b.steamAppId}` : '', b.gameId || ''].filter(Boolean).join(' · ')}</span></div>
+          <div class="muted small">${t(BLOCK_REASONS[b.reason] || b.reason)}${b.blockedBy ? ` · ${t('by {user}', { user: `@${b.blockedBy}` })}` : ''} · <bdi dir="ltr">${String(b.blockedAt).slice(0, 10)}</bdi></div>
+          <div class="fix-actions"><button class="btn btn-sm btn-quiet" type="button" data-unblock="${b.id}">${t('Unblock')}</button></div>
+        </div>`)}</div>` : html`<p class="muted">${t('No games are blocked.')}</p>`}
+    </section>`);
+  const form = body.querySelector('#block-form');
+  const error = body.querySelector('#block-error');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    const values = Object.fromEntries(new FormData(form));
+    try {
+      await api('/admin/blocked-games', { method: 'POST', body: { ...values, steamAppId: values.steamAppId.trim() || undefined, gameId: values.gameId.trim() || undefined } });
+      await blocked(body);
+    } catch (err) {
+      error.textContent = errorText(err);
+      error.hidden = false;
+    }
+  });
+  body.addEventListener('click', async (e) => {
+    const id = e.target.closest('[data-unblock]')?.dataset.unblock;
+    if (!id) return;
+    try {
+      await api(`/admin/blocked-games/${id}`, { method: 'DELETE' });
+      body.querySelector(`[data-block="${id}"]`)?.remove();
+    } catch (err) {
+      error.textContent = errorText(err);
+      error.hidden = false;
+    }
+  });
+}
 
 async function approvals(body, params) {
   const id = params.get('id');

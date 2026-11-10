@@ -40,6 +40,7 @@ const { transaction } = require('./db');
 const { normalizeTitle } = require('./text');
 const { steamArt } = require('./games/steam-art');
 const { SEASON_IDS, seasonPlan, MOODS, findMood } = require('./seasons');
+const { createGameBlocks, BlockError, REASONS: BLOCK_REASONS } = require('./game-blocks');
 
 const STATUSES = ['playing', 'completed', 'played', 'want', 'dropped'];
 const GAME_ID_RE = /^[a-z0-9][a-z0-9-]{0,149}$/;
@@ -137,6 +138,7 @@ function createApi({
   packStats = createPackStats({ db, translations }),
   friends = createFriends({ db, now, plans, notifications }),
   support = createSupport({ db, games, plans, notifications }),
+  blocks = createGameBlocks({ db, games }),
 }) {
   bootstrapAdmins(db);
   const api = express.Router();
@@ -242,11 +244,15 @@ function createApi({
         return [];
       })
       : []);
-    const [results, seasonal, sectionLists] = await Promise.all([
+    const [found, allSeasonal, allSections] = await Promise.all([
       Promise.all(rowDefs.map((r) => games.search({ genre: r.genre, sort: r.sort, pageSize: 30 }))),
       collect(plan.spotlight),
       Promise.all(plan.sections.map((s) => collect(s.query))),
     ]);
+    // Games GameShelf doesn't carry are left out of every row (src/game-blocks.js).
+    const results = await Promise.all(found.map(async (r) => ({ ...r, results: await blocks.filter(r.results) })));
+    const seasonal = await blocks.filter(allSeasonal);
+    const sectionLists = await Promise.all(allSections.map((list) => blocks.filter(list)));
     const listFor = (id) => results[rowDefs.findIndex((r) => r.id === id)]?.results || [];
 
     // Every game appears once on the page: the spotlight, then the Top 10,
@@ -372,6 +378,7 @@ function createApi({
     if (req.query.genre && !genre) return res.status(400).json({ error: 'Unknown genre.' });
     const sort = SORTS.includes(req.query.sort) ? req.query.sort : 'popular';
     const data = await games.search({ query, genre, sort, page });
+    data.results = await blocks.filter(data.results);
     await games.addSteamArt(data.results);
     res.json({ ...data, page, source: games.name });
   }));
@@ -381,6 +388,7 @@ function createApi({
     if (!GAME_ID_RE.test(id)) return res.status(404).json({ error: 'Game not found.' });
     const game = await games.getGame(id);
     if (!game) return res.status(404).json({ error: 'Game not found.' });
+    if (await blocks.refusal(game)) return res.status(404).json({ error: 'This game isn\'t available on GameShelf.', blocked: true });
     // Store links with GameShelf's affiliate IDs, where set (marked sponsored on the page).
     game.buy = withAffiliates(game.buy);
 
@@ -391,7 +399,7 @@ function createApi({
     if (!similar.length && genre) {
       try {
         const data = await games.search({ genre: genre.name, pageSize: 13 });
-        similar = data.results.filter((g) => g.id !== game.id).slice(0, 12);
+        similar = (await blocks.filter(data.results)).filter((g) => g.id !== game.id).slice(0, 12);
         await games.addSteamArt(similar);
       } catch (err) {
         console.error('Could not load similar games:', err.message);
@@ -752,7 +760,13 @@ function createApi({
   // Per account too, so many addresses can't drain the translation budget (it also has daily and monthly caps).
   const translateUserLimiter = rateLimit({ windowMs: 60 * 1000, max: 40, by: 'user' });
 
-  api.post('/translations/lookup', requireUser, translateLimiter, (req, res) => {
+  // A game GameShelf doesn't carry gets no translation, lookup, glossary or Arabic request.
+  const carried = asyncRoute(async (req, res, next) => {
+    if (await blocks.keyRefusal(req.body?.game)) return res.status(403).json({ error: 'This game isn\'t available on GameShelf.', blocked: true });
+    next();
+  });
+
+  api.post('/translations/lookup', requireUser, translateLimiter, carried, (req, res) => {
     const { game, hashes } = req.body || {};
     if (!translations) return res.status(503).json({ error: 'Shared translation isn\'t set up on this server.' });
     if (!Array.isArray(hashes) || hashes.length > 5000) return res.status(400).json({ error: 'Send up to 5000 line hashes at a time.' });
@@ -765,7 +779,7 @@ function createApi({
 
   // Before a game's lines are translated: its glossary (names, terms, how it speaks to the player), made from
   // the builder's candidates when there's none yet: { game, terms: [English], samples: [lines], context }.
-  api.post('/translations/glossary', requireUser, translateLimiter, translateUserLimiter, asyncRoute(async (req, res) => {
+  api.post('/translations/glossary', requireUser, translateLimiter, translateUserLimiter, carried, asyncRoute(async (req, res) => {
     if (!translations) return res.status(503).json({ error: 'Shared translation isn\'t set up on this server.' });
     const { game, terms, samples, context } = req.body || {};
     try {
@@ -778,7 +792,7 @@ function createApi({
       res.status(502).json({ error: 'The translation service didn\'t answer. Please try again later.' });
     }
   }));
-  api.post('/translations/translate', requireUser, translateLimiter, translateUserLimiter, asyncRoute(async (req, res) => {
+  api.post('/translations/translate', requireUser, translateLimiter, translateUserLimiter, carried, asyncRoute(async (req, res) => {
     const { game, lines, context, refresh } = req.body || {};
     if (!translations) return res.status(503).json({ error: 'Shared translation isn\'t set up on this server.' });
     if (!Array.isArray(lines) || !lines.length || lines.length > 200) return res.status(400).json({ error: 'Send 1 to 200 lines at a time.' });
@@ -825,7 +839,7 @@ function createApi({
     if (!Array.isArray(keys) || keys.length > 500) throw new TypeError('Send up to 500 games at a time.');
     return { games: Object.fromEntries(keys.map(String).filter((k) => GAME_KEY_RE.test(k)).map((k) => [k, arabicGames.status(k, askerOf(req))])) };
   }));
-  api.post('/arabic/requests', requireUser, translateLimiter, arabicRoute(({ game, name, reason, fingerprint }, req) => arabicGames.request(askerOf(req), String(game), name, reason, fingerprint)));
+  api.post('/arabic/requests', requireUser, translateLimiter, carried, arabicRoute(({ game, name, reason, fingerprint }, req) => arabicGames.request(askerOf(req), String(game), name, reason, fingerprint)));
 
   // ---- Players helping: votes, the leaderboard, translation fixes (see src/community.js) ----
 
@@ -852,6 +866,19 @@ function createApi({
     res.status(made.updated ? 200 : 201);
     return made;
   }));
+  // ---- Games GameShelf doesn't carry (src/game-blocks.js) ----
+  const blockRoute = (fn) => (req, res) => {
+    try {
+      res.json(fn(req));
+    } catch (err) {
+      if (err instanceof BlockError) return res.status(400).json({ error: err.message });
+      throw err;
+    }
+  };
+  api.get('/admin/blocked-games', requireAdmin, blockRoute(() => ({ blocked: blocks.list(), reasons: BLOCK_REASONS })));
+  api.post('/admin/blocked-games', requireAdmin, blockRoute((req) => ({ blocked: blocks.block(req.body || {}, req.user) })));
+  api.delete('/admin/blocked-games/:id', requireAdmin, blockRoute((req) => blocks.unblock(req.params.id)));
+
   api.get('/admin/fixes', requireAdmin, communityRoute(async (req) => community.fixes({ status: String(req.query.status || 'pending') })));
   api.post('/admin/fixes/:id/approve', requireAdmin, communityRoute(async (req) => community.approveFix(req.params.id, req.user, req.body?.arabic)));
   api.post('/admin/fixes/:id/reject', requireAdmin, communityRoute(async (req) => community.rejectFix(req.params.id, req.user)));
@@ -993,7 +1020,7 @@ function createApi({
   // The same, from the desktop app's Pack Studio (the game in the path).
   api.put('/admin/recipes/:game', requireAdmin, recipeRoute((req) => attachOne({ ...(req.body || {}), game: String(req.params.game) }, req.user)));
   api.delete('/admin/recipes/:game', requireAdmin, recipeRoute((req) => ({ removed: recipes.remove(String(req.params.game)) })));
-  api.post('/arabic/report', requireUser, translateLimiter, arabicRoute((body, req) => arabicGames.report(askerOf(req), { ...body, game: String(body.game) }, req.user)));
+  api.post('/arabic/report', requireUser, translateLimiter, carried, arabicRoute((body, req) => arabicGames.report(askerOf(req), { ...body, game: String(body.game) }, req.user)));
 
   // ---- The cloud catalog of Arabic packs (see src/pack-registry.js) ---------
 

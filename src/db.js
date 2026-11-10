@@ -501,6 +501,16 @@ function openDatabase(file = process.env.DB_FILE || path.join(__dirname, '..', '
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       PRIMARY KEY (game, user_id)
     );
+    -- Games GameShelf doesn't carry (src/game-blocks.js): left out of the catalog, their pages and translation.
+    CREATE TABLE IF NOT EXISTS blocked_games (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      steam_appid INTEGER UNIQUE,
+      game_id     TEXT UNIQUE,
+      title       TEXT NOT NULL,
+      reason      TEXT NOT NULL DEFAULT 'policy_violation',
+      blocked_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      blocked_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    );
     -- Old ids (IGDB slugs) that turned out to be a game already saved under another id.
     CREATE TABLE IF NOT EXISTS game_aliases (
       alias   TEXT PRIMARY KEY,
